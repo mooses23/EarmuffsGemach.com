@@ -157,6 +157,13 @@ export const translations = {
     contactLabel: "Contact:",
     depositLabel: "Deposit:",
     noStockInfo: "No stock info",
+    callAction: "Call",
+    smsAction: "SMS",
+    whatsappAction: "WhatsApp",
+    prefillBorrowMessage: "Hi, I'd like to borrow Baby Banz earmuffs from {location}. Is one available?",
+    contactLocation: "Contact Location",
+    contactLocationPrompt: "Need to reach {location}? Contact them directly:",
+    contactLabel2: "Contact",
 
     // Mobile Menu
     switchToHebrewMobile: "Switch to Hebrew",
@@ -953,6 +960,13 @@ export const translations = {
     contactLabel: "איש קשר:",
     depositLabel: "פיקדון:",
     noStockInfo: "אין מידע על מלאי",
+    callAction: "התקשר",
+    smsAction: "הודעה",
+    whatsappAction: "וואטסאפ",
+    prefillBorrowMessage: "שלום, אשמח לשאול אוזניות Baby Banz מ{location}. האם יש זמין?",
+    contactLocation: "צור קשר עם המיקום",
+    contactLocationPrompt: "צריכים ליצור קשר עם {location}? פנו אליהם ישירות:",
+    contactLabel2: "צור קשר",
 
     // Mobile Menu
     switchToHebrewMobile: "עבור לעברית",

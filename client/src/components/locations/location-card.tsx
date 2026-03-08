@@ -2,7 +2,8 @@ import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Location } from "@/lib/types";
 import { User, MapPin, Phone, Package } from "lucide-react";
-import { Link } from "wouter";
+import { ContactActionsLight } from "@/components/ui/contact-actions";
+import { useLocation } from "wouter";
 
 const COLOR_SWATCHES: Record<string, string> = {
   red: "#EF4444",
@@ -47,6 +48,7 @@ interface LocationCardProps {
 }
 
 export function LocationCard({ location, locationNumber }: LocationCardProps) {
+  const [, navigate] = useLocation();
   const { data: inventoryData } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
     queryKey: ["/api/locations", location.id, "inventory"],
     queryFn: async () => {
@@ -57,9 +59,15 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
   });
 
   const inventory = inventoryData?.inventory?.filter(item => item.quantity > 0) || [];
+
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("a") || target.closest("[data-contact-actions]")) return;
+    navigate(`/self-deposit?locationId=${location.id}`);
+  };
   
   return (
-    <Link href={`/self-deposit?locationId=${location.id}`}>
+    <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}`); }}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300 hover:bg-blue-50/30">
         <CardContent className="pt-6">
           <div className="flex justify-between items-start mb-4">
@@ -86,8 +94,11 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
             </p>
             <p className="flex items-center mb-2">
               <Phone className="w-5 h-5 mr-2 text-neutral-500" />
-              <span>{location.phone}</span>
+              <a href={`tel:${location.phone?.replace(/[^+\d]/g, "")}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors">{location.phone}</a>
             </p>
+            <div className="mb-2" data-contact-actions>
+              <ContactActionsLight phone={location.phone} locationName={location.name} />
+            </div>
             <p className="flex items-center">
               <Package className="w-5 h-5 mr-2 text-neutral-500" />
               {inventory.length > 0 ? (
@@ -103,6 +114,6 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
           </div>
         </CardContent>
       </Card>
-    </Link>
+    </div>
   );
 }

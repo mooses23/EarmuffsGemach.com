@@ -1,7 +1,8 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Search, Phone, MapPin, ChevronRight, ArrowLeft, Home, Package } from "lucide-react";
+import { ContactActions } from "@/components/ui/contact-actions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -592,6 +593,7 @@ interface LocationCardProps {
 
 function LocationCard({ location, region }: LocationCardProps) {
   const { t } = useLanguage();
+  const [, navigate] = useLocation();
   const { data: inventoryData } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
     queryKey: ["/api/locations", location.id, "inventory"],
     queryFn: async () => {
@@ -603,8 +605,14 @@ function LocationCard({ location, region }: LocationCardProps) {
 
   const inventory = inventoryData?.inventory?.filter(item => item.quantity > 0) || [];
 
+  const handleCardClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement;
+    if (target.closest("a") || target.closest("[data-contact-actions]")) return;
+    navigate(`/self-deposit?locationId=${location.id}`);
+  };
+
   return (
-    <Link href={`/self-deposit?locationId=${location.id}`}>
+    <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}`); }}>
       <div className="glass-card glass-card-hover glass-highlight rounded-2xl cursor-pointer p-6">
         <div className="flex items-start justify-between mb-4">
           <div>
@@ -625,7 +633,10 @@ function LocationCard({ location, region }: LocationCardProps) {
           
           <div className="flex items-center">
             <Phone className="h-4 w-4 text-slate-400 mr-2 flex-shrink-0" />
-            <p className="text-sm text-slate-300">{location.phone}</p>
+            <a href={`tel:${location.phone?.replace(/[^+\d]/g, "")}`} className="text-sm text-slate-300 hover:text-white transition-colors">{location.phone}</a>
+          </div>
+          <div data-contact-actions>
+            <ContactActions phone={location.phone} locationName={location.name} compact />
           </div>
           
           <div className="flex items-center">
@@ -663,6 +674,6 @@ function LocationCard({ location, region }: LocationCardProps) {
           </div>
         </div>
       </div>
-    </Link>
+    </div>
   );
 }

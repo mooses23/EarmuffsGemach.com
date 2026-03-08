@@ -69,6 +69,14 @@ Preferred communication style: Simple, everyday language.
 - **Typography**: White (#F8FAFC) for headings, slate-300/400 for body text on dark backgrounds
 - **Key Components Styled**: Header, homepage hero, location search, how-it-works cards, CTA section, dedication banner
 
+### Contact Actions System
+- **Component**: `client/src/components/ui/contact-actions.tsx` provides `ContactActions` (dark/glass theme, compact icon-only variant) and `ContactActionsLight` (light theme with labels)
+- **Features**: Clickable phone numbers (`tel:` links), SMS with pre-filled message (`sms:` links), WhatsApp with pre-filled message (`wa.me` links)
+- **Pre-filled Message**: Localized borrowing inquiry message with location name placeholder
+- **Integration Points**: Location cards (hierarchical search + legacy cards), self-deposit borrower form (both form view and payment view)
+- **Navigation Safety**: Cards use programmatic navigation via `useLocation` hook with click delegation to prevent contact button clicks from triggering card navigation
+- **i18n**: Translation keys `callAction`, `smsAction`, `whatsappAction`, `prefillBorrowMessage`, `contactLocation`, `contactLocationPrompt`, `contactLabel2` in both EN and HE
+
 ## External Dependencies
 
 ### Payment Integrations

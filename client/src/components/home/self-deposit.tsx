@@ -15,10 +15,13 @@ import { getLocations } from "@/lib/api";
 import type { Location } from "@/lib/types";
 import UniversalPaymentProcessor from "@/components/payment/universal-payment-processor";
 import { FeeCalculator } from "@/components/payment/fee-calculator";
-import { CreditCard, DollarSign, MapPin } from "lucide-react";
+import { CreditCard, DollarSign, MapPin, Phone } from "lucide-react";
+import { ContactActionsLight } from "@/components/ui/contact-actions";
 import { useSearch } from "wouter";
+import { useLanguage } from "@/hooks/use-language";
 
 export function SelfDeposit() {
+  const { t } = useLanguage();
   const searchParams = useSearch();
   const urlParams = new URLSearchParams(searchParams);
   const locationIdFromUrl = urlParams.get("locationId") || "";
@@ -75,6 +78,15 @@ export function SelfDeposit() {
                     <p className="font-semibold">{selectedLocationData.name}</p>
                     <p className="text-sm text-gray-500">{selectedLocationData.locationCode}</p>
                   </div>
+                  {selectedLocationData.phone && (
+                    <div>
+                      <Label className="text-sm font-medium text-gray-600">{t("contactLabel2")}</Label>
+                      <a href={`tel:${selectedLocationData.phone.replace(/[^+\d]/g, "")}`} className="block text-sm text-blue-600 hover:text-blue-800 hover:underline">{selectedLocationData.phone}</a>
+                      <div className="mt-2">
+                        <ContactActionsLight phone={selectedLocationData.phone} locationName={selectedLocationData.name} />
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <Label className="text-sm font-medium text-gray-600">Borrower</Label>
                     <p className="font-semibold">{borrowerName}</p>
@@ -174,6 +186,22 @@ export function SelfDeposit() {
                   </SelectContent>
                 </Select>
               </div>
+
+              {selectedLocationData && selectedLocationData.phone && (
+                <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Phone className="w-4 h-4 text-emerald-700" />
+                    <h3 className="font-semibold text-emerald-900">{t("contactLocation")}</h3>
+                  </div>
+                  <p className="text-sm text-emerald-800 mb-3">
+                    {t("contactLocationPrompt").replace("{location}", selectedLocationData.name)}
+                  </p>
+                  <div className="flex items-center gap-2 mb-2">
+                    <a href={`tel:${selectedLocationData.phone.replace(/[^+\d]/g, "")}`} className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline">{selectedLocationData.phone}</a>
+                  </div>
+                  <ContactActionsLight phone={selectedLocationData.phone} locationName={selectedLocationData.name} />
+                </div>
+              )}
 
               <div className="bg-blue-50 p-4 rounded-lg">
                 <h3 className="font-semibold text-blue-900 mb-2">Deposit Information</h3>
