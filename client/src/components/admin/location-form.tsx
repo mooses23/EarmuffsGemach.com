@@ -39,7 +39,7 @@ export function LocationForm({ location, regions, onSuccess }: LocationFormProps
   const queryClient = useQueryClient();
 
   const form = useForm<InsertLocation>({
-    resolver: zodResolver(insertLocationSchema.omit({ locationCode: true })),
+    resolver: zodResolver(insertLocationSchema.omit({ locationCode: true, operatorPin: true })),
     mode: "onChange",
     defaultValues: location ? {
       name: location.name || "",
@@ -52,7 +52,6 @@ export function LocationForm({ location, regions, onSuccess }: LocationFormProps
       isActive: location.isActive ?? true,
       cashOnly: location.cashOnly || false,
       depositAmount: location.depositAmount || 20,
-      operatorPin: location.operatorPin || "",
     } : {
       name: "",
       contactPerson: "",
@@ -64,7 +63,6 @@ export function LocationForm({ location, regions, onSuccess }: LocationFormProps
       isActive: true,
       cashOnly: false,
       depositAmount: 20,
-      operatorPin: "",
     },
   });
 
@@ -309,30 +307,6 @@ export function LocationForm({ location, regions, onSuccess }: LocationFormProps
           )}
         />
 
-
-        <FormField
-          control={form.control}
-          name="operatorPin"
-          render={({ field }) => (
-            <FormItem>
-              <FormLabel>Operator PIN</FormLabel>
-              <FormControl>
-                <Input 
-                  placeholder="4-6 digit PIN for operator login" 
-                  {...field}
-                  value={field.value || ""}
-                  maxLength={6}
-                  inputMode="numeric"
-                  onChange={(e) => field.onChange(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                />
-              </FormControl>
-              <FormDescription>
-                This PIN allows operators to log into the dashboard for this location
-              </FormDescription>
-              <FormMessage />
-            </FormItem>
-          )}
-        />
 
         <FormField
           control={form.control}

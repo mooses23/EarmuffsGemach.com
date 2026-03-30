@@ -504,6 +504,94 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json({ success: true });
   });
 
+  // OPERATOR PIN CHANGE ROUTE (session-scoped, requires current PIN)
+  app.patch("/api/operator/pin", async (req, res) => {
+    try {
+      const operatorLocationId = getOperatorLocationId(req);
+      if (!operatorLocationId || operatorLocationId === -1) {
+        return res.status(401).json({ message: "Operator authentication required" });
+      }
+
+      const pinChangeSchema = z.object({
+        currentPin: z.string().min(4).max(6),
+        newPin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
+        confirmPin: z.string().min(4).max(6),
+      });
+
+      const parseResult = pinChangeSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: "Invalid data", errors: parseResult.error.errors });
+      }
+
+      const { currentPin, newPin, confirmPin } = parseResult.data;
+
+      if (newPin !== confirmPin) {
+        return res.status(400).json({ message: "New PIN and confirmation do not match" });
+      }
+
+      const location = await storage.getLocation(operatorLocationId);
+      if (!location) {
+        return res.status(404).json({ message: "Location not found" });
+      }
+
+      if (location.operatorPin !== currentPin) {
+        return res.status(401).json({ message: "Current PIN is incorrect" });
+      }
+
+      await storage.updateLocation(operatorLocationId, { operatorPin: newPin });
+      res.json({ success: true, message: "PIN updated successfully" });
+    } catch (error) {
+      console.error("Error changing operator PIN:", error);
+      res.status(500).json({ message: "Failed to change PIN" });
+    }
+  });
+
+  // ADMIN PIN CHANGE ROUTE (admin-only, no current PIN required)
+  app.patch("/api/admin/locations/:id/pin", async (req, res) => {
+    try {
+      // Check admin authentication
+      if (!req.isAuthenticated()) {
+        return res.status(401).json({ message: "Admin authentication required" });
+      }
+      const user = req.user as Express.User;
+      if (!user.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) {
+        return res.status(400).json({ message: "Invalid location ID" });
+      }
+
+      const pinSchema = z.object({
+        newPin: z.string().min(4).max(6).regex(/^\d+$/, "PIN must be digits only"),
+        confirmPin: z.string().min(4).max(6),
+      });
+
+      const parseResult = pinSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({ message: "Invalid data", errors: parseResult.error.errors });
+      }
+
+      const { newPin, confirmPin } = parseResult.data;
+
+      if (newPin !== confirmPin) {
+        return res.status(400).json({ message: "PIN and confirmation do not match" });
+      }
+
+      const location = await storage.getLocation(id);
+      if (!location) {
+        return res.status(404).json({ message: "Location not found" });
+      }
+
+      await storage.updateLocation(id, { operatorPin: newPin });
+      res.json({ success: true, message: "PIN updated successfully" });
+    } catch (error) {
+      console.error("Error changing admin PIN:", error);
+      res.status(500).json({ message: "Failed to change PIN" });
+    }
+  });
+
   // APPLICATIONS ROUTES
   app.get("/api/applications", async (req, res) => {
     try {

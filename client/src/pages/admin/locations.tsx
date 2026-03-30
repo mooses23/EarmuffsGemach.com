@@ -5,6 +5,7 @@ import { Region, Location } from "@shared/schema";
 import { LocationForm } from "@/components/admin/location-form";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
+import { apiRequest } from "@/lib/queryClient";
 import {
   Card,
   CardContent,
@@ -47,6 +48,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { 
   Plus, 
   Search, 
@@ -62,7 +64,9 @@ import {
   Building2,
   CheckCircle,
   XCircle,
-  Loader2
+  Loader2,
+  KeyRound,
+  ShieldCheck
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -78,6 +82,11 @@ export default function AdminLocations() {
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false);
   const [editingLocation, setEditingLocation] = useState<Location | null>(null);
   const [deletingLocation, setDeletingLocation] = useState<Location | null>(null);
+  const [isPinDialogOpen, setIsPinDialogOpen] = useState(false);
+  const [pinLocation, setPinLocation] = useState<Location | null>(null);
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+  const [isPinManagementOpen, setIsPinManagementOpen] = useState(false);
 
   const { data: regions = [] } = useQuery<Region[]>({
     queryKey: ["/api/regions"],
@@ -126,6 +135,24 @@ export default function AdminLocations() {
     },
   });
 
+  const changePinMutation = useMutation({
+    mutationFn: async ({ id, newPin, confirmPin }: { id: number; newPin: string; confirmPin: string }) => {
+      const res = await apiRequest("PATCH", `/api/admin/locations/${id}/pin`, { newPin, confirmPin });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "PIN Updated", description: "The operator PIN has been changed successfully." });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      setIsPinDialogOpen(false);
+      setPinLocation(null);
+      setNewPin("");
+      setConfirmPin("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
   const toggleLocationStatus = (id: number, isActive: boolean) => {
     toggleStatusMutation.mutate({ id, isActive: !isActive });
   };
@@ -133,6 +160,13 @@ export default function AdminLocations() {
   const handleEditLocation = (location: Location) => {
     setEditingLocation(location);
     setIsEditDialogOpen(true);
+  };
+
+  const handleChangePinForLocation = (location: Location) => {
+    setPinLocation(location);
+    setNewPin("");
+    setConfirmPin("");
+    setIsPinDialogOpen(true);
   };
 
   const handleDeleteLocation = (location: Location) => {
@@ -419,6 +453,10 @@ export default function AdminLocations() {
                                 <Edit className="mr-2 h-4 w-4" />
                                 {t('editLocation')}
                               </DropdownMenuItem>
+                              <DropdownMenuItem onClick={() => handleChangePinForLocation(location)}>
+                                <KeyRound className="mr-2 h-4 w-4" />
+                                Change PIN
+                              </DropdownMenuItem>
                               <DropdownMenuItem 
                                 onClick={() => handleDeleteLocation(location)}
                                 className="text-red-600 focus:text-red-600"
@@ -518,6 +556,154 @@ export default function AdminLocations() {
                     <Trash2 className="mr-2 h-4 w-4" />
                     {t('deleteLocationConfirm')}
                   </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* PIN Management Card */}
+        <Card className="mt-6">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-5 w-5 text-primary" />
+                <div>
+                  <CardTitle>PIN Management</CardTitle>
+                  <CardDescription>Manage operator PINs for all locations</CardDescription>
+                </div>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setIsPinManagementOpen(!isPinManagementOpen)}
+              >
+                {isPinManagementOpen ? "Collapse" : "Expand"}
+              </Button>
+            </div>
+          </CardHeader>
+          {isPinManagementOpen && (
+            <CardContent>
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Location Name</TableHead>
+                      <TableHead>Code</TableHead>
+                      <TableHead className="hidden md:table-cell">Region</TableHead>
+                      <TableHead>PIN Status</TableHead>
+                      <TableHead>Action</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {locations.map((loc) => (
+                      <TableRow key={loc.id}>
+                        <TableCell className="font-medium">{loc.name}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{loc.locationCode}</Badge>
+                        </TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {getRegionNameById(loc.regionId)}
+                        </TableCell>
+                        <TableCell>
+                          {loc.operatorPin ? (
+                            <Badge variant="secondary" className="flex items-center gap-1 w-fit">
+                              <KeyRound className="h-3 w-3" />
+                              PIN set
+                            </Badge>
+                          ) : (
+                            <Badge variant="destructive" className="flex items-center gap-1 w-fit">
+                              <KeyRound className="h-3 w-3" />
+                              No PIN
+                            </Badge>
+                          )}
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleChangePinForLocation(loc)}
+                          >
+                            <KeyRound className="h-4 w-4 mr-1" />
+                            Change PIN
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </CardContent>
+          )}
+        </Card>
+
+        {/* PIN Change Dialog */}
+        <Dialog open={isPinDialogOpen} onOpenChange={(open) => {
+          setIsPinDialogOpen(open);
+          if (!open) { setNewPin(""); setConfirmPin(""); setPinLocation(null); }
+        }}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <KeyRound className="h-5 w-5 text-primary" />
+                Change Operator PIN
+              </DialogTitle>
+              <DialogDescription>
+                {pinLocation ? (
+                  <>Set a new 4–6 digit PIN for <strong>{pinLocation.name}</strong> ({pinLocation.locationCode}). No current PIN required.</>
+                ) : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="admin-new-pin">New PIN</Label>
+                <Input
+                  id="admin-new-pin"
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="4–6 digits"
+                  maxLength={6}
+                  value={newPin}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="admin-confirm-pin">Confirm New PIN</Label>
+                <Input
+                  id="admin-confirm-pin"
+                  type="password"
+                  inputMode="numeric"
+                  placeholder="Re-enter PIN"
+                  maxLength={6}
+                  value={confirmPin}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                />
+                {confirmPin && newPin !== confirmPin && (
+                  <p className="text-sm text-red-500">PINs do not match</p>
+                )}
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsPinDialogOpen(false)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  if (pinLocation) {
+                    changePinMutation.mutate({ id: pinLocation.id, newPin, confirmPin });
+                  }
+                }}
+                disabled={
+                  changePinMutation.isPending ||
+                  newPin.length < 4 ||
+                  confirmPin.length < 4 ||
+                  newPin !== confirmPin
+                }
+              >
+                {changePinMutation.isPending ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
+                ) : (
+                  <><ShieldCheck className="h-4 w-4 mr-2" /> Save PIN</>
                 )}
               </Button>
             </DialogFooter>

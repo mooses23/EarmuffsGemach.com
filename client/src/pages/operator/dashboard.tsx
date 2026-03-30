@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Home, LogOut, Package, ArrowRight, ArrowLeft, Phone, User, DollarSign, Check, AlertTriangle, Plus, Search, RotateCcw, CreditCard, CheckCircle, XCircle, Trash2, Clock } from "lucide-react";
+import { Loader2, Home, LogOut, Package, ArrowRight, ArrowLeft, Phone, User, DollarSign, Check, AlertTriangle, Plus, Search, RotateCcw, CreditCard, CheckCircle, XCircle, Trash2, Clock, KeyRound, ShieldCheck } from "lucide-react";
 import { Link, useLocation } from "wouter";
 import { useOperatorAuth } from "@/hooks/use-operator-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -13,6 +13,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Label } from "@/components/ui/label";
 import { format, isAfter, addDays } from "date-fns";
 import StripeSetupCheckout from "@/components/payment/stripe-setup-checkout";
 
@@ -1680,10 +1681,29 @@ export default function OperatorDashboard() {
   const { toast } = useToast();
   const { t } = useLanguage();
   const [, setPath] = useLocation();
-  const [activeTab, setActiveTab] = useState<"overview" | "lend" | "return">("overview");
+  const [activeTab, setActiveTab] = useState<"overview" | "lend" | "return" | "security">("overview");
   const [showAddStock, setShowAddStock] = useState(false);
   const [editStockColor, setEditStockColor] = useState<string | null>(null);
   const [editStockQty, setEditStockQty] = useState(0);
+  const [currentPin, setCurrentPin] = useState("");
+  const [newPin, setNewPin] = useState("");
+  const [confirmPin, setConfirmPin] = useState("");
+
+  const changePinMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", "/api/operator/pin", { currentPin, newPin, confirmPin });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "PIN Updated", description: "Your PIN has been changed successfully." });
+      setCurrentPin("");
+      setNewPin("");
+      setConfirmPin("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
 
   useEffect(() => {
     if (!isOperatorLoading && !operatorLocation) {
@@ -1773,7 +1793,7 @@ export default function OperatorDashboard() {
               <h1 className="text-2xl font-bold text-white">{operatorLocation.name}</h1>
               <p className="text-slate-400">{t('manageHeadbandLendingAndReturns')}</p>
             </div>
-            <TabsList className="grid grid-cols-3 w-full sm:w-auto glass-panel border-white/10">
+            <TabsList className="grid grid-cols-4 w-full sm:w-auto glass-panel border-white/10">
               <TabsTrigger value="overview" className="gap-2 data-[state=active]:bg-white/15 data-[state=active]:text-white">
                 <Package className="h-4 w-4" /> {t('stockOverview')}
               </TabsTrigger>
@@ -1782,6 +1802,9 @@ export default function OperatorDashboard() {
               </TabsTrigger>
               <TabsTrigger value="return" className="gap-2 data-[state=active]:bg-white/15 data-[state=active]:text-white">
                 <RotateCcw className="h-4 w-4" /> {t('returnEarmuffs')}
+              </TabsTrigger>
+              <TabsTrigger value="security" className="gap-2 data-[state=active]:bg-white/15 data-[state=active]:text-white">
+                <KeyRound className="h-4 w-4" /> Security
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1843,6 +1866,83 @@ export default function OperatorDashboard() {
                   onComplete={() => setActiveTab("overview")}
                   onCancel={() => setActiveTab("overview")}
                 />
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="security">
+            <Card className="glass-card">
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-white">
+                  <ShieldCheck className="h-5 w-5" />
+                  Change PIN
+                </CardTitle>
+                <CardDescription className="text-slate-400">
+                  Update the login PIN for your location. You will need your current PIN to make changes.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="max-w-sm space-y-5">
+                  <div className="space-y-2">
+                    <Label htmlFor="current-pin" className="text-slate-300">Current PIN</Label>
+                    <Input
+                      id="current-pin"
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="Enter current PIN"
+                      maxLength={6}
+                      className="bg-white/5 border-white/10 text-white placeholder:text-slate-500"
+                      value={currentPin}
+                      onChange={(e) => setCurrentPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="new-pin" className="text-slate-300">New PIN</Label>
+                    <Input
+                      id="new-pin"
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="4–6 digit PIN"
+                      maxLength={6}
+                      className="bg-white/5 border-white/10 text-white placeholder:text-slate-500"
+                      value={newPin}
+                      onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="confirm-pin" className="text-slate-300">Confirm New PIN</Label>
+                    <Input
+                      id="confirm-pin"
+                      type="password"
+                      inputMode="numeric"
+                      placeholder="Re-enter new PIN"
+                      maxLength={6}
+                      className="bg-white/5 border-white/10 text-white placeholder:text-slate-500"
+                      value={confirmPin}
+                      onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                    />
+                    {confirmPin && newPin !== confirmPin && (
+                      <p className="text-sm text-red-400">PINs do not match</p>
+                    )}
+                  </div>
+                  <Button
+                    className="w-full"
+                    onClick={() => changePinMutation.mutate()}
+                    disabled={
+                      changePinMutation.isPending ||
+                      currentPin.length < 4 ||
+                      newPin.length < 4 ||
+                      confirmPin.length < 4 ||
+                      newPin !== confirmPin
+                    }
+                  >
+                    {changePinMutation.isPending ? (
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
+                    ) : (
+                      <><ShieldCheck className="h-4 w-4 mr-2" /> Update PIN</>
+                    )}
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
