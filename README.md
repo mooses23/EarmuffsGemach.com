@@ -1,4 +1,4 @@
-# GemachHub
+# EarmuffsGeamch.com
 
 A comprehensive web-based platform for managing Gemach (Jewish free-loan charity) locations, inventory tracking, deposit management, and payment processing.
 
