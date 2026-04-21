@@ -10,6 +10,11 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { getLocations, getRegions } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
+import {
+  localizeRegionName,
+  localizeCityName,
+  localizeUSState,
+} from "@/lib/location-names";
 import type { Location, Region } from "@/lib/types";
 
 type CityCategory = {
@@ -23,45 +28,11 @@ type CityCategory = {
   stateCode?: string | null;
 };
 
-const US_STATE_NAMES: Record<string, string> = {
-  CA: "California",
-  NY: "New York",
-  NJ: "New Jersey",
-  FL: "Florida",
-  IL: "Illinois",
-  MD: "Maryland",
-  MI: "Michigan",
-  OH: "Ohio",
-  PA: "Pennsylvania"
-};
-
-const CA_PROVINCE_NAMES: Record<string, string> = {
-  ON: "Ontario",
-  QC: "Quebec"
-};
-
-const IL_REGION_NAMES: Record<string, string> = {
-  JER: "Jerusalem",
-  TEL: "Tel Aviv Area",
-  CEN: "Central",
-  SHA: "Shomron"
-};
-
-const UK_REGION_NAMES: Record<string, string> = {
-  LON: "London",
-  MAN: "Manchester"
-};
-
-const AU_STATE_NAMES: Record<string, string> = {
-  VIC: "Victoria",
-  NSW: "New South Wales"
-};
-
 // Threshold for when a state is considered "high-density" and shows community view
 const HIGH_DENSITY_THRESHOLD = 3;
 
 export function HierarchicalLocationSearch() {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
   const [selectedCity, setSelectedCity] = useState<CityCategory | null>(null);
@@ -152,11 +123,11 @@ export function HierarchicalLocationSearch() {
     });
     
     return Array.from(statesSet).sort((a, b) => {
-      const nameA = US_STATE_NAMES[a] || a;
-      const nameB = US_STATE_NAMES[b] || b;
+      const nameA = localizeUSState(language, a);
+      const nameB = localizeUSState(language, b);
       return nameA.localeCompare(nameB);
     });
-  }, [selectedRegion, cityCategories]);
+  }, [selectedRegion, cityCategories, language]);
 
   // Get communities (cityCategories) within selected state with location counts
   const stateCommunitiesWithCounts = useMemo(() => {
@@ -289,7 +260,7 @@ export function HierarchicalLocationSearch() {
                   >
                     <div className="flex items-center justify-between mb-4">
                       <h3 className="text-xl font-semibold text-white">
-                        {region.name}
+                        {localizeRegionName(language, region.slug, region.name)}
                       </h3>
                       <ChevronRight className="h-5 w-5 text-slate-300" />
                     </div>
@@ -302,7 +273,7 @@ export function HierarchicalLocationSearch() {
                         <div className="flex flex-wrap gap-1">
                           {regionCities.slice(0, 3).map(city => (
                             <span key={city.id} className="px-2 py-1 text-xs rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                              {city.name}
+                              {localizeCityName(language, city.slug, city.name)}
                             </span>
                           ))}
                           {regionCities.length > 3 && (
@@ -350,7 +321,7 @@ export function HierarchicalLocationSearch() {
         </div>
         
         <h2 className="text-2xl md:text-3xl font-bold text-white mb-2">
-          {selectedRegion.name}
+          {localizeRegionName(language, selectedRegion.slug, selectedRegion.name)}
         </h2>
         <p className="text-slate-400">
           {t("choosePopularCity")}
@@ -362,7 +333,7 @@ export function HierarchicalLocationSearch() {
           <Search className="absolute left-4 top-1/2 transform -translate-y-1/2 text-slate-400 h-5 w-5" />
           <input
             type="text"
-            placeholder={`${t("searchLocationsIn")} ${selectedRegion.name}...`}
+            placeholder={`${t("searchLocationsIn")} ${localizeRegionName(language, selectedRegion.slug, selectedRegion.name)}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-12 pr-4 py-4 text-base rounded-full input-glass placeholder:text-slate-500"
@@ -385,7 +356,7 @@ export function HierarchicalLocationSearch() {
                   className="px-4 py-2 rounded-full text-sm font-medium btn-glass-outline flex items-center gap-2"
                 >
                   <ArrowLeft className="h-3 w-3" />
-                  {US_STATE_NAMES[selectedState] || selectedState}
+                  {localizeUSState(language, selectedState)}
                 </button>
                 
                 {/* All Communities in this state button */}
@@ -411,7 +382,7 @@ export function HierarchicalLocationSearch() {
                         : "btn-glass-outline"
                     }`}
                   >
-                    {community.name}
+                    {localizeCityName(language, community.slug, community.name)}
                     <span className="ml-1 text-xs opacity-75">({community.locationCount})</span>
                   </button>
                 ))}
@@ -462,7 +433,7 @@ export function HierarchicalLocationSearch() {
                           : "btn-glass-outline"
                       }`}
                     >
-                      {US_STATE_NAMES[stateCode] || stateCode}
+                      {localizeUSState(language, stateCode)}
                     </button>
                   );
                 })}
@@ -483,7 +454,7 @@ export function HierarchicalLocationSearch() {
                   : "btn-glass-outline"
               }`}
             >
-              {t("all")} {subRegions.labelType}
+              {t("all")} {t("cities")}
             </button>
             {subRegions.codes.map((code) => (
               <button
@@ -495,7 +466,7 @@ export function HierarchicalLocationSearch() {
                     : "btn-glass-outline"
                 }`}
               >
-                {subRegions.names[code] || code}
+                {localizeCityName(language, code, subRegions.names[code] || code)}
               </button>
             ))}
           </div>
@@ -508,7 +479,7 @@ export function HierarchicalLocationSearch() {
             <div className="flex items-center justify-between mb-6 px-4 md:px-0">
               <div>
                 <h3 className="text-xl font-semibold text-white">
-                  {city.name}
+                  {localizeCityName(language, city.slug, city.name)}
                 </h3>
                 {city.description && (
                   <p className="text-sm text-slate-400">{city.description}</p>

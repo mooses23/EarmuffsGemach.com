@@ -4,6 +4,7 @@ import { Location } from "@/lib/types";
 import { User, MapPin, Phone, Package } from "lucide-react";
 import { ContactActionsLight } from "@/components/ui/contact-actions";
 import { useLocation } from "wouter";
+import { useLanguage } from "@/hooks/use-language";
 
 const COLOR_SWATCHES: Record<string, string> = {
   red: "#EF4444",
@@ -49,6 +50,7 @@ interface LocationCardProps {
 
 export function LocationCard({ location, locationNumber }: LocationCardProps) {
   const [, navigate] = useLocation();
+  const { t } = useLanguage();
   const { data: inventoryData } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
     queryKey: ["/api/locations", location.id, "inventory"],
     queryFn: async () => {
@@ -80,7 +82,7 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
               <h3 className="text-xl font-semibold">{location.name}</h3>
             </div>
             <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
-              {location.isActive ? "Active" : "Inactive"}
+              {location.isActive ? t("active") : t("inactive")}
             </span>
           </div>
           <div className="mb-4 text-neutral-600">
@@ -108,7 +110,7 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
                   ))}
                 </span>
               ) : (
-                <span className="text-neutral-400 text-sm">No stock data</span>
+                <span className="text-neutral-400 text-sm">{t("noStockData")}</span>
               )}
             </p>
           </div>
