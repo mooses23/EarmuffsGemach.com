@@ -37,13 +37,13 @@ export function Header() {
           <div className="flex items-center space-x-2 md:space-x-3 ml-2 md:ml-8">
             <Link href="/" className="flex items-center space-x-2 md:space-x-3">
               <div className="glass-icon-blue rounded-full p-1.5 md:p-2">
-                <img src={logoImage} alt="Earmuffs Gemach" className="h-8 w-8 md:h-10 md:w-10 rounded-full object-cover" />
+                <img src={logoImage} alt={t("earmuffsGemach")} className="h-8 w-8 md:h-10 md:w-10 rounded-full object-cover" />
               </div>
               <h1 className="text-lg md:text-2xl font-bold text-white hidden sm:block">
-                Earmuffs Gemach
+                {t("earmuffsGemach")}
               </h1>
               <h1 className="text-sm font-bold text-white sm:hidden">
-                Earmuffs Gemach
+                {t("earmuffsGemach")}
               </h1>
             </Link>
           </div>

@@ -1695,13 +1695,13 @@ export default function OperatorDashboard() {
       return res.json();
     },
     onSuccess: () => {
-      toast({ title: "PIN Updated", description: "Your PIN has been changed successfully." });
+      toast({ title: t("pinUpdated"), description: t("pinUpdatedDescription") });
       setCurrentPin("");
       setNewPin("");
       setConfirmPin("");
     },
     onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
+      toast({ title: t("error"), description: error.message, variant: "destructive" });
     },
   });
 
@@ -1797,22 +1797,22 @@ export default function OperatorDashboard() {
               <TabsTrigger value="overview" className="gap-1.5 data-[state=active]:bg-white/15 data-[state=active]:text-white">
                 <Package className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline truncate">{t('stockOverview')}</span>
-                <span className="sm:hidden text-xs">Stock</span>
+                <span className="sm:hidden text-xs">{t('stockShort')}</span>
               </TabsTrigger>
               <TabsTrigger value="lend" className="gap-1.5 data-[state=active]:bg-white/15 data-[state=active]:text-white">
                 <ArrowRight className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline truncate">{t('lendEarmuffs')}</span>
-                <span className="sm:hidden text-xs">Lend</span>
+                <span className="sm:hidden text-xs">{t('lendShort')}</span>
               </TabsTrigger>
               <TabsTrigger value="return" className="gap-1.5 data-[state=active]:bg-white/15 data-[state=active]:text-white">
                 <RotateCcw className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline truncate">{t('returnEarmuffs')}</span>
-                <span className="sm:hidden text-xs">Return</span>
+                <span className="sm:hidden text-xs">{t('returnShort')}</span>
               </TabsTrigger>
               <TabsTrigger value="security" className="gap-1.5 data-[state=active]:bg-white/15 data-[state=active]:text-white">
                 <KeyRound className="h-4 w-4 shrink-0" />
-                <span className="hidden sm:inline">Security</span>
-                <span className="sm:hidden text-xs">PIN</span>
+                <span className="hidden sm:inline">{t('security')}</span>
+                <span className="sm:hidden text-xs">{t('pinShort')}</span>
               </TabsTrigger>
             </TabsList>
           </div>
@@ -1883,21 +1883,21 @@ export default function OperatorDashboard() {
               <CardHeader className="pb-3">
                 <CardTitle className="flex items-center gap-2 text-white">
                   <ShieldCheck className="h-5 w-5" />
-                  Change PIN
+                  {t('changePin')}
                 </CardTitle>
                 <CardDescription className="text-slate-400">
-                  Update the login PIN for your location. You will need your current PIN to make changes.
+                  {t('changePinDescription')}
                 </CardDescription>
               </CardHeader>
               <CardContent>
                 <div className="max-w-sm space-y-5">
                   <div className="space-y-2">
-                    <Label htmlFor="current-pin" className="text-slate-300">Current PIN</Label>
+                    <Label htmlFor="current-pin" className="text-slate-300">{t('currentPin')}</Label>
                     <Input
                       id="current-pin"
                       type="password"
                       inputMode="numeric"
-                      placeholder="Enter current PIN"
+                      placeholder={t('enterCurrentPin')}
                       maxLength={6}
                       className="bg-white/5 border-white/10 text-white placeholder:text-slate-500"
                       value={currentPin}
@@ -1905,12 +1905,12 @@ export default function OperatorDashboard() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="new-pin" className="text-slate-300">New PIN</Label>
+                    <Label htmlFor="new-pin" className="text-slate-300">{t('newPin')}</Label>
                     <Input
                       id="new-pin"
                       type="password"
                       inputMode="numeric"
-                      placeholder="4–6 digit PIN"
+                      placeholder={t('pinPlaceholder')}
                       maxLength={6}
                       className="bg-white/5 border-white/10 text-white placeholder:text-slate-500"
                       value={newPin}
@@ -1918,19 +1918,19 @@ export default function OperatorDashboard() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="confirm-pin" className="text-slate-300">Confirm New PIN</Label>
+                    <Label htmlFor="confirm-pin" className="text-slate-300">{t('confirmNewPin')}</Label>
                     <Input
                       id="confirm-pin"
                       type="password"
                       inputMode="numeric"
-                      placeholder="Re-enter new PIN"
+                      placeholder={t('reEnterNewPin')}
                       maxLength={6}
                       className="bg-white/5 border-white/10 text-white placeholder:text-slate-500"
                       value={confirmPin}
                       onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
                     />
                     {confirmPin && newPin !== confirmPin && (
-                      <p className="text-sm text-red-400">PINs do not match</p>
+                      <p className="text-sm text-red-400">{t('pinsDoNotMatch')}</p>
                     )}
                   </div>
                   <Button
@@ -1945,9 +1945,9 @@ export default function OperatorDashboard() {
                     }
                   >
                     {changePinMutation.isPending ? (
-                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
+                      <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {t('saving')}</>
                     ) : (
-                      <><ShieldCheck className="h-4 w-4 mr-2" /> Update PIN</>
+                      <><ShieldCheck className="h-4 w-4 mr-2" /> {t('updatePin')}</>
                     )}
                   </Button>
                 </div>
