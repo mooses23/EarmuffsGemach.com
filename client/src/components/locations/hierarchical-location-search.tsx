@@ -594,13 +594,14 @@ interface LocationCardProps {
 function LocationCard({ location, region }: LocationCardProps) {
   const { t } = useLanguage();
   const [, navigate] = useLocation();
-  const { data: inventoryData } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
+  const { data: inventoryData, isLoading: inventoryLoading } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
     queryKey: ["/api/locations", location.id, "inventory"],
     queryFn: async () => {
       const res = await fetch(`/api/locations/${location.id}/inventory`);
       if (!res.ok) return { inventory: [], total: 0 };
       return res.json();
     },
+    staleTime: 60_000,
   });
 
   const inventory = inventoryData?.inventory?.filter(item => item.quantity > 0) || [];
@@ -639,9 +640,15 @@ function LocationCard({ location, region }: LocationCardProps) {
             <ContactActions phone={location.phone} locationName={location.name} compact />
           </div>
           
-          <div className="flex items-center">
+          <div className="flex items-center min-h-[28px]">
             <Package className="h-4 w-4 text-slate-400 mr-2 flex-shrink-0" />
-            {inventory.length > 0 ? (
+            {inventoryLoading ? (
+              <div className="flex items-center gap-1">
+                {[1, 2, 3].map(i => (
+                  <div key={i} className="w-6 h-6 rounded-full bg-white/10 animate-pulse" />
+                ))}
+              </div>
+            ) : inventory.length > 0 ? (
               <div className="flex items-center gap-1 flex-wrap">
                 {inventory.map(item => (
                   <InventoryCircle key={item.color} color={item.color} quantity={item.quantity} />
