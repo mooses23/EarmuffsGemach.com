@@ -41,19 +41,21 @@ export function HierarchicalLocationSearch() {
   const [showCommunityView, setShowCommunityView] = useState(false);
   const [initialRegionApplied, setInitialRegionApplied] = useState(false);
 
-  const { data: locations = [] } = useQuery({
+  const { data: locations = [], isLoading: locationsLoading } = useQuery({
     queryKey: ["/api/locations"],
     queryFn: () => getLocations(),
   });
 
-  const { data: regions = [] } = useQuery({
+  const { data: regions = [], isLoading: regionsLoading } = useQuery({
     queryKey: ["/api/regions"],
     queryFn: () => getRegions(),
   });
 
-  const { data: cityCategories = [] } = useQuery<CityCategory[]>({
+  const { data: cityCategories = [], isLoading: cityCategoriesLoading } = useQuery<CityCategory[]>({
     queryKey: ["/api/city-categories"],
   });
+
+  const isInitialLoading = regionsLoading || locationsLoading || cityCategoriesLoading;
 
   useEffect(() => {
     if (regions.length > 0 && !initialRegionApplied) {
@@ -219,7 +221,35 @@ export function HierarchicalLocationSearch() {
           </div>
         </div>
 
-        {searchQuery ? (
+        {isInitialLoading ? (
+          <div className="space-y-8">
+            <div className="text-center mb-8">
+              <div className="h-9 md:h-10 w-72 mx-auto rounded-lg bg-white/10 animate-pulse mb-4" />
+              <div className="h-5 w-56 mx-auto rounded bg-white/5 animate-pulse" />
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 px-4 md:px-0">
+              {[1, 2, 3, 4, 5, 6].map((i) => (
+                <div
+                  key={i}
+                  className="glass-card glass-highlight rounded-2xl p-6 animate-pulse"
+                >
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="h-6 w-32 rounded bg-white/10" />
+                    <div className="h-5 w-5 rounded bg-white/10" />
+                  </div>
+                  <div className="space-y-3">
+                    <div className="h-4 w-40 rounded bg-white/5" />
+                    <div className="flex gap-2">
+                      <div className="h-6 w-16 rounded-full bg-white/5" />
+                      <div className="h-6 w-20 rounded-full bg-white/5" />
+                      <div className="h-6 w-14 rounded-full bg-white/5" />
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : searchQuery ? (
           <div className="space-y-8">
             <div className="text-center">
               <p className="text-slate-400">
