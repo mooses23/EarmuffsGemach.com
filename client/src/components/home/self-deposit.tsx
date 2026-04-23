@@ -15,7 +15,7 @@ import { getLocations } from "@/lib/api";
 import type { Location } from "@/lib/types";
 import UniversalPaymentProcessor from "@/components/payment/universal-payment-processor";
 import { FeeCalculator } from "@/components/payment/fee-calculator";
-import { CreditCard, DollarSign, MapPin, Phone } from "lucide-react";
+import { CreditCard, DollarSign, MapPin, Phone, Mail, User } from "lucide-react";
 import { ContactActionsLight } from "@/components/ui/contact-actions";
 import { useSearch } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
@@ -190,8 +190,8 @@ export function SelfDeposit() {
                 </Select>
               </div>
 
-              {selectedLocationData && selectedLocationData.phone && (
-                <div className="bg-emerald-50 p-4 rounded-lg border border-emerald-200">
+              {selectedLocationData && (
+                <div id="location-contact" className="bg-emerald-50 p-4 rounded-lg border border-emerald-200" data-testid="panel-location-contact">
                   <div className="flex items-center gap-2 mb-2">
                     <Phone className="w-4 h-4 text-emerald-700" />
                     <h3 className="font-semibold text-emerald-900">{t("contactLocation")}</h3>
@@ -199,10 +199,35 @@ export function SelfDeposit() {
                   <p className="text-sm text-emerald-800 mb-3">
                     {t("contactLocationPrompt").replace("{location}", language === "he" && selectedLocationData.nameHe ? selectedLocationData.nameHe : selectedLocationData.name)}
                   </p>
-                  <div className="flex items-center gap-2 mb-2">
-                    <a href={`tel:${selectedLocationData.phone.replace(/[^+\d]/g, "")}`} className="text-sm font-medium text-emerald-700 hover:text-emerald-900 hover:underline">{selectedLocationData.phone}</a>
+                  <div className="space-y-1.5 mb-3">
+                    {(language === "he" && selectedLocationData.contactPersonHe ? selectedLocationData.contactPersonHe : selectedLocationData.contactPerson) && (
+                      <div className="flex items-start gap-2 text-sm text-emerald-900">
+                        <User className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" />
+                        <span><span className="font-medium">{t("contactPerson")}:</span> {language === "he" && selectedLocationData.contactPersonHe ? selectedLocationData.contactPersonHe : selectedLocationData.contactPerson}</span>
+                      </div>
+                    )}
+                    {selectedLocationData.phone && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <Phone className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" />
+                        <a href={`tel:${selectedLocationData.phone.replace(/[^+\d]/g, "")}`} className="font-medium text-emerald-700 hover:text-emerald-900 hover:underline" data-testid="link-location-phone">{selectedLocationData.phone}</a>
+                      </div>
+                    )}
+                    {selectedLocationData.email && (
+                      <div className="flex items-start gap-2 text-sm">
+                        <Mail className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" />
+                        <a href={`mailto:${selectedLocationData.email}`} className="font-medium text-emerald-700 hover:text-emerald-900 hover:underline break-all" data-testid="link-location-email">{selectedLocationData.email}</a>
+                      </div>
+                    )}
+                    {(language === "he" && selectedLocationData.addressHe ? selectedLocationData.addressHe : selectedLocationData.address) && (
+                      <div className="flex items-start gap-2 text-sm text-emerald-900">
+                        <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0 text-emerald-700" />
+                        <span>{language === "he" && selectedLocationData.addressHe ? selectedLocationData.addressHe : selectedLocationData.address}</span>
+                      </div>
+                    )}
                   </div>
-                  <ContactActionsLight phone={selectedLocationData.phone} locationName={language === "he" && selectedLocationData.nameHe ? selectedLocationData.nameHe : selectedLocationData.name} />
+                  {selectedLocationData.phone && (
+                    <ContactActionsLight phone={selectedLocationData.phone} locationName={language === "he" && selectedLocationData.nameHe ? selectedLocationData.nameHe : selectedLocationData.name} />
+                  )}
                 </div>
               )}
 

@@ -81,8 +81,8 @@ export const translations = {
     responseHoursDescription: "We typically respond to inquiries within 24-48 hours, excluding Shabbat and Jewish holidays.",
     sendUsMessage: "Send Us a Message",
     contactGoesToAdminTitle: "Messages here go to our main team",
-    contactGoesToAdminBody: "This form reaches the central Baby Banz Earmuffs Gemach team — not a specific local gemach. To contact the gemach you borrowed from (about an active loan, return, or deposit), please reach out to that location directly using the contact details on its location page.",
-    findYourLocation: "Find your local gemach",
+    contactGoesToAdminBody: "This form reaches the central Baby Banz Earmuffs Gemach team — not a specific local gemach. To contact the gemach you borrowed from (about an active loan, return, or deposit), pick it from the list below — each location's page shows its phone, email, and address so you can reach them directly.",
+    findYourLocation: "Pick your gemach from the list",
 
     // Operator dashboard — return reminder
     sendReturnReminder: "Send return reminder",
@@ -1171,8 +1171,8 @@ export const translations = {
     responseHoursDescription: "אנו משיבים בדרך כלל לפניות תוך 24-48 שעות, למעט שבת וחגי ישראל.",
     sendUsMessage: "שלח לנו הודעה",
     contactGoesToAdminTitle: "ההודעות כאן מגיעות לצוות הראשי שלנו",
-    contactGoesToAdminBody: "טופס זה מגיע לצוות המרכזי של גמ״ח אוזניות בייבי בנז — לא לסניף מקומי מסוים. כדי ליצור קשר עם הגמ״ח שממנו השאלת (לגבי השאלה פעילה, החזרה או פיקדון), פנה ישירות לאותו סניף באמצעות פרטי הקשר שבעמוד שלו.",
-    findYourLocation: "מצא את הגמ״ח המקומי שלך",
+    contactGoesToAdminBody: "טופס זה מגיע לצוות המרכזי של גמ״ח אוזניות בייבי בנז — לא לסניף מקומי מסוים. כדי ליצור קשר עם הגמ״ח שממנו השאלת (לגבי השאלה פעילה, החזרה או פיקדון), בחר אותו מהרשימה — בעמוד של כל סניף מופיעים טלפון, אימייל וכתובת ליצירת קשר ישירה.",
+    findYourLocation: "בחר את הגמ״ח שלך מהרשימה",
 
     // Operator dashboard — return reminder
     sendReturnReminder: "שלח תזכורת החזרה",
