@@ -1012,12 +1012,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!contact) {
         return res.status(404).json({ message: "Contact not found" });
       }
-      const { replyText } = req.body;
+      const { replyText, replySubject: customSubject } = req.body as { replyText?: string; replySubject?: string };
       if (!replyText || typeof replyText !== 'string' || !replyText.trim()) {
         return res.status(400).json({ message: "Reply text is required" });
       }
       const sanitize = (s: string) => s.replace(/[\r\n]/g, ' ');
-      const replySubject = contact.subject.startsWith('Re:') ? contact.subject : `Re: ${contact.subject}`;
+      const baseSubject = (typeof customSubject === 'string' && customSubject.trim())
+        ? customSubject.trim()
+        : contact.subject;
+      const replySubject = baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`;
       await sendNewEmail(sanitize(contact.email), sanitize(replySubject), replyText.trim());
       await storage.markContactRead(id);
       res.json({ message: "Reply sent successfully" });
@@ -2083,7 +2086,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const { replyText } = req.body;
+      const { replyText, replySubject: customSubject } = req.body as { replyText?: string; replySubject?: string };
       if (!replyText || typeof replyText !== 'string') {
         return res.status(400).json({ message: "Reply text is required" });
       }
@@ -2093,12 +2096,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Email not found" });
       }
 
+      const subjectToUse = (typeof customSubject === 'string' && customSubject.trim())
+        ? customSubject.trim()
+        : email.subject;
       await sendReply(
         email.id,
         email.threadId,
         replyText,
         email.from,
-        email.subject
+        subjectToUse
       );
       res.json({ success: true });
     } catch (error: any) {

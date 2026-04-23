@@ -34,7 +34,18 @@ import {
   Trash2,
   AlertCircle,
   ChevronDown,
+  Pencil,
+  Eye,
+  EyeOff,
 } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Link } from "wouter";
 import DOMPurify from "dompurify";
 import type { Contact } from "@shared/schema";
@@ -105,7 +116,7 @@ function sanitizeHtml(body: string): string {
 
 export default function AdminInbox() {
   const { toast } = useToast();
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const queryClient = useQueryClient();
 
   const [selected, setSelected] = useState<UnifiedItem | null>(null);
@@ -116,6 +127,9 @@ export default function AdminInbox() {
   const [replySubject, setReplySubject] = useState("");
   const [translatedBody, setTranslatedBody] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<Contact | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editMessage, setEditMessage] = useState("");
 
   // Contacts query
   const contactsQuery = useQuery<Contact[]>({
@@ -253,10 +267,11 @@ export default function AdminInbox() {
   });
   const sendReplyMutation = useMutation({
     mutationFn: async (item: UnifiedItem) => {
+      const payload = { replyText, replySubject };
       if (item.source === "email") {
-        await apiRequest("POST", `/api/admin/emails/${item.id}/reply`, { replyText });
+        await apiRequest("POST", `/api/admin/emails/${item.id}/reply`, payload);
       } else {
-        await apiRequest("POST", `/api/contact/${item.id}/respond`, { replyText });
+        await apiRequest("POST", `/api/contact/${item.id}/respond`, payload);
       }
     },
     onSuccess: () => {
@@ -309,6 +324,9 @@ export default function AdminInbox() {
     }
   };
 
+  // Translation always targets the current admin UI language.
+  const uiTarget: "en" | "he" = language === "he" ? "he" : "en";
+
   const handleTranslateMessage = async () => {
     if (!selected) return;
     if (translatedBody) {
@@ -316,10 +334,7 @@ export default function AdminInbox() {
       return;
     }
     try {
-      // Heuristic: detect Hebrew presence to choose target
-      const isHebrew = /[\u0590-\u05FF]/.test(selected.body);
-      const target: "en" | "he" = isHebrew ? "en" : "he";
-      const out = await translateMutation.mutateAsync({ text: selected.body, target });
+      const out = await translateMutation.mutateAsync({ text: selected.body, target: uiTarget });
       setTranslatedBody(out);
     } catch (e: any) {
       toast({ title: t("error"), description: e.message, variant: "destructive" });
@@ -329,14 +344,57 @@ export default function AdminInbox() {
   const handleTranslateReply = async () => {
     if (!replyText.trim()) return;
     try {
-      const isHebrew = /[\u0590-\u05FF]/.test(replyText);
-      const target: "en" | "he" = isHebrew ? "en" : "he";
-      const out = await translateMutation.mutateAsync({ text: replyText, target });
+      const out = await translateMutation.mutateAsync({ text: replyText, target: uiTarget });
       setReplyText(out);
     } catch (e: any) {
       toast({ title: t("error"), description: e.message, variant: "destructive" });
     }
   };
+
+  const toggleReadStatus = (item: UnifiedItem) => {
+    const newIsRead = !item.isRead;
+    if (item.source === "email") {
+      // Gmail backend only supports mark-as-read; show toast if user tries to mark unread
+      if (!newIsRead) {
+        toast({ title: t("error"), description: t("inboxCannotMarkEmailUnread"), variant: "destructive" });
+        return;
+      }
+      markEmailRead.mutate(String(item.id), {
+        onSuccess: () => {
+          qc.invalidateQueries({ queryKey: ["/api/admin/emails"] });
+          setSelected({ ...item, isRead: true });
+        },
+      });
+    } else {
+      markContactRead.mutate(
+        { id: Number(item.id), isRead: newIsRead },
+        { onSuccess: () => setSelected({ ...item, isRead: newIsRead }) }
+      );
+    }
+  };
+
+  const openEditDialog = () => {
+    if (!selected || selected.source !== "form") return;
+    setEditSubject(selected.subject);
+    setEditMessage(selected.body);
+    setEditOpen(true);
+  };
+
+  const editContactMutation = useMutation({
+    mutationFn: async ({ id, subject, message }: { id: number; subject: string; message: string }) => {
+      const res = await apiRequest("PATCH", `/api/contact/${id}`, { subject, message });
+      return res.json();
+    },
+    onSuccess: (updated: Contact) => {
+      qc.invalidateQueries({ queryKey: ["/api/contact"] });
+      toast({ title: t("msgUpdatedSuccess") });
+      setEditOpen(false);
+      if (selected) {
+        setSelected({ ...selected, subject: updated.subject, body: updated.message });
+      }
+    },
+    onError: () => toast({ title: t("error"), description: t("msgUpdateFailed"), variant: "destructive" }),
+  });
 
   // ============ DETAIL VIEW ============
   if (selected) {
@@ -348,18 +406,48 @@ export default function AdminInbox() {
               <ArrowLeft className="h-4 w-4 mr-2" />
               {t("backToInbox")}
             </Button>
-            <div className="ml-auto flex items-center gap-2">
+            <div className="ml-auto flex items-center gap-2 flex-wrap">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => toggleReadStatus(selected)}
+                disabled={markEmailRead.isPending || markContactRead.isPending}
+                data-testid="button-toggle-read"
+              >
+                {selected.isRead ? (
+                  <>
+                    <EyeOff className="h-4 w-4 mr-2" />
+                    {t("markAsUnread")}
+                  </>
+                ) : (
+                  <>
+                    <Eye className="h-4 w-4 mr-2" />
+                    {t("markAsRead")}
+                  </>
+                )}
+              </Button>
               {selected.source === "form" && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-destructive hover:text-destructive"
-                  onClick={() => setConfirmDelete({ id: Number(selected.id) } as Contact)}
-                  data-testid="button-delete-message"
-                >
-                  <Trash2 className="h-4 w-4 mr-2" />
-                  {t("msgDelete")}
-                </Button>
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={openEditDialog}
+                    data-testid="button-edit-message"
+                  >
+                    <Pencil className="h-4 w-4 mr-2" />
+                    {t("msgEdit")}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-destructive hover:text-destructive"
+                    onClick={() => setConfirmDelete({ id: Number(selected.id) } as Contact)}
+                    data-testid="button-delete-message"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    {t("msgDelete")}
+                  </Button>
+                </>
               )}
             </div>
           </div>
@@ -474,6 +562,54 @@ export default function AdminInbox() {
               <p className="text-xs text-muted-foreground">{t("inboxSentFromGemach")}</p>
             </CardContent>
           </Card>
+
+          <Dialog open={editOpen} onOpenChange={setEditOpen}>
+            <DialogContent>
+              <DialogHeader>
+                <DialogTitle>{t("msgEditMessage")}</DialogTitle>
+                <DialogDescription>{t("msgEditDesc")}</DialogDescription>
+              </DialogHeader>
+              <div className="space-y-4 py-2">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">{t("subject")}</label>
+                  <Input
+                    value={editSubject}
+                    onChange={(e) => setEditSubject(e.target.value)}
+                    data-testid="input-edit-subject"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">{t("message")}</label>
+                  <Textarea
+                    value={editMessage}
+                    onChange={(e) => setEditMessage(e.target.value)}
+                    rows={6}
+                    className="resize-none"
+                    data-testid="textarea-edit-message"
+                  />
+                </div>
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => setEditOpen(false)}>
+                  {t("cancel")}
+                </Button>
+                <Button
+                  onClick={() =>
+                    selected &&
+                    editContactMutation.mutate({
+                      id: Number(selected.id),
+                      subject: editSubject,
+                      message: editMessage,
+                    })
+                  }
+                  disabled={editContactMutation.isPending}
+                  data-testid="button-save-edit"
+                >
+                  {editContactMutation.isPending ? t("saving") : t("saveChanges")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           <AlertDialog open={!!confirmDelete} onOpenChange={(o) => !o && setConfirmDelete(null)}>
             <AlertDialogContent>

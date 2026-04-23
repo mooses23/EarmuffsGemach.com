@@ -523,6 +523,7 @@ export const translations = {
     inboxTranslateReply: "Translate reply",
     inboxShowOriginal: "Show original",
     inboxTranslated: "Translated",
+    inboxCannotMarkEmailUnread: "Marking Gmail messages as unread isn't supported here — open Gmail to do that.",
 
     // Founder's tribute (landing page)
     tapToReadStory: "· tap to read her story ·",
@@ -1580,6 +1581,7 @@ export const translations = {
     inboxTranslateReply: "תרגם את התגובה",
     inboxShowOriginal: "הצג את המקור",
     inboxTranslated: "מתורגם",
+    inboxCannotMarkEmailUnread: "סימון הודעות Gmail כלא נקראו אינו נתמך כאן — פתח את Gmail כדי לעשות זאת.",
 
     contactMessages: "הודעות יצירת קשר",
     msgPageSubtitle: "צפייה ומענה להודעות מטופס יצירת הקשר",
