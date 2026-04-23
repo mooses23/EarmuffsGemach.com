@@ -999,34 +999,49 @@ function ReturnWizard({
           ) : (
             <div className="space-y-2 max-h-[400px] overflow-y-auto">
               {filteredTransactions.map((tx) => (
-                <button
+                <div
                   key={tx.id}
-                  onClick={() => setSelectedTransaction(tx)}
-                  className={`w-full p-4 border-2 rounded-xl flex items-center justify-between transition-all text-left
+                  className={`w-full border-2 rounded-xl transition-all
                     ${selectedTransaction?.id === tx.id ? "border-primary bg-primary/10" : "border-white/10 hover:border-primary/50 hover:bg-white/5"}`}
                 >
-                  <div className="flex items-center gap-3">
-                    {tx.headbandColor && <ColorSwatch color={tx.headbandColor} />}
-                    <div>
-                      <div className="font-medium text-white">{tx.borrowerName}</div>
-                      <div className="text-sm text-slate-400">{tx.borrowerPhone}</div>
-                      <div className="text-xs text-slate-400">
-                        {t('borrowed')} {formatLocalizedDate(new Date(tx.borrowDate), language, false)}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedTransaction(tx)}
+                    className="w-full p-4 flex items-center justify-between text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      {tx.headbandColor && <ColorSwatch color={tx.headbandColor} />}
+                      <div>
+                        <div className="font-medium text-white">{tx.borrowerName}</div>
+                        <div className="text-sm text-slate-400">{tx.borrowerPhone}</div>
+                        <div className="text-xs text-slate-400">
+                          {t('borrowed')} {formatLocalizedDate(new Date(tx.borrowDate), language, false)}
+                        </div>
+                        {tx.lastReturnReminderAt && (
+                          <div className="text-xs text-amber-300 mt-1" data-testid={`text-reminder-sent-list-${tx.id}`}>
+                            <BellRing className="inline h-3 w-3 mr-1 -mt-0.5" />
+                            {t('reminderSentInline').replace('{{date}}', formatLocalizedDate(new Date(tx.lastReturnReminderAt), language, false))}
+                            {(tx.returnReminderCount ?? 0) > 1 && ` · ×${tx.returnReminderCount}`}
+                          </div>
+                        )}
                       </div>
                     </div>
+                    <div className="text-right">
+                      <div className="font-bold text-white">${tx.depositAmount.toFixed(2)}</div>
+                      {tx.payLaterStatus && tx.payLaterStatus !== "CHARGED" && (
+                        <Badge variant="secondary" className="mt-1">
+                          <CreditCard className="h-3 w-3 mr-1" /> {t('card')}
+                        </Badge>
+                      )}
+                      {isOverdue(tx) && (
+                        <Badge variant="destructive" className="mt-1">{t('overdue')}</Badge>
+                      )}
+                    </div>
+                  </button>
+                  <div className="px-4 pb-3 -mt-1 flex justify-end" onClick={(e) => e.stopPropagation()}>
+                    <ReturnReminderButton tx={tx} locationId={location.id} />
                   </div>
-                  <div className="text-right">
-                    <div className="font-bold text-white">${tx.depositAmount.toFixed(2)}</div>
-                    {tx.payLaterStatus && tx.payLaterStatus !== "CHARGED" && (
-                      <Badge variant="secondary" className="mt-1">
-                        <CreditCard className="h-3 w-3 mr-1" /> {t('card')}
-                      </Badge>
-                    )}
-                    {isOverdue(tx) && (
-                      <Badge variant="destructive" className="mt-1">{t('overdue')}</Badge>
-                    )}
-                  </div>
-                </button>
+                </div>
               ))}
             </div>
           )}

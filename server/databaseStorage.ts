@@ -742,6 +742,10 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS last_return_reminder_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS return_reminder_count INTEGER NOT NULL DEFAULT 0`);
   } catch (err: any) {
-    console.warn('ensureSchemaUpgrades warning:', err?.message || err);
+    schemaUpgradesRun = false;
+    console.error('[ensureSchemaUpgrades] Failed to apply transactions reminder columns:', err?.message || err);
+    if (process.env.NODE_ENV === 'production') {
+      throw err;
+    }
   }
 }
