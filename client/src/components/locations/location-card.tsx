@@ -69,11 +69,11 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
   const handleCardClick = (e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest("a") || target.closest("[data-contact-actions]")) return;
-    navigate(`/self-deposit?locationId=${location.id}`);
+    navigate(`/self-deposit?locationId=${location.id}#location-contact`);
   };
   
   return (
-    <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}`); }}>
+    <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}#location-contact`); }}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300 hover:bg-blue-50/30">
         <CardContent className="pt-6">
           <div className="flex justify-between items-start mb-4">

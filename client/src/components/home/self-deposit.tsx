@@ -44,6 +44,30 @@ export function SelfDeposit() {
 
   const selectedLocationData = locations.find((loc: Location) => loc.id.toString() === selectedLocation);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (window.location.hash !== "#location-contact") return;
+    if (!selectedLocationData || showPayment) return;
+    let cancelled = false;
+    let attempts = 0;
+    const tryScroll = () => {
+      if (cancelled) return;
+      const el = document.getElementById("location-contact");
+      if (el) {
+        el.scrollIntoView({ behavior: "smooth", block: "start" });
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) {
+        window.requestAnimationFrame(tryScroll);
+      }
+    };
+    window.requestAnimationFrame(tryScroll);
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLocationData, showPayment]);
+
   const canProceedToPayment = selectedLocation && borrowerName && borrowerEmail && selectedPaymentMethod;
 
   const handleProceedToPayment = () => {
