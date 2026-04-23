@@ -1,8 +1,9 @@
 import { useEffect } from "react";
 import { ContactForm } from "@/components/contact/contact-form";
 import { Card, CardContent } from "@/components/ui/card";
-import { Mail, Clock } from "lucide-react";
+import { Mail, Clock, Info } from "lucide-react";
 import { useLanguage } from "@/hooks/use-language";
+import { Link } from "wouter";
 
 export default function Contact() {
   const { t } = useLanguage();
@@ -23,6 +24,16 @@ export default function Contact() {
           </div>
           
           <div className="max-w-3xl mx-auto px-3 sm:px-0">
+            <div className="mb-6 sm:mb-8 rounded-lg border border-amber-300 bg-amber-50 p-4 sm:p-5 flex gap-3" data-testid="contact-admin-notice">
+              <Info className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm sm:text-base text-amber-900">
+                <p className="font-semibold mb-1">{t("contactGoesToAdminTitle")}</p>
+                <p className="mb-2">{t("contactGoesToAdminBody")}</p>
+                <Link href="/locations" className="font-medium underline hover:no-underline">
+                  {t("findYourLocation")} →
+                </Link>
+              </div>
+            </div>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 sm:gap-6 mb-6 sm:mb-8">
               {/* Email */}
               <Card className="text-center hover:shadow-md transition-shadow">

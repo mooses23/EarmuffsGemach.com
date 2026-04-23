@@ -250,6 +250,9 @@ export const transactions = pgTable("transactions", {
   magicTokenExpiresAt: timestamp("magic_token_expires_at"),
   chargeErrorCode: text("charge_error_code"), // Stripe error code if charge fails
   chargeErrorMessage: text("charge_error_message"), // Stripe error message
+  // Return reminder tracking
+  lastReturnReminderAt: timestamp("last_return_reminder_at"),
+  returnReminderCount: integer("return_reminder_count").notNull().default(0),
 });
 
 export const insertTransactionSchema = createInsertSchema(transactions).pick({

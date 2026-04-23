@@ -432,6 +432,21 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
+  async recordReturnReminderSent(id: number): Promise<Transaction> {
+    const transaction = await this.getTransaction(id);
+    if (!transaction) {
+      throw new Error(`Transaction with id ${id} not found`);
+    }
+    const result = await db.update(transactions)
+      .set({
+        lastReturnReminderAt: new Date(),
+        returnReminderCount: (transaction.returnReminderCount ?? 0) + 1,
+      })
+      .where(eq(transactions.id, id))
+      .returning();
+    return result[0];
+  }
+
   // Contact operations
   async getAllContacts(): Promise<Contact[]> {
     return db.select().from(contacts);
@@ -716,5 +731,17 @@ export class DatabaseStorage implements IStorage {
   }
   async deleteFaqEntry(id: number): Promise<void> {
     await db.delete(faqEntries).where(eq(faqEntries.id, id));
+  }
+}
+
+let schemaUpgradesRun = false;
+export async function ensureSchemaUpgrades(): Promise<void> {
+  if (schemaUpgradesRun) return;
+  schemaUpgradesRun = true;
+  try {
+    await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS last_return_reminder_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS return_reminder_count INTEGER NOT NULL DEFAULT 0`);
+  } catch (err: any) {
+    console.warn('ensureSchemaUpgrades warning:', err?.message || err);
   }
 }

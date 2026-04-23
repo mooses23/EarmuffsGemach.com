@@ -119,3 +119,45 @@ export async function sendOperatorWelcomeEmail(ctx: OperatorWelcomeContext): Pro
   const { subject, body } = buildWelcomeEmail(ctx);
   await sendNewEmail(ctx.operatorEmail, subject, body);
 }
+
+export interface ReturnReminderContext {
+  borrowerName: string;
+  borrowerEmail: string;
+  locationName: string;
+  language?: 'en' | 'he';
+}
+
+function buildReturnReminderEmail(ctx: ReturnReminderContext): { subject: string; body: string } {
+  const firstName = (ctx.borrowerName || '').trim().split(/\s+/)[0] || ctx.borrowerName || '';
+  if (ctx.language === 'he') {
+    const subject = `תזכורת עדינה — החזרת אוזניות בייבי בנז (${ctx.locationName})`;
+    const body = `שלום ${firstName},
+
+זה גמ"ח אוזניות בייבי בנז ${ctx.locationName}. אנחנו רואים שהשאלת מאיתנו אוזניות לאחרונה — כשיהיה לך רגע פנוי, נשמח אם תחזיר אותן כדי שמשפחה נוספת תוכל ליהנות מהן.
+
+אין שום לחץ — רק תזכורת ידידותית. אם כבר החזרת, אפשר להתעלם מההודעה.
+
+תודה רבה על העזרה!
+
+— גמ"ח אוזניות בייבי בנז ${ctx.locationName}
+`;
+    return { subject, body };
+  }
+  const subject = `Friendly reminder — please return your Baby Banz earmuffs (${ctx.locationName})`;
+  const body = `Hi ${firstName},
+
+This is the ${ctx.locationName} Baby Banz Earmuffs Gemach. We see you recently borrowed earmuffs from us — whenever you have a moment, could you please bring them back so the next family can use them?
+
+No rush at all — just a gentle reminder. If you've already returned them, please ignore this note.
+
+Thank you so much for helping us keep the gemach going!
+
+— ${ctx.locationName} Baby Banz Earmuffs Gemach
+`;
+  return { subject, body };
+}
+
+export async function sendReturnReminderEmail(ctx: ReturnReminderContext): Promise<void> {
+  const { subject, body } = buildReturnReminderEmail(ctx);
+  await sendNewEmail(ctx.borrowerEmail, subject, body);
+}

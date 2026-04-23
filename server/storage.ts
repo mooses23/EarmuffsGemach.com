@@ -89,6 +89,7 @@ export interface IStorage {
   createTransaction(transaction: InsertTransaction): Promise<Transaction>;
   updateTransaction(id: number, data: Partial<InsertTransaction>): Promise<Transaction>;
   markTransactionReturned(id: number, refundAmount?: number): Promise<Transaction>;
+  recordReturnReminderSent(id: number): Promise<Transaction>;
 
   // Contact operations
   getAllContacts(): Promise<Contact[]>;
@@ -2635,6 +2636,20 @@ export class MemStorage implements IStorage {
     };
     this.transactions.set(id, updatedTransaction);
     return updatedTransaction;
+  }
+
+  async recordReturnReminderSent(id: number): Promise<Transaction> {
+    const transaction = this.transactions.get(id);
+    if (!transaction) {
+      throw new Error(`Transaction with id ${id} not found`);
+    }
+    const updated: Transaction = {
+      ...transaction,
+      lastReturnReminderAt: new Date(),
+      returnReminderCount: (transaction.returnReminderCount ?? 0) + 1,
+    };
+    this.transactions.set(id, updated);
+    return updated;
   }
 
   // Contact methods

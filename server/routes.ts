@@ -4,7 +4,8 @@ import { storage } from "./storage.js";
 import { PaymentSyncService } from "./payment-sync.js";
 import { DepositSyncService } from "./deposit-sync.js";
 import { DepositRefundService } from "./deposit-refund.js";
-import { EmailNotificationService, sendOperatorWelcomeEmail } from "./email-notifications.js";
+import { EmailNotificationService, sendOperatorWelcomeEmail, sendReturnReminderEmail } from "./email-notifications.js";
+import { ensureSchemaUpgrades } from "./databaseStorage.js";
 import { AuditTrailService } from "./audit-trail.js";
 import { PaymentAnalyticsEngine } from "./analytics-engine.js";
 import { DepositDetectionService } from "./deposit-detection.js";
@@ -48,6 +49,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   
   // Create test users for demonstration
   await createTestUsers();
+
+  // Apply lightweight schema upgrades (idempotent)
+  await ensureSchemaUpgrades();
 
   // Helper to check operator authorization - supports both Passport auth and PIN-based session
   function getOperatorLocationId(req: any): number | null {
@@ -2213,6 +2217,73 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error forwarding email to operator:", error);
       res.status(500).json({ message: error.message || "Failed to forward email" });
+    }
+  });
+
+  // ============================================
+  // RETURN REMINDER (operator → borrower)
+  // ============================================
+  const PLACEHOLDER_EMAIL_SUFFIX = "@placeholder.local";
+  const REMINDER_RATE_LIMIT_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+  app.post("/api/locations/:locationId/transactions/:id/return-reminder", async (req, res) => {
+    try {
+      const locationId = parseInt(req.params.locationId, 10);
+      const transactionId = parseInt(req.params.id, 10);
+      if (Number.isNaN(locationId) || Number.isNaN(transactionId)) {
+        return res.status(400).json({ message: "Invalid location or transaction id" });
+      }
+
+      const operatorLocationId = getOperatorLocationId(req);
+      if (!operatorLocationId) {
+        return res.status(401).json({ message: "Operator authentication required" });
+      }
+      if (operatorLocationId !== -1 && operatorLocationId !== locationId) {
+        return res.status(403).json({ message: "Not authorized for this location" });
+      }
+
+      const transaction = await storage.getTransaction(transactionId);
+      if (!transaction || transaction.locationId !== locationId) {
+        return res.status(404).json({ message: "Transaction not found for this location" });
+      }
+      if (transaction.isReturned) {
+        return res.status(400).json({ message: "This transaction is already marked returned" });
+      }
+      const email = (transaction.borrowerEmail || '').trim();
+      if (!email || email.toLowerCase().endsWith(PLACEHOLDER_EMAIL_SUFFIX)) {
+        return res.status(400).json({ message: "No real borrower email on file for this transaction" });
+      }
+      if (transaction.lastReturnReminderAt) {
+        const elapsed = Date.now() - new Date(transaction.lastReturnReminderAt).getTime();
+        if (elapsed < REMINDER_RATE_LIMIT_MS) {
+          const hoursLeft = Math.ceil((REMINDER_RATE_LIMIT_MS - elapsed) / (60 * 60 * 1000));
+          return res.status(429).json({ message: `A reminder was already sent recently. Please wait ${hoursLeft}h before sending another.` });
+        }
+      }
+
+      const location = await storage.getLocation(locationId);
+      if (!location) return res.status(404).json({ message: "Location not found" });
+
+      const language: 'en' | 'he' = (req.body?.language === 'he') ? 'he' : 'en';
+      const locationName = (language === 'he' && (location as any).nameHe) ? (location as any).nameHe : location.name;
+
+      try {
+        await sendReturnReminderEmail({
+          borrowerName: transaction.borrowerName,
+          borrowerEmail: email,
+          locationName,
+          language,
+        });
+      } catch (sendErr: any) {
+        console.error("Failed to send return reminder email:", sendErr);
+        return res.status(502).json({ message: sendErr?.message || "Failed to send reminder email" });
+      }
+
+      const updated = await storage.recordReturnReminderSent(transactionId);
+      res.json({ success: true, transaction: updated });
+    } catch (error: any) {
+      console.error("Error sending return reminder:", error);
+      res.status(500).json({ message: error?.message || "Failed to send return reminder" });
     }
   });
 

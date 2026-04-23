@@ -80,6 +80,23 @@ export const translations = {
     responseHours: "Response Hours",
     responseHoursDescription: "We typically respond to inquiries within 24-48 hours, excluding Shabbat and Jewish holidays.",
     sendUsMessage: "Send Us a Message",
+    contactGoesToAdminTitle: "Messages here go to our main team",
+    contactGoesToAdminBody: "This form reaches the central Baby Banz Earmuffs Gemach team — not a specific local gemach. To contact the gemach you borrowed from (about an active loan, return, or deposit), please reach out to that location directly using the contact details on its location page.",
+    findYourLocation: "Find your local gemach",
+
+    // Operator dashboard — return reminder
+    sendReturnReminder: "Send return reminder",
+    reminderSent: "Reminder sent",
+    reminderSentToast: "Reminder email sent to the borrower.",
+    reminderFailed: "Could not send reminder",
+    reminderConfirmTitle: "Send a return reminder?",
+    reminderConfirmBody: "We'll email {{name}} a friendly note asking them to return the earmuffs. Only send if you've already tried less formal channels.",
+    reminderNoEmailTooltip: "No email on file for this borrower",
+    reminderRecentlySentTooltip: "A reminder was sent recently — please wait 24 hours before sending another",
+    reminderAlreadyReturnedTooltip: "This loan is already marked returned",
+    reminderCountLabel: "Reminders sent",
+    reminderLastSentLabel: "Last reminder",
+    sendReminder: "Send",
 
     // Apply page
     openGemachInCommunity: "Open a Gemach in Your Community",
@@ -1152,6 +1169,23 @@ export const translations = {
     responseHours: "שעות מענה",
     responseHoursDescription: "אנו משיבים בדרך כלל לפניות תוך 24-48 שעות, למעט שבת וחגי ישראל.",
     sendUsMessage: "שלח לנו הודעה",
+    contactGoesToAdminTitle: "ההודעות כאן מגיעות לצוות הראשי שלנו",
+    contactGoesToAdminBody: "טופס זה מגיע לצוות המרכזי של גמ״ח אוזניות בייבי בנז — לא לסניף מקומי מסוים. כדי ליצור קשר עם הגמ״ח שממנו השאלת (לגבי השאלה פעילה, החזרה או פיקדון), פנה ישירות לאותו סניף באמצעות פרטי הקשר שבעמוד שלו.",
+    findYourLocation: "מצא את הגמ״ח המקומי שלך",
+
+    // Operator dashboard — return reminder
+    sendReturnReminder: "שלח תזכורת החזרה",
+    reminderSent: "התזכורת נשלחה",
+    reminderSentToast: "מייל תזכורת נשלח למשאיל.",
+    reminderFailed: "לא הצלחנו לשלוח תזכורת",
+    reminderConfirmTitle: "לשלוח תזכורת החזרה?",
+    reminderConfirmBody: "נשלח ל-{{name}} מייל ידידותי עם בקשה להחזיר את האוזניות. שלח רק אחרי שניסית בערוצים פחות פורמליים.",
+    reminderNoEmailTooltip: "אין כתובת מייל למשאיל הזה",
+    reminderRecentlySentTooltip: "תזכורת נשלחה לאחרונה — נא להמתין 24 שעות לפני שליחה נוספת",
+    reminderAlreadyReturnedTooltip: "ההשאלה הזו כבר סומנה כהוחזרה",
+    reminderCountLabel: "תזכורות שנשלחו",
+    reminderLastSentLabel: "תזכורת אחרונה",
+    sendReminder: "שלח",
 
     // Apply page
     openGemachInCommunity: "פתח גמ״ח בקהילה שלך",

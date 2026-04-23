@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Home, LogOut, Package, ArrowRight, ArrowLeft, Phone, User, DollarSign, Check, AlertTriangle, Plus, Search, RotateCcw, CreditCard, CheckCircle, XCircle, Trash2, Clock, KeyRound, ShieldCheck } from "lucide-react";
+import { Loader2, Home, LogOut, Package, ArrowRight, ArrowLeft, Phone, User, DollarSign, Check, AlertTriangle, Plus, Search, RotateCcw, CreditCard, CheckCircle, XCircle, Trash2, Clock, KeyRound, ShieldCheck, BellRing } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link, useLocation } from "wouter";
 import { useOperatorAuth } from "@/hooks/use-operator-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
@@ -180,6 +181,94 @@ function RestockingInstructions() {
   );
 }
 
+function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId: number }) {
+  const { t, language } = useLanguage();
+  const { toast } = useToast();
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const email = (tx.borrowerEmail || '').trim();
+  const isPlaceholderEmail = !email || email.toLowerCase().endsWith('@placeholder.local');
+  const lastSent = tx.lastReturnReminderAt ? new Date(tx.lastReturnReminderAt) : null;
+  const sentRecently = !!(lastSent && (Date.now() - lastSent.getTime()) < 24 * 60 * 60 * 1000);
+
+  const mutation = useMutation({
+    mutationFn: async () => {
+      return apiRequest('POST', `/api/locations/${locationId}/transactions/${tx.id}/return-reminder`, { language });
+    },
+    onSuccess: () => {
+      toast({ title: t('reminderSent'), description: t('reminderSentToast') });
+      queryClient.invalidateQueries({ queryKey: ['/api/locations', locationId, 'transactions'] });
+      queryClient.invalidateQueries({ queryKey: [`/api/locations/${locationId}/transactions`] });
+      setConfirmOpen(false);
+    },
+    onError: (err: any) => {
+      toast({ title: t('reminderFailed'), description: err?.message || '', variant: 'destructive' });
+    },
+  });
+
+  let disabledReason: string | null = null;
+  if (tx.isReturned) disabledReason = t('reminderAlreadyReturnedTooltip');
+  else if (isPlaceholderEmail) disabledReason = t('reminderNoEmailTooltip');
+  else if (sentRecently) disabledReason = t('reminderRecentlySentTooltip');
+
+  const button = (
+    <Button
+      type="button"
+      size="sm"
+      variant="outline"
+      disabled={!!disabledReason || mutation.isPending}
+      onClick={() => setConfirmOpen(true)}
+      className="border-white/20 text-slate-200 hover:bg-white/10 disabled:opacity-50"
+      data-testid={`button-send-reminder-${tx.id}`}
+    >
+      {mutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <BellRing className="h-3.5 w-3.5 mr-1" />}
+      {t('sendReturnReminder')}
+      {(tx.returnReminderCount ?? 0) > 0 && (
+        <span className="ml-1 text-xs opacity-70">({tx.returnReminderCount})</span>
+      )}
+    </Button>
+  );
+
+  return (
+    <>
+      {disabledReason ? (
+        <TooltipProvider>
+          <Tooltip>
+            <TooltipTrigger asChild><span tabIndex={0}>{button}</span></TooltipTrigger>
+            <TooltipContent><p className="max-w-xs text-xs">{disabledReason}</p></TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : button}
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('reminderConfirmTitle')}</DialogTitle>
+            <DialogDescription>
+              {t('reminderConfirmBody').replace('{{name}}', tx.borrowerName)}
+            </DialogDescription>
+          </DialogHeader>
+          {lastSent && (
+            <div className="text-xs text-muted-foreground">
+              {t('reminderLastSentLabel')}: {formatLocalizedDate(lastSent, language)}
+              {(tx.returnReminderCount ?? 0) > 0 && ` · ${t('reminderCountLabel')}: ${tx.returnReminderCount}`}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmOpen(false)} disabled={mutation.isPending}>
+              {t('cancel')}
+            </Button>
+            <Button onClick={() => mutation.mutate()} disabled={mutation.isPending} data-testid={`button-confirm-reminder-${tx.id}`}>
+              {mutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+              {t('sendReminder')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function RecentActivity({ transactions, locationId, locationCode }: { transactions: Transaction[]; locationId: number; locationCode?: string }) {
   const { t, language } = useLanguage();
   const recentTransactions = [...transactions]
@@ -208,7 +297,7 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
         ) : (
           <div className="space-y-3">
             {recentTransactions.map((tx) => (
-              <div key={tx.id} className="flex items-center justify-between p-3 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors">
+              <div key={tx.id} className="flex flex-col gap-2 p-3 bg-white/5 border border-white/10 rounded-lg hover:bg-white/10 transition-colors sm:flex-row sm:items-center sm:justify-between">
                 <div className="flex items-center gap-3">
                   {tx.headbandColor && <ColorSwatch color={tx.headbandColor} size="sm" />}
                   <div>
@@ -223,11 +312,16 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <Badge variant={tx.isReturned ? "outline" : "default"} className={tx.isReturned ? "mb-1 border-white/20 text-slate-300" : "mb-1"}>
-                    {tx.isReturned ? t('returned') : t('activeBorrow')}
-                  </Badge>
-                  <div className="text-xs font-medium text-white">${tx.depositAmount.toFixed(2)}</div>
+                <div className="flex items-center gap-3 sm:flex-row-reverse">
+                  <div className="text-right">
+                    <Badge variant={tx.isReturned ? "outline" : "default"} className={tx.isReturned ? "mb-1 border-white/20 text-slate-300" : "mb-1"}>
+                      {tx.isReturned ? t('returned') : t('activeBorrow')}
+                    </Badge>
+                    <div className="text-xs font-medium text-white">${tx.depositAmount.toFixed(2)}</div>
+                  </div>
+                  {!tx.isReturned && (
+                    <ReturnReminderButton tx={tx} locationId={locationId} />
+                  )}
                 </div>
               </div>
             ))}
