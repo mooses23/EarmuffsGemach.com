@@ -318,6 +318,23 @@ function FaqTab() {
   );
 }
 
+export function GlossaryContent() {
+  return (
+    <Tabs defaultValue="facts">
+      <TabsList>
+        <TabsTrigger value="facts" data-testid="tab-facts">Facts</TabsTrigger>
+        <TabsTrigger value="faqs" data-testid="tab-faqs">FAQs</TabsTrigger>
+      </TabsList>
+      <TabsContent value="facts" className="mt-4">
+        <FactsTab />
+      </TabsContent>
+      <TabsContent value="faqs" className="mt-4">
+        <FaqTab />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
 export default function AdminGlossaryPage() {
   return (
     <div className="container max-w-5xl mx-auto py-8 space-y-6">
@@ -330,18 +347,7 @@ export default function AdminGlossaryPage() {
           </p>
         </div>
       </div>
-      <Tabs defaultValue="facts">
-        <TabsList>
-          <TabsTrigger value="facts" data-testid="tab-facts">Facts</TabsTrigger>
-          <TabsTrigger value="faqs" data-testid="tab-faqs">FAQs</TabsTrigger>
-        </TabsList>
-        <TabsContent value="facts" className="mt-4">
-          <FactsTab />
-        </TabsContent>
-        <TabsContent value="faqs" className="mt-4">
-          <FaqTab />
-        </TabsContent>
-      </Tabs>
+      <GlossaryContent />
     </div>
   );
 }

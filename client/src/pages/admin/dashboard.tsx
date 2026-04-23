@@ -196,11 +196,6 @@ export default function Dashboard() {
                       {t('inboxTitle')}
                     </Button>
                   </Link>
-                  <Link href="/admin/glossary">
-                    <Button className="w-full" variant="outline" data-testid="button-nav-glossary">
-                      AI Knowledge Base
-                    </Button>
-                  </Link>
                 </CardContent>
               </Card>
 

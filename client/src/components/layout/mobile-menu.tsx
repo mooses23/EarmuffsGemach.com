@@ -74,7 +74,7 @@ export function MobileMenu({ isOpen, setIsOpen }: MobileMenuProps) {
         
         {user ? (
           <div className="pt-4 space-y-2 border-t border-white/10 mt-2">
-            {isOperator && (
+            {isOperator && !isAdmin && (
               <Link
                 href="/operator/dashboard"
                 onClick={() => setIsOpen(false)}

@@ -37,7 +37,9 @@ import {
   Pencil,
   Eye,
   EyeOff,
+  BookOpen,
 } from "lucide-react";
+import { GlossaryContent } from "./glossary";
 import {
   Dialog,
   DialogContent,
@@ -45,6 +47,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
+  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import DOMPurify from "dompurify";
@@ -134,6 +137,7 @@ export default function AdminInbox() {
   const [translations, setTranslations] = useState<Record<string, string>>({});
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [editSubject, setEditSubject] = useState("");
   const [editMessage, setEditMessage] = useState("");
 
@@ -755,6 +759,26 @@ export default function AdminInbox() {
                 {unreadCount} {t("unread")}
               </Badge>
             )}
+            <Dialog open={glossaryOpen} onOpenChange={setGlossaryOpen}>
+              <DialogTrigger asChild>
+                <Button variant="outline" size="sm" data-testid="button-open-glossary">
+                  <BookOpen className="h-4 w-4 mr-2" />
+                  AI Knowledge Base
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-5xl max-h-[85vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <BookOpen className="h-5 w-5" />
+                    AI Knowledge Base
+                  </DialogTitle>
+                  <DialogDescription>
+                    Edit the facts and FAQ answers the AI uses when drafting replies in this inbox.
+                  </DialogDescription>
+                </DialogHeader>
+                <GlossaryContent />
+              </DialogContent>
+            </Dialog>
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={emailQueries.isFetching} data-testid="button-refresh">
               <RefreshCw className={`h-4 w-4 mr-2 ${emailQueries.isFetching ? "animate-spin" : ""}`} />
               {t("refresh")}

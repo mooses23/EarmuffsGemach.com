@@ -149,7 +149,7 @@ export function Header() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="glass-panel border-white/20">
-                      {isOperator && (
+                      {isOperator && !isAdmin && (
                         <DropdownMenuItem asChild>
                           <Link href="/operator/dashboard" className="flex items-center gap-2 w-full text-slate-200 hover:text-white">
                             <LayoutDashboard className="h-4 w-4" />
