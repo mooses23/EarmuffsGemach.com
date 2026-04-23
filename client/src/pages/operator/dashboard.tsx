@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Label } from "@/components/ui/label";
 import { format, isAfter, addDays } from "date-fns";
@@ -1682,6 +1683,8 @@ export default function OperatorDashboard() {
   const { t, language } = useLanguage();
   const [, setPath] = useLocation();
   const [activeTab, setActiveTab] = useState<"overview" | "lend" | "return" | "security">("overview");
+  const [showPinPrompt, setShowPinPrompt] = useState(false);
+  const [suppressPinPrompt, setSuppressPinPrompt] = useState(false);
   const [showAddStock, setShowAddStock] = useState(false);
   const [editStockColor, setEditStockColor] = useState<string | null>(null);
   const [editStockQty, setEditStockQty] = useState(0);
@@ -1699,6 +1702,10 @@ export default function OperatorDashboard() {
       setCurrentPin("");
       setNewPin("");
       setConfirmPin("");
+      setShowPinPrompt(false);
+      if (operatorLocation) {
+        localStorage.removeItem(`pinPromptSuppressed:${operatorLocation.id}`);
+      }
     },
     onError: (error: Error) => {
       toast({ title: t("error"), description: error.message, variant: "destructive" });
@@ -1710,6 +1717,16 @@ export default function OperatorDashboard() {
       setPath("/auth");
     }
   }, [isOperatorLoading, operatorLocation, setPath]);
+
+  useEffect(() => {
+    if (!operatorLocation) return;
+    const isDefault = (operatorLocation as any).pinIsDefault === true;
+    const suppressKey = `pinPromptSuppressed:${operatorLocation.id}`;
+    const suppressed = typeof window !== "undefined" && localStorage.getItem(suppressKey) === "1";
+    if (isDefault && !suppressed) {
+      setShowPinPrompt(true);
+    }
+  }, [operatorLocation]);
 
   const { 
     data: transactions = [], 
@@ -1970,6 +1987,63 @@ export default function OperatorDashboard() {
         color={editStockColor || ""}
         currentQty={editStockQty}
       />
+
+      <Dialog
+        open={showPinPrompt}
+        onOpenChange={(open) => {
+          if (!open) {
+            if (suppressPinPrompt && operatorLocation) {
+              localStorage.setItem(`pinPromptSuppressed:${operatorLocation.id}`, "1");
+            }
+            setShowPinPrompt(false);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[440px]" data-testid="dialog-pin-default-prompt">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-amber-500" />
+              {t("pinDefaultPromptTitle")}
+            </DialogTitle>
+            <DialogDescription>{t("pinDefaultPromptDesc")}</DialogDescription>
+          </DialogHeader>
+          <div className="flex items-center gap-2 py-2">
+            <Checkbox
+              id="suppress-pin-prompt"
+              checked={suppressPinPrompt}
+              onCheckedChange={(c) => setSuppressPinPrompt(c === true)}
+              data-testid="checkbox-suppress-pin-prompt"
+            />
+            <Label htmlFor="suppress-pin-prompt" className="text-sm cursor-pointer">
+              {t("pinDefaultDontRemind")}
+            </Label>
+          </div>
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (suppressPinPrompt && operatorLocation) {
+                  localStorage.setItem(`pinPromptSuppressed:${operatorLocation.id}`, "1");
+                }
+                setShowPinPrompt(false);
+              }}
+              data-testid="button-pin-prompt-later"
+            >
+              {t("pinDefaultLater")}
+            </Button>
+            <Button
+              onClick={() => {
+                setShowPinPrompt(false);
+                setActiveTab("security");
+              }}
+              data-testid="button-pin-prompt-change"
+            >
+              <KeyRound className="h-4 w-4 mr-1" />
+              {t("pinDefaultChangeNow")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

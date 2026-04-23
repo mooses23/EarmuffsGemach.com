@@ -489,7 +489,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         const { operatorPin, ...locationWithoutPin } = location;
         res.json({ 
           success: true, 
-          location: locationWithoutPin 
+          location: { ...locationWithoutPin, pinIsDefault: operatorPin === '1234' }
         });
       });
     } catch (error) {
@@ -945,7 +945,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const { operatorPin, ...locationWithoutPin } = location;
-      res.json(locationWithoutPin);
+      res.json({ ...locationWithoutPin, pinIsDefault: operatorPin === '1234' });
     } catch (error) {
       console.error("Error fetching operator location:", error);
       res.status(500).json({ message: "Failed to fetch location" });
