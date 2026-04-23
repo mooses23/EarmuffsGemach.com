@@ -527,6 +527,10 @@ export const translations = {
     inboxGmailNotConfiguredTitle: "Gmail is not configured",
     inboxGmailNotConfiguredDesc: "Email features are unavailable. Add the following environment variables to enable Gmail:",
     inboxGmailSetupLink: "Read the Gmail API setup guide →",
+    inboxGmailExpiredTitle: "Gmail refresh token expired or revoked",
+    inboxGmailExpiredDesc: "Google rejected the saved credentials (invalid_grant). Generate a new refresh token using the OAuth Playground and replace GMAIL_REFRESH_TOKEN in the environment variables, then redeploy.",
+    inboxGmailRegenerateNote: "needs to be regenerated",
+    inboxGmailRegenerateLink: "Open Google OAuth Playground →",
 
     // Founder's tribute (landing page)
     tapToReadStory: "· tap to read her story ·",
@@ -1588,6 +1592,10 @@ export const translations = {
     inboxGmailNotConfiguredTitle: "Gmail אינו מוגדר",
     inboxGmailNotConfiguredDesc: "תכונות הדוא״ל אינן זמינות. הוסף את משתני הסביבה הבאים כדי להפעיל את Gmail:",
     inboxGmailSetupLink: "קרא את מדריך הגדרת Gmail API ←",
+    inboxGmailExpiredTitle: "אסימון הרענון של Gmail פג תוקף או בוטל",
+    inboxGmailExpiredDesc: "גוגל דחתה את אישורי הגישה השמורים (invalid_grant). צור אסימון רענון חדש דרך ה-OAuth Playground והחלף את GMAIL_REFRESH_TOKEN במשתני הסביבה, ולאחר מכן פרוס מחדש.",
+    inboxGmailRegenerateNote: "יש לחדש",
+    inboxGmailRegenerateLink: "פתח את Google OAuth Playground ←",
 
     contactMessages: "הודעות יצירת קשר",
     msgPageSubtitle: "צפייה ומענה להודעות מטופס יצירת הקשר",

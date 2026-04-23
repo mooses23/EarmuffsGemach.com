@@ -650,6 +650,8 @@ export default function AdminInbox() {
     ? (emailErrorRaw instanceof Error ? emailErrorRaw.message : String(emailErrorRaw))
     : null;
   const gmailNotConfigured = gmailStatusQuery.data && !gmailStatusQuery.data.configured;
+  const gmailInvalidGrant = !!emailError && /refresh token is invalid|invalid_grant/i.test(emailError);
+  const showGmailIssue = gmailNotConfigured || gmailInvalidGrant;
 
   return (
     <div className="py-10">
@@ -720,34 +722,38 @@ export default function AdminInbox() {
           </div>
         </div>
 
-        {gmailNotConfigured && (
+        {showGmailIssue && (
           <Card className="mb-6 border-amber-300 bg-amber-50 dark:bg-amber-950/30" data-testid="card-gmail-not-configured">
             <CardContent className="pt-6">
               <div className="flex items-start gap-3">
                 <AlertCircle className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
                 <div className="space-y-2 text-sm">
-                  <div className="font-semibold text-amber-900 dark:text-amber-100">{t("inboxGmailNotConfiguredTitle")}</div>
-                  <p className="text-amber-900/90 dark:text-amber-100/90">{t("inboxGmailNotConfiguredDesc")}</p>
+                  <div className="font-semibold text-amber-900 dark:text-amber-100">
+                    {gmailInvalidGrant ? t("inboxGmailExpiredTitle") : t("inboxGmailNotConfiguredTitle")}
+                  </div>
+                  <p className="text-amber-900/90 dark:text-amber-100/90">
+                    {gmailInvalidGrant ? t("inboxGmailExpiredDesc") : t("inboxGmailNotConfiguredDesc")}
+                  </p>
                   <ul className="list-disc list-inside text-xs text-amber-900/80 dark:text-amber-100/80 space-y-0.5">
                     <li><code>GMAIL_CLIENT_ID</code></li>
                     <li><code>GMAIL_CLIENT_SECRET</code></li>
-                    <li><code>GMAIL_REFRESH_TOKEN</code></li>
+                    <li><code>GMAIL_REFRESH_TOKEN</code>{gmailInvalidGrant && <span className="ml-1">— {t("inboxGmailRegenerateNote")}</span>}</li>
                   </ul>
                   <a
-                    href="https://developers.google.com/gmail/api/quickstart/nodejs"
+                    href="https://developers.google.com/oauthplayground"
                     target="_blank"
                     rel="noreferrer"
                     className="inline-block underline text-amber-900 dark:text-amber-100 font-medium"
                     data-testid="link-gmail-setup"
                   >
-                    {t("inboxGmailSetupLink")}
+                    {gmailInvalidGrant ? t("inboxGmailRegenerateLink") : t("inboxGmailSetupLink")}
                   </a>
                 </div>
               </div>
             </CardContent>
           </Card>
         )}
-        {emailError && !gmailNotConfigured && (
+        {emailError && !showGmailIssue && (
           <Card className="mb-4 border-destructive/50">
             <CardContent className="p-4 flex items-start gap-3 text-sm">
               <AlertCircle className="h-5 w-5 text-destructive mt-0.5" />

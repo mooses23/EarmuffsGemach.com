@@ -2002,6 +2002,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.json(result);
     } catch (error: any) {
       console.error("Error fetching emails:", error);
+      const raw = String(error?.message || error?.response?.data?.error || "");
+      if (/invalid_grant/i.test(raw)) {
+        return res.status(401).json({
+          code: "gmail_invalid_grant",
+          message: "Gmail refresh token is invalid or expired. Generate a new GMAIL_REFRESH_TOKEN and update the environment variable.",
+        });
+      }
       res.status(500).json({ message: error.message || "Failed to fetch emails" });
     }
   });
