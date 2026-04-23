@@ -19,7 +19,7 @@ import {
   faqEntries, type FaqEntry, type InsertFaqEntry,
   knowledgeDocs, type KnowledgeDoc, type InsertKnowledgeDoc,
   replyExamples, type ReplyExample, type InsertReplyExample,
-  returnReminderEvents, type ReturnReminderEvent, type InsertReturnReminderEvent,
+  returnReminderEvents, type ReturnReminderEvent, type InsertReturnReminderEvent, type ReturnReminderEventWithSender,
   kbEmbeddings, type KbEmbedding, type InsertKbEmbedding,
   type KbSourceKind,
   type PayLaterStatus
@@ -462,11 +462,35 @@ export class DatabaseStorage implements IStorage {
     });
   }
 
-  async getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEvent[]> {
-    return db.select()
+  async getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEventWithSender[]> {
+    const rows = await db.select({
+      id: returnReminderEvents.id,
+      transactionId: returnReminderEvents.transactionId,
+      sentAt: returnReminderEvents.sentAt,
+      sentByUserId: returnReminderEvents.sentByUserId,
+      channel: returnReminderEvents.channel,
+      language: returnReminderEvents.language,
+      firstName: users.firstName,
+      lastName: users.lastName,
+    })
       .from(returnReminderEvents)
+      .leftJoin(users, eq(users.id, returnReminderEvents.sentByUserId))
       .where(eq(returnReminderEvents.transactionId, transactionId))
       .orderBy(desc(returnReminderEvents.sentAt));
+    return rows.map(r => {
+      const senderName = r.sentByUserId != null
+        ? `${r.firstName ?? ''} ${r.lastName ?? ''}`.trim() || null
+        : null;
+      return {
+        id: r.id,
+        transactionId: r.transactionId,
+        sentAt: r.sentAt,
+        sentByUserId: r.sentByUserId,
+        channel: r.channel,
+        language: r.language,
+        senderName,
+      };
+    });
   }
 
   // Contact operations

@@ -7,7 +7,7 @@ import { useOperatorAuth } from "@/hooks/use-operator-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
-import { Transaction, Location, HEADBAND_COLORS, InventoryByColor, ReturnReminderEvent } from "@shared/schema";
+import { Transaction, Location, HEADBAND_COLORS, InventoryByColor, ReturnReminderEventWithSender } from "@shared/schema";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -186,7 +186,7 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
   const reminderCount = tx.returnReminderCount ?? 0;
   const enabled = reminderCount > 0;
 
-  const { data, isLoading } = useQuery<{ events: ReturnReminderEvent[] }>({
+  const { data, isLoading } = useQuery<{ events: ReturnReminderEventWithSender[] }>({
     queryKey: ['/api/locations', locationId, 'transactions', tx.id, 'return-reminders'],
     queryFn: async () => {
       const res = await apiRequest(
@@ -227,6 +227,10 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
               <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.channel}</span>
               <span className="text-slate-500">·</span>
               <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.language}</span>
+              <span className="text-slate-500">·</span>
+              <span className="text-slate-300" data-testid={`reminder-history-sender-${ev.id}`}>
+                {t('reminderHistorySender').replace('{{name}}', ev.senderName ?? t('reminderHistorySenderUnknown'))}
+              </span>
             </li>
           ))}
         </ol>

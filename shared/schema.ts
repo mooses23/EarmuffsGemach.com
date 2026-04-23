@@ -272,6 +272,7 @@ export const insertReturnReminderEventSchema = createInsertSchema(returnReminder
 
 export type ReturnReminderEvent = typeof returnReminderEvents.$inferSelect;
 export type InsertReturnReminderEvent = z.infer<typeof insertReturnReminderEventSchema>;
+export type ReturnReminderEventWithSender = ReturnReminderEvent & { senderName: string | null };
 
 export const insertTransactionSchema = createInsertSchema(transactions).pick({
   locationId: true,

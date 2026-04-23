@@ -17,7 +17,7 @@ import {
   faqEntries, type FaqEntry, type InsertFaqEntry,
   knowledgeDocs, type KnowledgeDoc, type InsertKnowledgeDoc,
   replyExamples, type ReplyExample, type InsertReplyExample,
-  returnReminderEvents, type ReturnReminderEvent, type InsertReturnReminderEvent,
+  returnReminderEvents, type ReturnReminderEvent, type InsertReturnReminderEvent, type ReturnReminderEventWithSender,
   kbEmbeddings, type KbEmbedding, type InsertKbEmbedding,
   type KbSourceKind,
   type PayLaterStatus
@@ -119,7 +119,7 @@ export interface IStorage {
   updateTransaction(id: number, data: Partial<InsertTransaction>): Promise<Transaction>;
   markTransactionReturned(id: number, refundAmount?: number): Promise<Transaction>;
   recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null }): Promise<Transaction>;
-  getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEvent[]>;
+  getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEventWithSender[]>;
 
   // Contact operations
   getAllContacts(): Promise<Contact[]>;
@@ -2698,10 +2698,17 @@ export class MemStorage implements IStorage {
     return updated;
   }
 
-  async getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEvent[]> {
+  async getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEventWithSender[]> {
     return Array.from(this.returnReminderEventsMap.values())
       .filter(e => e.transactionId === transactionId)
-      .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime());
+      .sort((a, b) => new Date(b.sentAt).getTime() - new Date(a.sentAt).getTime())
+      .map(e => {
+        const user = e.sentByUserId != null ? this.users.get(e.sentByUserId) : undefined;
+        const senderName = user
+          ? `${user.firstName ?? ''} ${user.lastName ?? ''}`.trim() || null
+          : null;
+        return { ...e, senderName };
+      });
   }
 
   // Contact methods
