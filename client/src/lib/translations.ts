@@ -99,6 +99,8 @@ export const translations = {
     reminderCountLabel: "Reminders sent",
     reminderLastSentLabel: "Last reminder",
     reminderSentInline: "Reminder sent {{date}}",
+    borrowerReminderNotice: "The gemach sent you a return reminder on {{date}}. Please return the earmuffs as soon as you can.",
+    borrowerReminderContactPrompt: "Need to reach out?",
     sendReminder: "Send",
 
     // Apply page
@@ -1191,6 +1193,8 @@ export const translations = {
     reminderCountLabel: "תזכורות שנשלחו",
     reminderLastSentLabel: "תזכורת אחרונה",
     reminderSentInline: "תזכורת נשלחה ב-{{date}}",
+    borrowerReminderNotice: "הגמ״ח שלח לך תזכורת להחזרה בתאריך {{date}}. אנא החזר את האוזניות בהקדם האפשרי.",
+    borrowerReminderContactPrompt: "צריך ליצור קשר?",
     sendReminder: "שלח",
 
     // Apply page

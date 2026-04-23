@@ -28,8 +28,8 @@ import {
   CreditCard,
   Loader2,
   ArrowRight,
+  BellRing,
 } from "lucide-react";
-
 interface StatusPageData {
   id: number;
   status: string;
@@ -38,6 +38,11 @@ interface StatusPageData {
   currency: string;
   locationName?: string;
   locationAddress?: string;
+  locationPhone?: string;
+  locationEmail?: string;
+  isReturned?: boolean;
+  lastReturnReminderAt?: string | null;
+  returnReminderCount?: number;
   requiresAction: boolean;
   paymentIntentClientSecret?: string;
   publishableKey?: string;
@@ -200,6 +205,14 @@ function StripePaymentForm({
   );
 }
 
+function formatReminderDate(date: Date, language: 'en' | 'he'): string {
+  return date.toLocaleDateString(language === 'he' ? 'he-IL' : 'en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  });
+}
+
 function StatusPageContent({
   transactionId,
   token,
@@ -207,7 +220,7 @@ function StatusPageContent({
   transactionId: string;
   token: string;
 }) {
-  const { t } = useLanguage();
+  const { t, language } = useLanguage();
   const getStatusInfo = useStatusInfo();
   const [paymentSuccess, setPaymentSuccess] = useState(false);
   const [paymentError, setPaymentError] = useState<string | null>(null);
@@ -341,6 +354,55 @@ function StatusPageContent({
               <Alert>
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>{statusInfo.message}</AlertDescription>
+              </Alert>
+            )}
+
+            {!data.isReturned && data.lastReturnReminderAt && (
+              <Alert
+                className="border-amber-300 bg-amber-50"
+                data-testid="alert-borrower-reminder-sent"
+              >
+                <BellRing className="h-4 w-4 text-amber-600" />
+                <AlertDescription className="text-amber-900">
+                  <div className="font-medium">
+                    {t("borrowerReminderNotice").replace(
+                      "{{date}}",
+                      formatReminderDate(new Date(data.lastReturnReminderAt), language),
+                    )}
+                  </div>
+                  {(data.returnReminderCount ?? 0) > 1 && (
+                    <div className="text-xs mt-1 opacity-80">
+                      {t("reminderCountLabel")}: {data.returnReminderCount}
+                    </div>
+                  )}
+                  {(data.locationPhone || data.locationEmail) && (
+                    <div className="text-xs mt-2 opacity-90">
+                      {t("borrowerReminderContactPrompt")}
+                      {data.locationPhone && (
+                        <>
+                          {" "}
+                          <a
+                            href={`tel:${data.locationPhone.replace(/[^+\d]/g, "")}`}
+                            className="underline hover:no-underline"
+                            data-testid="link-borrower-reminder-phone"
+                          >
+                            {data.locationPhone}
+                          </a>
+                        </>
+                      )}
+                      {data.locationPhone && data.locationEmail && " · "}
+                      {data.locationEmail && (
+                        <a
+                          href={`mailto:${data.locationEmail}`}
+                          className="underline hover:no-underline"
+                          data-testid="link-borrower-reminder-email"
+                        >
+                          {data.locationEmail}
+                        </a>
+                      )}
+                    </div>
+                  )}
+                </AlertDescription>
               </Alert>
             )}
 
