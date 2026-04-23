@@ -32,7 +32,7 @@ export default function Home() {
           onClick={handleBannerClick}
           role="button"
           aria-expanded={showStory}
-          aria-label="Learn the story behind this organization"
+          aria-label={t('tributeAriaLabel')}
         >
           <div className="absolute inset-0 opacity-40">
             <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(251,191,36,0.15),transparent_70%)]"></div>
@@ -53,7 +53,7 @@ export default function Home() {
               className="text-xs text-amber-400/50 mt-0.5 font-sans tracking-widest uppercase"
               style={{ letterSpacing: '0.15em', transition: 'opacity 0.3s ease', opacity: showStory ? 0 : 1 }}
             >
-              · tap to read her story ·
+              {t('tapToReadStory')}
             </p>
           </div>
         </div>
@@ -87,17 +87,17 @@ export default function Home() {
                   </div>
 
                   <div className="relative px-6 py-6 md:px-10 md:py-8 space-y-3">
-                    <p className="font-serif text-sm md:text-base text-amber-100/90 leading-relaxed tracking-wide">
-                      Started by Rivka <span className="text-amber-300/80 text-xs align-super font-sans">A&quot;H</span>, this organization began with a simple conversation at a wedding about protecting babies' hearing.
+                    <p className="font-serif text-sm md:text-base text-amber-100/90 leading-relaxed tracking-wide" data-testid="text-tribute-para-1">
+                      {t('tributePara1')}
                     </p>
-                    <p className="font-serif text-sm md:text-base text-slate-300/75 leading-relaxed tracking-wide">
-                      Instead of leaving it as an idea, Rivka took action — starting with just one location. Today, the initiative has grown to over <span className="text-amber-200/90 font-medium">100 locations worldwide</span>, helping families in a meaningful and practical way.
+                    <p className="font-serif text-sm md:text-base text-slate-300/75 leading-relaxed tracking-wide" data-testid="text-tribute-para-2">
+                      {t('tributePara2')}
                     </p>
-                    <p className="font-serif text-sm md:text-base text-slate-300/75 leading-relaxed tracking-wide">
-                      She accomplished all of this while caring for her special needs child, reflecting her deep commitment to helping Klal Yisroel.
+                    <p className="font-serif text-sm md:text-base text-slate-300/75 leading-relaxed tracking-wide" data-testid="text-tribute-para-3">
+                      {t('tributePara3')}
                     </p>
-                    <p className="font-serif text-sm md:text-base text-amber-200/80 leading-relaxed tracking-wide italic">
-                      Her legacy continues to make a difference every day.
+                    <p className="font-serif text-sm md:text-base text-amber-200/80 leading-relaxed tracking-wide italic" data-testid="text-tribute-para-4">
+                      {t('tributePara4')}
                     </p>
                   </div>
                 </div>
