@@ -109,6 +109,12 @@ function formatDate(dateStr: string | Date): string {
   }
 }
 
+function safeDate(input: string | Date | null | undefined): string {
+  if (!input) return new Date().toISOString();
+  const d = input instanceof Date ? input : new Date(input);
+  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
+}
+
 function sanitizeHtml(body: string): string {
   const html = body.includes("<") ? body : body.replace(/\n/g, "<br/>");
   return DOMPurify.sanitize(html);
@@ -200,7 +206,7 @@ export default function AdminInbox() {
         subject: c.subject,
         body: c.message,
         snippet: c.message.slice(0, 140),
-        date: c.submittedAt ? new Date(c.submittedAt).toISOString() : new Date().toISOString(),
+        date: safeDate(c.submittedAt),
         isRead: !!c.isRead,
       });
     }
@@ -216,11 +222,15 @@ export default function AdminInbox() {
         subject: e.subject,
         body: e.body,
         snippet: e.snippet,
-        date: e.date ? new Date(e.date).toISOString() : new Date().toISOString(),
+        date: safeDate(e.date),
         isRead: e.isRead,
       });
     }
-    return list.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+    return list.sort((a, b) => {
+      const ta = new Date(a.date).getTime();
+      const tb = new Date(b.date).getTime();
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    });
   }, [contactsQuery.data, allEmails]);
 
   const filtered = unified.filter((it) => {
