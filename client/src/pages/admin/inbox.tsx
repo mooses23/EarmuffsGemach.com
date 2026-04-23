@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -141,11 +141,16 @@ export default function AdminInbox() {
     queryKey: ["/api/contact"],
   });
 
-  // First page of emails (subsequent pages fetched via Load More into emailPages)
-  const emailQueries = useQuery<EmailsResponse>({
-    queryKey: ["/api/admin/emails"],
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/emails?maxResults=25`, { credentials: "include" });
+  // Paginated emails (using infinite query for proper cache + refresh behavior)
+  const emailQueries = useInfiniteQuery<EmailsResponse>({
+    queryKey: ["/api/admin/emails", "infinite"],
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }) => {
+      const params = new URLSearchParams({ maxResults: "25" });
+      if (typeof pageParam === "string" && pageParam) {
+        params.set("pageToken", pageParam);
+      }
+      const res = await fetch(`/api/admin/emails?${params.toString()}`, { credentials: "include" });
       if (!res.ok) {
         let message = "Failed to load emails";
         try { message = (await res.json()).message || message; } catch {}
@@ -153,46 +158,32 @@ export default function AdminInbox() {
       }
       return res.json();
     },
+    getNextPageParam: (lastPage) => lastPage.nextPageToken ?? undefined,
   });
 
-  // Accumulated emails across pages
-  const [emailPages, setEmailPages] = useState<EmailsResponse[]>([]);
-  useEffect(() => {
-    if (emailQueries.data && emailPages.length === 0) {
-      setEmailPages([emailQueries.data]);
-    }
-  }, [emailQueries.data, emailPages.length]);
-
   const allEmails: GmailEmail[] = useMemo(() => {
-    const merged = emailPages.flatMap((p) => p.emails);
+    const merged = (emailQueries.data?.pages ?? []).flatMap((p) => p.emails);
     const ids = new Set<string>();
     return merged.filter((e) => {
       if (ids.has(e.id)) return false;
       ids.add(e.id);
       return true;
     });
-  }, [emailPages]);
+  }, [emailQueries.data]);
 
-  const nextPageToken = emailPages[emailPages.length - 1]?.nextPageToken;
-
-  const handleLoadMore = async () => {
-    if (!nextPageToken) return;
-    try {
-      const url = `/api/admin/emails?maxResults=25&pageToken=${encodeURIComponent(nextPageToken)}`;
-      const res = await fetch(url, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load more");
-      const data: EmailsResponse = await res.json();
-      setEmailPages((prev) => [...prev, data]);
-    } catch (e) {
-      toast({ title: t("error"), description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+  const handleLoadMore = () => {
+    if (emailQueries.hasNextPage && !emailQueries.isFetchingNextPage) {
+      emailQueries.fetchNextPage().catch((e) => {
+        toast({ title: t("error"), description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+      });
     }
   };
 
   const handleRefresh = async () => {
-    setEmailPages([]);
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["/api/contact"] }),
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/emails"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/emails/status"] }),
     ]);
   };
 
@@ -284,7 +275,7 @@ export default function AdminInbox() {
       setReplyText("");
       setSelected(null);
       qc.invalidateQueries({ queryKey: ["/api/contact"] });
-      qc.invalidateQueries({ queryKey: ["/api/admin/emails"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] });
     },
     onError: (err: unknown) =>
       toast({ title: t("error"), description: err instanceof Error ? err.message : t("failedToSendReply"), variant: "destructive" }),
@@ -319,7 +310,7 @@ export default function AdminInbox() {
     if (!item.isRead) {
       if (item.source === "email") {
         markEmailRead.mutate(String(item.id), {
-          onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/admin/emails"] }),
+          onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] }),
         });
       } else {
         markContactRead.mutate({ id: Number(item.id), isRead: true });
@@ -370,7 +361,7 @@ export default function AdminInbox() {
       }
       markEmailRead.mutate(String(item.id), {
         onSuccess: () => {
-          qc.invalidateQueries({ queryKey: ["/api/admin/emails"] });
+          qc.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] });
           setSelected({ ...item, isRead: true });
         },
       });
@@ -643,7 +634,7 @@ export default function AdminInbox() {
   }
 
   // ============ LIST VIEW ============
-  const isLoading = contactsQuery.isLoading || (emailQueries.isLoading && emailPages.length === 0);
+  const isLoading = contactsQuery.isLoading || emailQueries.isLoading;
   const emailErrorRaw = emailQueries.error;
   const emailError = emailQueries.isError
     ? (emailErrorRaw instanceof Error ? emailErrorRaw.message : String(emailErrorRaw))
@@ -823,9 +814,9 @@ export default function AdminInbox() {
           </CardContent>
         </Card>
 
-        {nextPageToken && (
+        {emailQueries.hasNextPage && (
           <div className="flex justify-center mt-4">
-            <Button variant="outline" onClick={handleLoadMore} disabled={emailQueries.isFetching} data-testid="button-load-more">
+            <Button variant="outline" onClick={handleLoadMore} disabled={emailQueries.isFetchingNextPage} data-testid="button-load-more">
               <ChevronDown className="h-4 w-4 mr-2" />
               {t("inboxLoadMore")}
             </Button>
