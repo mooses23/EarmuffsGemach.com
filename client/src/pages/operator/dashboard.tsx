@@ -193,7 +193,7 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
 
   const mutation = useMutation({
     mutationFn: async () => {
-      return apiRequest('POST', `/api/locations/${locationId}/transactions/${tx.id}/return-reminder`, { language });
+      return apiRequest('POST', `/api/locations/${locationId}/transactions/${tx.id}/return-reminder`, {});
     },
     onSuccess: () => {
       toast({ title: t('reminderSent'), description: t('reminderSentToast') });
@@ -310,6 +310,13 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
                     <div className="text-xs text-slate-400">
                       {formatLocalizedDate(new Date(tx.borrowDate), language)}
                     </div>
+                    {!tx.isReturned && tx.lastReturnReminderAt && (
+                      <div className="text-xs text-amber-300 mt-0.5" data-testid={`text-reminder-sent-${tx.id}`}>
+                        <BellRing className="inline h-3 w-3 mr-1 -mt-0.5" />
+                        {t('reminderSentInline').replace('{{date}}', formatLocalizedDate(new Date(tx.lastReturnReminderAt), language))}
+                        {(tx.returnReminderCount ?? 0) > 1 && ` · ×${tx.returnReminderCount}`}
+                      </div>
+                    )}
                   </div>
                 </div>
                 <div className="flex items-center gap-3 sm:flex-row-reverse">

@@ -96,6 +96,7 @@ export const translations = {
     reminderAlreadyReturnedTooltip: "This loan is already marked returned",
     reminderCountLabel: "Reminders sent",
     reminderLastSentLabel: "Last reminder",
+    reminderSentInline: "Reminder sent {{date}}",
     sendReminder: "Send",
 
     // Apply page
@@ -1185,6 +1186,7 @@ export const translations = {
     reminderAlreadyReturnedTooltip: "ההשאלה הזו כבר סומנה כהוחזרה",
     reminderCountLabel: "תזכורות שנשלחו",
     reminderLastSentLabel: "תזכורת אחרונה",
+    reminderSentInline: "תזכורת נשלחה ב-{{date}}",
     sendReminder: "שלח",
 
     // Apply page

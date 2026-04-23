@@ -2264,8 +2264,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const location = await storage.getLocation(locationId);
       if (!location) return res.status(404).json({ message: "Location not found" });
 
-      const language: 'en' | 'he' = (req.body?.language === 'he') ? 'he' : 'en';
-      const locationName = (language === 'he' && (location as any).nameHe) ? (location as any).nameHe : location.name;
+      // Choose reminder language from canonical location data: if the location
+      // has a Hebrew name populated, treat it as a Hebrew-speaking gemach.
+      const language: 'en' | 'he' = location.nameHe ? 'he' : 'en';
+      const locationName = (language === 'he' && location.nameHe) ? location.nameHe : location.name;
 
       try {
         await sendReturnReminderEmail({
