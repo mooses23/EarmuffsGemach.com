@@ -2238,9 +2238,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
       await markAsUnread(req.params.id);
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error marking email as unread:", error);
-      res.status(500).json({ message: error.message || "Failed to mark as unread" });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to mark as unread";
+      console.error("Error marking email as unread:", msg);
+      res.status(500).json({ message: msg });
     }
   });
 
@@ -2282,9 +2283,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
       await trashEmail(req.params.id);
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error trashing email:", error);
-      res.status(500).json({ message: error.message || "Failed to trash" });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to trash";
+      console.error("Error trashing email:", msg);
+      res.status(500).json({ message: msg });
     }
   });
 
@@ -2296,9 +2298,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
       await untrashEmail(req.params.id);
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error untrashing email:", error);
-      res.status(500).json({ message: error.message || "Failed to restore" });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to restore";
+      console.error("Error untrashing email:", msg);
+      res.status(500).json({ message: msg });
     }
   });
 
@@ -2310,9 +2313,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
       await markAsSpam(req.params.id);
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error marking email as spam:", error);
-      res.status(500).json({ message: error.message || "Failed to mark as spam" });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to mark as spam";
+      console.error("Error marking email as spam:", msg);
+      res.status(500).json({ message: msg });
     }
   });
 

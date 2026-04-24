@@ -13,6 +13,9 @@ const SPAM_TOKENS = [
 ];
 
 const URL_RE = /https?:\/\/[^\s)]+/gi;
+// Non-global twin used with `.test()` so we don't get bitten by global-regex
+// `lastIndex` statefulness between calls.
+const URL_TEST_RE = /https?:\/\/[^\s)]+/i;
 const EMAIL_RE = /[\w.+-]+@[\w-]+\.[\w.-]+/g;
 const HEBREW_LATIN_RE = /[A-Za-z\u0590-\u05FF]/;
 
@@ -93,7 +96,7 @@ export function scoreContactSpam(input: {
   }
 
   // 6) Name looks like a URL (common spam pattern)
-  if (URL_RE.test(name)) {
+  if (URL_TEST_RE.test(name)) {
     score += 2;
     reasons.push('name field contains a URL');
   }

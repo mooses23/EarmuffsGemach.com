@@ -192,6 +192,9 @@ export default function AdminInbox() {
 
   const invalidateEmailLists = () => {
     qc.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] });
+    // Folder-chip backlog counts also depend on the just-changed Gmail label,
+    // so refresh them immediately rather than waiting for the 60s poll.
+    qc.invalidateQueries({ queryKey: ["/api/admin/emails/labels"] });
   };
 
   const allEmails: GmailEmail[] = useMemo(() => {
