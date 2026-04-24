@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { motion, useMotionValue, useTransform, type PanInfo } from "framer-motion";
+import { useEffect, useRef, useState } from "react";
+import { motion, useMotionValue, useTransform, animate, type PanInfo } from "framer-motion";
 import { type LucideIcon } from "lucide-react";
 
 export interface SwipeAction {
@@ -18,9 +18,11 @@ interface SwipeableRowProps {
   testId?: string;
 }
 
-const REVEAL_THRESHOLD = 64;
-const COMMIT_THRESHOLD = 180;
-const LONG_THRESHOLD = 280;
+const REVEAL = 72;
+const COMMIT = 160;
+const LONG = 260;
+
+type RevealState = "closed" | "right" | "left";
 
 export function SwipeableRow({
   children,
@@ -30,58 +32,57 @@ export function SwipeableRow({
   disabled = false,
   testId,
 }: SwipeableRowProps) {
-  // Physical direction mapping per spec — kept identical in LTR and RTL so
-  // muscle memory carries across locales (right = mark unread, left = archive,
-  // long left = delete).
   const x = useMotionValue(0);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [committing, setCommitting] = useState<"left" | "right" | "leftLong" | null>(null);
+  const [reveal, setReveal] = useState<RevealState>("closed");
 
-  const rightBg = useTransform(x, [0, REVEAL_THRESHOLD, COMMIT_THRESHOLD], [0, 0.7, 1]);
-  const leftBg = useTransform(x, [-COMMIT_THRESHOLD, -REVEAL_THRESHOLD, 0], [1, 0.7, 0]);
-  const leftLongBg = useTransform(x, [-LONG_THRESHOLD, -COMMIT_THRESHOLD, -REVEAL_THRESHOLD], [1, 0, 0]);
+  const rightBg = useTransform(x, [0, REVEAL, COMMIT], [0, 0.85, 1]);
+  const leftBg = useTransform(x, [-COMMIT, -REVEAL, 0], [1, 0.85, 0]);
+  const leftLongBg = useTransform(x, [-LONG, -COMMIT, -REVEAL], [1, 0, 0]);
+
+  const close = () => {
+    animate(x, 0, { type: "spring", stiffness: 500, damping: 40 });
+    setReveal("closed");
+  };
+
+  const commit = (action: SwipeAction) => {
+    action.onCommit();
+    x.set(0);
+    setReveal("closed");
+  };
 
   const handleDragEnd = (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
+    if (disabled) return close();
     const offset = info.offset.x;
-    if (disabled) {
-      x.set(0);
+    if (offset >= COMMIT && rightAction) return commit(rightAction);
+    if (offset <= -LONG && leftLongAction) return commit(leftLongAction);
+    if (offset <= -COMMIT && leftAction) return commit(leftAction);
+    // Partial-reveal snap so the user can tap the revealed action button or
+    // tap outside (overlay) to cancel — the iOS Mail interaction model.
+    if (offset >= REVEAL && rightAction) {
+      animate(x, REVEAL + 24, { type: "spring", stiffness: 500, damping: 40 });
+      setReveal("right");
       return;
     }
-    if (offset >= COMMIT_THRESHOLD && rightAction) {
-      setCommitting("right");
-      const width = containerRef.current?.offsetWidth || 600;
-      void Promise.resolve()
-        .then(() => {
-          x.set(width);
-        })
-        .then(() => {
-          window.setTimeout(() => {
-            try { rightAction.onCommit(); } finally { x.set(0); setCommitting(null); }
-          }, 160);
-        });
+    if (offset <= -REVEAL && (leftAction || leftLongAction)) {
+      animate(x, -(REVEAL + 24), { type: "spring", stiffness: 500, damping: 40 });
+      setReveal("left");
       return;
     }
-    if (offset <= -LONG_THRESHOLD && leftLongAction) {
-      setCommitting("leftLong");
-      const width = containerRef.current?.offsetWidth || 600;
-      x.set(-width);
-      window.setTimeout(() => {
-        try { leftLongAction.onCommit(); } finally { x.set(0); setCommitting(null); }
-      }, 160);
-      return;
-    }
-    if (offset <= -COMMIT_THRESHOLD && leftAction) {
-      setCommitting("left");
-      const width = containerRef.current?.offsetWidth || 600;
-      x.set(-width);
-      window.setTimeout(() => {
-        try { leftAction.onCommit(); } finally { x.set(0); setCommitting(null); }
-      }, 160);
-      return;
-    }
-    // Snap back to neutral
-    x.set(0);
+    close();
   };
+
+  // Tap-outside to cancel the partial reveal.
+  useEffect(() => {
+    if (reveal === "closed") return;
+    const onPointer = (event: MouseEvent | TouchEvent) => {
+      if (!containerRef.current) return;
+      if (!containerRef.current.contains(event.target as Node)) close();
+    };
+    document.addEventListener("pointerdown", onPointer as EventListener, true);
+    return () => document.removeEventListener("pointerdown", onPointer as EventListener, true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reveal]);
 
   const RightIcon = rightAction?.icon;
   const LeftIcon = leftAction?.icon;
@@ -89,32 +90,40 @@ export function SwipeableRow({
 
   return (
     <div ref={containerRef} className="relative overflow-hidden" data-testid={testId}>
-      {/* Right-swipe action (revealed when dragging right) */}
       {rightAction && (
         <motion.div
           className={`absolute inset-y-0 left-0 flex items-center justify-start pl-6 ${rightAction.color}`}
           style={{ opacity: rightBg, width: "100%" }}
           aria-hidden
-          data-testid={testId ? `${testId}-action-right` : undefined}
         >
-          <div className="flex items-center gap-2 text-white">
+          <button
+            type="button"
+            onClick={() => commit(rightAction)}
+            className="flex items-center gap-2 text-white"
+            data-testid={testId ? `${testId}-action-right` : undefined}
+            tabIndex={reveal === "right" ? 0 : -1}
+          >
             {RightIcon ? <RightIcon className="h-5 w-5" /> : null}
             <span className="text-sm font-semibold">{rightAction.label}</span>
-          </div>
+          </button>
         </motion.div>
       )}
-      {/* Left-swipe actions (revealed when dragging left) */}
       {leftAction && (
         <motion.div
           className={`absolute inset-y-0 right-0 flex items-center justify-end pr-6 ${leftAction.color}`}
           style={{ opacity: leftBg, width: "100%" }}
           aria-hidden
-          data-testid={testId ? `${testId}-action-left` : undefined}
         >
-          <div className="flex items-center gap-2 text-white">
+          <button
+            type="button"
+            onClick={() => commit(leftAction)}
+            className="flex items-center gap-2 text-white"
+            data-testid={testId ? `${testId}-action-left` : undefined}
+            tabIndex={reveal === "left" ? 0 : -1}
+          >
             {LeftIcon ? <LeftIcon className="h-5 w-5" /> : null}
             <span className="text-sm font-semibold">{leftAction.label}</span>
-          </div>
+          </button>
         </motion.div>
       )}
       {leftLongAction && (
@@ -134,11 +143,12 @@ export function SwipeableRow({
       <motion.div
         drag={disabled ? false : "x"}
         dragDirectionLock
-        dragConstraints={{ left: -LONG_THRESHOLD - 40, right: COMMIT_THRESHOLD + 40 }}
+        dragConstraints={{ left: -LONG - 40, right: COMMIT + 40 }}
         dragElastic={0.15}
         style={{ x, touchAction: "pan-y" }}
         onDragEnd={handleDragEnd}
-        className={`relative bg-card ${committing ? "pointer-events-none" : ""}`}
+        onClick={() => { if (reveal !== "closed") close(); }}
+        className="relative bg-card"
       >
         {children}
       </motion.div>

@@ -43,7 +43,6 @@ import {
   ShieldAlert,
   ShieldCheck,
   Undo2,
-  SlidersHorizontal,
 } from "lucide-react";
 import { SwipeableRow } from "@/components/admin/SwipeableRow";
 import { GlossaryContent } from "./glossary";
@@ -143,7 +142,6 @@ export default function AdminInbox() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
   const [folder, setFolder] = useState<Folder>("inbox");
-  const [showFilters, setShowFilters] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [replySubject, setReplySubject] = useState("");
   const [translations, setTranslations] = useState<Record<string, string>>({});
@@ -1231,36 +1229,21 @@ export default function AdminInbox() {
               </button>
             );
           })}
-          <div className="ml-auto">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setShowFilters((v) => !v)}
-              data-testid="button-toggle-filters"
-            >
-              <SlidersHorizontal className="h-4 w-4 mr-1.5" />
-              {showFilters ? t("inboxFiltersHide") : t("inboxFiltersShow")}
-            </Button>
-          </div>
         </div>
 
-        {/* Search + secondary filters (collapsible to keep the chrome tidy) */}
+        {/* Search + source/read filters in one always-visible compact row. */}
         <div className="flex flex-col gap-3 mb-6">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-            <Input
-              placeholder={t("inboxSearchPlaceholder")}
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="pl-10"
-              data-testid="input-search"
-            />
-          </div>
-          {/* Swipe-discoverability hint (desktop sees a tooltip-like line; on touch it just reads as a tip) */}
-          <p className="text-xs text-muted-foreground italic" data-testid="text-swipe-hint">
-            {t("inboxSwipeHint")}
-          </p>
-          {showFilters && (
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative flex-1 min-w-[180px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={t("inboxSearchPlaceholder")}
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="pl-10"
+                data-testid="input-search"
+              />
+            </div>
             <div className="flex gap-2 flex-wrap items-center" data-testid="filters-secondary">
               {(["all", "email", "form"] as SourceFilter[]).map((s) => (
                 <Button
@@ -1296,7 +1279,10 @@ export default function AdminInbox() {
                 </Button>
               )}
             </div>
-          )}
+          </div>
+          <p className="text-xs text-muted-foreground italic" data-testid="text-swipe-hint">
+            {t("inboxSwipeHint")}
+          </p>
         </div>
 
         {showGmailIssue && (
