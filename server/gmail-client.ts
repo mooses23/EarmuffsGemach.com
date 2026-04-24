@@ -343,6 +343,18 @@ export async function archiveEmail(messageId: string): Promise<void> {
   });
 }
 
+export async function unarchiveEmail(messageId: string): Promise<void> {
+  // Re-add INBOX label so a previously-archived message reappears in the inbox.
+  const gmail = await getUncachableGmailClient();
+  await gmail.users.messages.modify({
+    userId: 'me',
+    id: messageId,
+    requestBody: {
+      addLabelIds: ['INBOX']
+    }
+  });
+}
+
 export async function trashEmail(messageId: string): Promise<void> {
   const gmail = await getUncachableGmailClient();
   await gmail.users.messages.trash({

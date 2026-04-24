@@ -338,6 +338,10 @@ export default function AdminInbox() {
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/untrash`),
     onSuccess: () => invalidateEmailLists(),
   });
+  const unarchiveEmailMut = useMutation({
+    mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/unarchive`),
+    onSuccess: () => invalidateEmailLists(),
+  });
   const spamEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/spam`),
     onSuccess: () => invalidateEmailLists(),
@@ -374,9 +378,25 @@ export default function AdminInbox() {
       ),
     });
   };
+  const performUnarchive = (item: UnifiedItem) => {
+    const success = () => toast({ title: t("inboxRestoreSuccess") });
+    const failure = () => toast({ title: t("inboxRestoreFailed"), variant: "destructive" });
+    if (item.source === "email") {
+      // Re-add INBOX label so the message reappears in the inbox folder.
+      unarchiveEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
+    } else {
+      updateContactFlags.mutate(
+        { id: Number(item.id), isArchived: false },
+        { onSuccess: success, onError: failure }
+      );
+    }
+  };
   const performArchive = (item: UnifiedItem) => {
     const failure = () => toast({ title: t("inboxArchiveFailed"), variant: "destructive" });
-    const success = () => undoToast(t("inboxArchiveSuccess"), () => performRestore(item));
+    // Undo archive uses the dedicated unarchive path (re-add INBOX label for
+    // Gmail; clear isArchived for contact-form messages). performRestore would
+    // call untrash, which is wrong for archived-but-not-trashed messages.
+    const success = () => undoToast(t("inboxArchiveSuccess"), () => performUnarchive(item));
     if (item.source === "email") {
       archiveEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
     } else {
@@ -1363,7 +1383,7 @@ export default function AdminInbox() {
                       : { label: t("inboxSwipeMarkUnread"), icon: EyeOff, color: "bg-blue-500", onCommit: () => performMarkUnread(it) };
                   const leftAction =
                     folder === "inbox"
-                      ? { label: t("inboxSwipeArchive"), icon: Archive, color: "bg-amber-600", onCommit: () => performArchive(it) }
+                      ? { label: t("inboxSwipeArchive"), icon: Archive, color: "bg-gray-500", onCommit: () => performArchive(it) }
                       : undefined;
                   const leftLongAction =
                     folder === "trash"
@@ -1376,7 +1396,6 @@ export default function AdminInbox() {
                       rightAction={rightAction}
                       leftAction={leftAction}
                       leftLongAction={leftLongAction}
-                      isRtl={language === "he"}
                     >
                       <button
                         type="button"

@@ -12,7 +12,7 @@ import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
 import { PayLaterService } from "./payLaterService.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
-import { listEmails, getEmail, markAsRead, markAsUnread, archiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, type GmailListMode } from "./gmail-client.js";
+import { listEmails, getEmail, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, type GmailListMode } from "./gmail-client.js";
 import { scoreContactSpam } from "./spam-heuristic.js";
 import {
   generateEmailResponse, translateText, generateWelcomeOpener,
@@ -2246,9 +2246,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
       await archiveEmail(req.params.id);
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error archiving email:", error);
-      res.status(500).json({ message: error.message || "Failed to archive" });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to archive";
+      console.error("Error archiving email:", msg);
+      res.status(500).json({ message: msg });
+    }
+  });
+
+  // Undo archive: re-add INBOX label so the message reappears in the inbox.
+  app.post("/api/admin/emails/:id/unarchive", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
+      const user = req.user as Express.User;
+      if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
+      await unarchiveEmail(req.params.id);
+      res.json({ success: true });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to unarchive";
+      console.error("Error unarchiving email:", msg);
+      res.status(500).json({ message: msg });
     }
   });
 

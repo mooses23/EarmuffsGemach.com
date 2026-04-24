@@ -16,13 +16,6 @@ interface SwipeableRowProps {
   leftLongAction?: SwipeAction;
   disabled?: boolean;
   testId?: string;
-  /**
-   * When true, the gesture mapping is mirrored so that "trailing-edge" actions
-   * (visually reading-end) keep their semantics in RTL languages (Hebrew).
-   * The caller passes its own actions; SwipeableRow only flips physical
-   * left/right wiring under the hood.
-   */
-  isRtl?: boolean;
 }
 
 const REVEAL_THRESHOLD = 64;
@@ -31,21 +24,15 @@ const LONG_THRESHOLD = 280;
 
 export function SwipeableRow({
   children,
-  rightAction: rightActionProp,
-  leftAction: leftActionProp,
-  leftLongAction: leftLongActionProp,
+  rightAction,
+  leftAction,
+  leftLongAction,
   disabled = false,
   testId,
-  isRtl = false,
 }: SwipeableRowProps) {
-  // In RTL the user's "primary" gesture-end is on the left, so we mirror
-  // the wiring: the action they tagged as `rightAction` (semantically the
-  // forward/positive action like "mark unread") becomes the physical
-  // left-revealed action, and vice versa. Long-left stays paired with the
-  // physical "left" gesture so that the destructive escalation feels the same.
-  const rightAction = isRtl ? leftActionProp : rightActionProp;
-  const leftAction = isRtl ? rightActionProp : leftActionProp;
-  const leftLongAction = leftLongActionProp; // Destructive escalation always on the destructive-side (left for LTR, mirrored automatically by direction).
+  // Physical direction mapping per spec — kept identical in LTR and RTL so
+  // muscle memory carries across locales (right = mark unread, left = archive,
+  // long left = delete).
   const x = useMotionValue(0);
   const containerRef = useRef<HTMLDivElement>(null);
   const [committing, setCommitting] = useState<"left" | "right" | "leftLong" | null>(null);
