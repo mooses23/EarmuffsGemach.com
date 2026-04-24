@@ -201,7 +201,16 @@ export default function AdminInbox() {
     return String(item.id);
   };
   const lookupReplied = (item: UnifiedItem): string | null => {
-    return repliedRefMap.get(`${item.source}:${replyRefForItem(item)}`) || null;
+    // Primary lookup uses the current key (threadId for email). Falls back
+    // to the legacy message-id key so historical reply_example rows captured
+    // before threadId became the standard still mark messages as replied.
+    const primary = repliedRefMap.get(`${item.source}:${replyRefForItem(item)}`);
+    if (primary !== undefined) return primary || ""; // empty string => "replied, no exact date"
+    if (item.source === "email") {
+      const legacy = repliedRefMap.get(`email:${String(item.id)}`);
+      if (legacy !== undefined) return legacy || "";
+    }
+    return null;
   };
 
   // Paginated emails (using infinite query for proper cache + refresh behavior).
@@ -663,8 +672,17 @@ export default function AdminInbox() {
       // are keyed by Gmail threadId so the entire conversation gets marked.
       qc.invalidateQueries({ queryKey: ["/api/admin/reply-examples/refs"] });
       if (selected) {
+        // Use a prefix-style invalidation (predicate) so any per-message
+        // history query for this conversation is refreshed regardless of
+        // its trailing legacyMessageId cache segment.
         qc.invalidateQueries({
-          queryKey: ["/api/admin/reply-examples/by-ref", selected.source, replyRefForItem(selected)],
+          predicate: (q) => {
+            const key = q.queryKey;
+            return Array.isArray(key)
+              && key[0] === "/api/admin/reply-examples/by-ref"
+              && key[1] === selected.source
+              && key[2] === replyRefForItem(selected);
+          },
         });
       }
     },
@@ -978,7 +996,10 @@ export default function AdminInbox() {
                   <div className="flex items-center gap-2 flex-shrink-0">
                     {(() => {
                       const repliedAt = lookupReplied(selected);
-                      if (!repliedAt) return null;
+                      if (repliedAt === null) return null;
+                      const label = repliedAt
+                        ? t("inboxRepliedOn").replace("{date}", formatDate(repliedAt))
+                        : t("inboxReplied");
                       return (
                         <Badge
                           variant="outline"
@@ -986,7 +1007,7 @@ export default function AdminInbox() {
                           data-testid="badge-replied-detail"
                         >
                           <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                          {t("inboxRepliedOn").replace("{date}", formatDate(repliedAt))}
+                          {label}
                         </Badge>
                       );
                     })()}
@@ -1040,7 +1061,12 @@ export default function AdminInbox() {
             </CardContent>
           </Card>
 
-          <SentRepliesPanel item={selected} t={t} sourceRef={replyRefForItem(selected)} />
+          <SentRepliesPanel
+            item={selected}
+            t={t}
+            sourceRef={replyRefForItem(selected)}
+            legacyMessageId={selected.source === "email" ? String(selected.id) : undefined}
+          />
 
           <Card>
             <CardHeader>
@@ -1654,17 +1680,20 @@ export default function AdminInbox() {
                                 // state is still visible in the detail view.
                                 if (folder === "spam" || folder === "trash") return null;
                                 const repliedAt = lookupReplied(it);
-                                if (!repliedAt) return null;
+                                if (repliedAt === null) return null;
+                                const dateLabel = repliedAt ? formatDate(repliedAt) : "";
                                 return (
                                   <Badge
                                     variant="outline"
                                     className="text-[10px] py-0 h-5 flex-shrink-0 border-green-600 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300 dark:border-green-700 font-semibold gap-1"
                                     data-testid={`badge-replied-${it.key}`}
-                                    title={t("inboxRepliedOn").replace("{date}", formatDate(repliedAt))}
+                                    title={dateLabel ? t("inboxRepliedOn").replace("{date}", dateLabel) : t("inboxReplied")}
                                   >
                                     <CheckCircle2 className="h-3 w-3" />
                                     <span>{t("inboxReplied")}</span>
-                                    <span className="font-normal opacity-80">· {formatDate(repliedAt)}</span>
+                                    {dateLabel && (
+                                      <span className="font-normal opacity-80">· {dateLabel}</span>
+                                    )}
                                   </Badge>
                                 );
                               })()}
@@ -1905,16 +1934,21 @@ function SentRepliesPanel({
   item,
   t,
   sourceRef,
+  legacyMessageId,
 }: {
   item: UnifiedItem;
   t: (k: TranslationKey) => string;
   sourceRef: string;
+  legacyMessageId?: string;
 }) {
   const [open, setOpen] = useState(true);
   const query = useQuery<SentReplyEntry[]>({
-    queryKey: ["/api/admin/reply-examples/by-ref", item.source, sourceRef],
+    queryKey: ["/api/admin/reply-examples/by-ref", item.source, sourceRef, legacyMessageId ?? null],
     queryFn: async () => {
       const params = new URLSearchParams({ sourceType: item.source, sourceRef });
+      if (legacyMessageId && legacyMessageId !== sourceRef) {
+        params.set("legacyMessageId", legacyMessageId);
+      }
       const res = await fetch(`/api/admin/reply-examples/by-ref?${params.toString()}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed to load reply history");
       return res.json();

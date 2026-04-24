@@ -12,7 +12,7 @@ import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
 import { PayLaterService } from "./payLaterService.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
-import { listEmails, getEmail, getThreadMessages, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, type GmailListMode } from "./gmail-client.js";
+import { listEmails, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, type GmailListMode } from "./gmail-client.js";
 import { scoreContactSpam } from "./spam-heuristic.js";
 import {
   generateEmailResponse, translateText, generateWelcomeOpener,
@@ -2652,12 +2652,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
-  // Lightweight: which messages already have at least one saved reply?
-  // Returns one row per (sourceType, sourceRef) with the most-recent reply
-  // timestamp, so the inbox list can mark answered rows without N+1 lookups.
+  // Which inbox items have already been replied to? Returns one row per
+  // (sourceType, sourceRef). For email, sourceRef is the Gmail threadId.
+  // Combines two sources so the list badge stays accurate even when the
+  // admin replies directly in Gmail:
+  //   1. Saved reply_examples (this app's own sends, plus any captured)
+  //   2. Gmail threads with at least one SENT message (label SENT) — best
+  //      effort, capped to recent threads to keep the call cheap. Each
+  //      gmail-only entry has lastRepliedAt = "" so the UI knows to render
+  //      the badge without an exact date (the precise per-message dates
+  //      appear in the detail view's Sent replies panel).
   app.get("/api/admin/reply-examples/refs", requireAdminMW, async (_req, res) => {
     try {
-      res.json(await storage.getReplyExampleRefs());
+      const saved = await storage.getReplyExampleRefs();
+      const seen = new Set(saved.map((r) => `${r.sourceType}:${r.sourceRef}`));
+      const merged = [...saved];
+      try {
+        const gmailConfigured = getGmailConfigStatus();
+        if (gmailConfigured.configured) {
+          const sentThreadIds = await listSentThreadIds(500);
+          for (const tid of sentThreadIds) {
+            const key = `email:${tid}`;
+            if (!seen.has(key)) {
+              merged.push({ sourceType: "email", sourceRef: tid, lastRepliedAt: "" });
+              seen.add(key);
+            }
+          }
+        }
+      } catch (gmailErr) {
+        console.warn("Failed to merge Gmail SENT thread refs (non-fatal):",
+          gmailErr instanceof Error ? gmailErr.message : String(gmailErr));
+      }
+      res.json(merged);
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
@@ -2689,7 +2715,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       const saved = await storage.getReplyExamplesByRef(sourceType, sourceRef);
-      const savedEntries: SentReplyEntry[] = saved.map((r) => ({
+      // Backward compatibility: older email reply records were keyed by the
+      // Gmail message id (not threadId). When sourceType is email and a
+      // legacyMessageId hint is supplied, also pull those rows so admins
+      // don't lose visibility into pre-migration replies.
+      const legacyMessageId = String(req.query.legacyMessageId || "").trim();
+      let legacy: typeof saved = [];
+      if (sourceType === "email" && legacyMessageId && legacyMessageId !== sourceRef) {
+        try {
+          legacy = await storage.getReplyExamplesByRef("email", legacyMessageId);
+        } catch (legacyErr) {
+          console.warn("Legacy reply-example lookup failed (non-fatal):",
+            legacyErr instanceof Error ? legacyErr.message : String(legacyErr));
+        }
+      }
+      const savedEntries: SentReplyEntry[] = [...saved, ...legacy].map((r) => ({
         id: `saved:${r.id}`,
         source: 'saved',
         sentReply: r.sentReply,

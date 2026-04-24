@@ -283,6 +283,34 @@ export async function getEmail(messageId: string): Promise<EmailMessage | null> 
   }
 }
 
+// Returns the IDs of all Gmail threads that contain at least one message
+// sent by us (label SENT). Used to mark inbox rows as "Replied" even when
+// the reply was composed directly in Gmail (not via this app). Capped to
+// `maxThreads` most-recent threads to keep the call cheap; this is more
+// than enough for a typical inbox view since unanswered older threads are
+// rare and the badge is informational.
+export async function listSentThreadIds(maxThreads: number = 500): Promise<string[]> {
+  const gmail = await getUncachableGmailClient();
+  const ids = new Set<string>();
+  let pageToken: string | undefined;
+  let safety = 5; // hard ceiling: 5 pages * 100 = 500 threads
+  while (safety-- > 0) {
+    const resp = await gmail.users.threads.list({
+      userId: 'me',
+      q: 'in:sent',
+      maxResults: Math.min(100, maxThreads - ids.size),
+      pageToken,
+    });
+    for (const t of resp.data.threads || []) {
+      if (t.id) ids.add(t.id);
+      if (ids.size >= maxThreads) return Array.from(ids);
+    }
+    pageToken = resp.data.nextPageToken || undefined;
+    if (!pageToken) break;
+  }
+  return Array.from(ids);
+}
+
 export async function getThreadMessages(threadId: string, max: number = 6): Promise<EmailMessage[]> {
   const gmail = await getUncachableGmailClient();
   try {
