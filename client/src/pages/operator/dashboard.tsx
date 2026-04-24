@@ -185,6 +185,7 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
   const { t, language } = useLanguage();
   const reminderCount = tx.returnReminderCount ?? 0;
   const enabled = reminderCount > 0;
+  const [senderFilter, setSenderFilter] = useState<string>('__all__');
 
   const { data, isLoading } = useQuery<{ events: ReturnReminderEventWithSender[] }>({
     queryKey: ['/api/locations', locationId, 'transactions', tx.id, 'return-reminders'],
@@ -197,6 +198,24 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
     },
     enabled,
   });
+
+  const events = data?.events ?? [];
+  const unknownLabel = t('reminderHistorySenderUnknown');
+  const senderOptions = Array.from(
+    new Map(
+      events.map((ev) => {
+        const key = ev.sentByUserId != null ? `id:${ev.sentByUserId}` : `name:${ev.senderName ?? '__unknown__'}`;
+        const label = ev.senderName ?? unknownLabel;
+        return [key, { key, label }];
+      }),
+    ).values(),
+  );
+  const filteredEvents = senderFilter === '__all__'
+    ? events
+    : events.filter((ev) => {
+        const key = ev.sentByUserId != null ? `id:${ev.sentByUserId}` : `name:${ev.senderName ?? '__unknown__'}`;
+        return key === senderFilter;
+      });
 
   return (
     <div className="rounded-lg border border-white/10 bg-white/5 p-3" data-testid={`reminder-history-${tx.id}`}>
@@ -211,29 +230,69 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
         <p className="text-xs text-slate-400">{t('reminderHistoryEmpty')}</p>
       ) : isLoading ? (
         <p className="text-xs text-slate-400">{t('reminderHistoryLoading')}</p>
-      ) : (data?.events ?? []).length === 0 ? (
+      ) : events.length === 0 ? (
         <p className="text-xs text-slate-400">{t('reminderHistoryEmpty')}</p>
       ) : (
-        <ol className="space-y-1.5">
-          {(data?.events ?? []).map((ev) => (
-            <li
-              key={ev.id}
-              className="flex items-center gap-2 text-xs text-slate-300"
-              data-testid={`reminder-history-item-${ev.id}`}
-            >
-              <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300 flex-shrink-0" />
-              <span className="text-slate-200">{formatLocalizedDate(new Date(ev.sentAt), language)}</span>
-              <span className="text-slate-500">·</span>
-              <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.channel}</span>
-              <span className="text-slate-500">·</span>
-              <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.language}</span>
-              <span className="text-slate-500">·</span>
-              <span className="text-slate-300" data-testid={`reminder-history-sender-${ev.id}`}>
-                {t('reminderHistorySender').replace('{{name}}', ev.senderName ?? t('reminderHistorySenderUnknown'))}
+        <>
+          {senderOptions.length > 1 && (
+            <div className="mb-2 flex flex-wrap items-center gap-1.5" data-testid={`reminder-history-filter-${tx.id}`}>
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 me-1">
+                {t('reminderHistoryFilterLabel')}:
               </span>
-            </li>
-          ))}
-        </ol>
+              <button
+                type="button"
+                onClick={() => setSenderFilter('__all__')}
+                className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                  senderFilter === '__all__'
+                    ? 'bg-amber-300/20 border-amber-300/60 text-amber-200'
+                    : 'border-white/20 text-slate-300 hover:bg-white/10'
+                }`}
+                data-testid={`reminder-history-filter-chip-all-${tx.id}`}
+              >
+                {t('reminderHistoryFilterAll')}
+              </button>
+              {senderOptions.map((opt) => (
+                <button
+                  key={opt.key}
+                  type="button"
+                  onClick={() => setSenderFilter(opt.key)}
+                  className={`text-xs px-2 py-0.5 rounded-full border transition-colors ${
+                    senderFilter === opt.key
+                      ? 'bg-amber-300/20 border-amber-300/60 text-amber-200'
+                      : 'border-white/20 text-slate-300 hover:bg-white/10'
+                  }`}
+                  data-testid={`reminder-history-filter-chip-${tx.id}-${opt.key}`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          )}
+          {filteredEvents.length === 0 ? (
+            <p className="text-xs text-slate-400">{t('reminderHistoryFilterEmpty')}</p>
+          ) : (
+            <ol className="space-y-1.5">
+              {filteredEvents.map((ev) => (
+                <li
+                  key={ev.id}
+                  className="flex items-center gap-2 text-xs text-slate-300"
+                  data-testid={`reminder-history-item-${ev.id}`}
+                >
+                  <span className="inline-block h-1.5 w-1.5 rounded-full bg-amber-300 flex-shrink-0" />
+                  <span className="text-slate-200">{formatLocalizedDate(new Date(ev.sentAt), language)}</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.channel}</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.language}</span>
+                  <span className="text-slate-500">·</span>
+                  <span className="text-slate-300" data-testid={`reminder-history-sender-${ev.id}`}>
+                    {t('reminderHistorySender').replace('{{name}}', ev.senderName ?? unknownLabel)}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </>
       )}
     </div>
   );
