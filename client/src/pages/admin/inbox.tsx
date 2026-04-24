@@ -369,6 +369,7 @@ export default function AdminInbox() {
   const undoToast = (title: string, undoFn: () => void) => {
     toast({
       title,
+      duration: 5000,
       action: (
         <ToastAction altText={t("inboxDetailRestore")} onClick={undoFn} data-testid="toast-undo-action">
           {t("inboxDetailRestore")}

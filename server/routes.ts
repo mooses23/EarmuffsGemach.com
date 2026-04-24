@@ -2133,7 +2133,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Aggregate Gmail label counts (used by inbox folder chips for backlog hints)
+  // Aggregate Gmail label counts (used by inbox folder chips for backlog hints).
+  //
+  // Contract: ALWAYS responds 200 with a counts object. When Gmail is
+  // unavailable (not connected, transient API failure), returns
+  //   { inbox: 0, spam: 0, trash: 0, error: <reason> }
+  // so the inbox UI never breaks. Clients should treat the presence of an
+  // `error` field as "counts are unavailable" rather than treating 200 as a
+  // health signal.
   app.get("/api/admin/emails/labels", async (req, res) => {
     try {
       if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
@@ -2142,7 +2149,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const counts = await getLabelCounts();
       res.json(counts);
     } catch (error: unknown) {
-      // Counts are a soft enhancement — never break the inbox UI if Gmail is down/unconfigured.
       const msg = error instanceof Error ? error.message : "Failed to fetch label counts";
       console.error("Error fetching Gmail label counts:", msg);
       res.status(200).json({ inbox: 0, spam: 0, trash: 0, error: msg });

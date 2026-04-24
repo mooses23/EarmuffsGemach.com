@@ -146,7 +146,15 @@ export function SwipeableRow({
         dragElastic={0.15}
         style={{ x, touchAction: "pan-y" }}
         onDragEnd={handleDragEnd}
-        onClick={() => { if (reveal !== "closed") close(); }}
+        onClickCapture={(e) => {
+          // While a swipe action is revealed, intercept clicks: cancel the
+          // reveal instead of opening the underlying row.
+          if (reveal !== "closed") {
+            e.stopPropagation();
+            e.preventDefault();
+            close();
+          }
+        }}
         className="relative bg-card"
       >
         {children}
