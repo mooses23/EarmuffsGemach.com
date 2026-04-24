@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -45,6 +45,8 @@ import {
   Undo2,
 } from "lucide-react";
 import { SwipeableRow } from "@/components/admin/SwipeableRow";
+import { Checkbox } from "@/components/ui/checkbox";
+import { CheckSquare, X } from "lucide-react";
 import { GlossaryContent } from "./glossary";
 import {
   Dialog,
@@ -142,6 +144,12 @@ export default function AdminInbox() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
   const [folder, setFolder] = useState<Folder>("inbox");
+  // Bulk-select mode lets the admin tick multiple rows and apply a single
+  // batch action (Archive / Trash / Report-spam / Mark read) instead of
+  // swiping each row individually.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [bulkRunning, setBulkRunning] = useState(false);
   const [replyText, setReplyText] = useState("");
   const [replySubject, setReplySubject] = useState("");
   const [translations, setTranslations] = useState<Record<string, string>>({});
@@ -293,6 +301,52 @@ export default function AdminInbox() {
     }
     return true;
   });
+
+  // Items currently selected in bulk mode, resolved against the visible list.
+  // Looking up by key (rather than caching items at click-time) keeps the
+  // selection in sync if the underlying data refetches mid-selection.
+  const filteredKeySet = useMemo(() => new Set(filtered.map((it) => it.key)), [filtered]);
+  const selectedItems = useMemo(
+    () => filtered.filter((it) => selectedKeys.has(it.key)),
+    [filtered, selectedKeys]
+  );
+
+  // Drop any selected keys that no longer appear in the visible list (e.g.
+  // after switching folders, applying a filter, or after a bulk action moved
+  // them out). Prevents "phantom" selections.
+  useEffect(() => {
+    if (selectedKeys.size === 0) return;
+    const keysArr = Array.from(selectedKeys);
+    const needsPrune = keysArr.some((k) => !filteredKeySet.has(k));
+    if (needsPrune) {
+      setSelectedKeys((prev) => {
+        const next = new Set<string>();
+        Array.from(prev).forEach((k) => { if (filteredKeySet.has(k)) next.add(k); });
+        return next;
+      });
+    }
+  }, [filteredKeySet, selectedKeys]);
+
+  // Leaving select mode always clears any pending selection.
+  const exitSelectMode = () => {
+    setSelectMode(false);
+    setSelectedKeys(new Set());
+  };
+  const toggleRowSelection = (key: string) => {
+    setSelectedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  };
+  const allVisibleSelected = filtered.length > 0 && selectedItems.length === filtered.length;
+  const toggleSelectAll = () => {
+    if (allVisibleSelected) {
+      setSelectedKeys(new Set());
+    } else {
+      setSelectedKeys(new Set(filtered.map((it) => it.key)));
+    }
+  };
 
   // Folder chip counts use TOTAL backlog per source — not unread — so they
   // mirror Gmail's own folder badges. Form-side counts come from the local
@@ -462,6 +516,70 @@ export default function AdminInbox() {
     } else {
       updateContactFlags.mutate({ id: Number(item.id), isSpam: true }, { onSuccess: success, onError: failure });
     }
+  };
+
+  // ===== Bulk actions =====
+  // Each bulk action is implemented as a single async function that runs the
+  // existing per-id endpoints in a loop. We fan out with Promise.allSettled so
+  // a single failure doesn't stop the rest, then surface ONE summary toast.
+  type BulkKind = "markRead" | "archive" | "trash" | "spam" | "notSpam" | "restore";
+  const runOneBulk = async (item: UnifiedItem, kind: BulkKind): Promise<void> => {
+    const idStr = String(item.id);
+    const idNum = Number(item.id);
+    if (item.source === "email") {
+      switch (kind) {
+        case "markRead": await apiRequest("POST", `/api/admin/emails/${idStr}/read`); return;
+        case "archive": await apiRequest("POST", `/api/admin/emails/${idStr}/archive`); return;
+        case "trash": await apiRequest("POST", `/api/admin/emails/${idStr}/trash`); return;
+        case "spam": await apiRequest("POST", `/api/admin/emails/${idStr}/spam`); return;
+        case "notSpam": await apiRequest("POST", `/api/admin/emails/${idStr}/not-spam`); return;
+        case "restore":
+          // Spam folder uses not-spam; Trash folder uses untrash.
+          if (folder === "spam") {
+            await apiRequest("POST", `/api/admin/emails/${idStr}/not-spam`);
+          } else {
+            await apiRequest("POST", `/api/admin/emails/${idStr}/untrash`);
+          }
+          return;
+      }
+    } else {
+      switch (kind) {
+        case "markRead":
+          await apiRequest("PATCH", `/api/contact/${idNum}`, { isRead: true }); return;
+        case "archive":
+          await apiRequest("PATCH", `/api/contact/${idNum}`, { isArchived: true }); return;
+        case "trash":
+          // Contacts are hard-deleted from Trash actions (mirrors single-row behavior).
+          await apiRequest("DELETE", `/api/contact/${idNum}`); return;
+        case "spam":
+          await apiRequest("PATCH", `/api/contact/${idNum}`, { isSpam: true }); return;
+        case "notSpam":
+          await apiRequest("PATCH", `/api/contact/${idNum}`, { isSpam: false }); return;
+        case "restore":
+          await apiRequest("PATCH", `/api/contact/${idNum}`, { isArchived: false, isSpam: false }); return;
+      }
+    }
+  };
+  const runBulkAction = async (kind: BulkKind, items: UnifiedItem[]) => {
+    if (items.length === 0 || bulkRunning) return;
+    setBulkRunning(true);
+    const results = await Promise.allSettled(items.map((it) => runOneBulk(it, kind)));
+    const ok = results.filter((r) => r.status === "fulfilled").length;
+    const fail = results.length - ok;
+    // Refresh affected caches (one shot, not per-row) to repaint the list.
+    qc.invalidateQueries({ queryKey: ["/api/contact"] });
+    invalidateEmailLists();
+    // Single summary toast — counts succeeded/failed.
+    if (fail === 0) {
+      toast({ title: t("inboxBulkAllSucceeded"), description: `${ok}` });
+    } else if (ok === 0) {
+      toast({ title: t("inboxBulkAllFailed"), description: `${fail}`, variant: "destructive" });
+    } else {
+      toast({ title: t("inboxBulkPartial"), description: `${ok} ✓ · ${fail} ✗`, variant: "destructive" });
+    }
+    setSelectedKeys(new Set());
+    setSelectMode(false);
+    setBulkRunning(false);
   };
   const deleteContact = useMutation({
     mutationFn: async (id: number) => apiRequest("DELETE", `/api/contact/${id}`),
@@ -1289,11 +1407,27 @@ export default function AdminInbox() {
                   {t("inboxClearFilters")}
                 </Button>
               )}
+              <div className="w-px h-6 bg-border mx-1" />
+              <Button
+                variant={selectMode ? "default" : "outline"}
+                size="sm"
+                onClick={() => (selectMode ? exitSelectMode() : setSelectMode(true))}
+                data-testid="button-toggle-select-mode"
+                disabled={bulkRunning}
+              >
+                {selectMode ? (
+                  <><X className="h-4 w-4 mr-1.5" />{t("inboxBulkExit")}</>
+                ) : (
+                  <><CheckSquare className="h-4 w-4 mr-1.5" />{t("inboxBulkSelect")}</>
+                )}
+              </Button>
             </div>
           </div>
-          <p className="text-xs text-muted-foreground italic" data-testid="text-swipe-hint">
-            {t("inboxSwipeHint")}
-          </p>
+          {!selectMode && (
+            <p className="text-xs text-muted-foreground italic" data-testid="text-swipe-hint">
+              {t("inboxSwipeHint")}
+            </p>
+          )}
         </div>
 
         {showGmailIssue && (
@@ -1384,6 +1518,7 @@ export default function AdminInbox() {
                     folder === "trash"
                       ? undefined
                       : { label: t("inboxSwipeDelete"), icon: Trash2, color: "bg-red-600", onCommit: () => performTrash(it) };
+                  const isChecked = selectedKeys.has(it.key);
                   return (
                     <SwipeableRow
                       key={it.key}
@@ -1391,15 +1526,31 @@ export default function AdminInbox() {
                       rightAction={rightAction}
                       leftAction={leftAction}
                       leftLongAction={leftLongAction}
+                      // Disable swipe gestures while in select mode so the
+                      // checkbox click target isn't fighting drag handlers.
+                      disabled={selectMode}
                     >
                       <button
                         type="button"
-                        onClick={() => openItem(it)}
+                        onClick={() => (selectMode ? toggleRowSelection(it.key) : openItem(it))}
                         className={`w-full p-4 text-left hover-elevate active-elevate-2 transition-colors flex items-start gap-4 ${
                           !it.isRead ? "bg-primary/5" : ""
-                        }`}
+                        } ${selectMode && isChecked ? "bg-primary/10" : ""}`}
                         data-testid={`row-${it.key}-button`}
+                        aria-pressed={selectMode ? isChecked : undefined}
                       >
+                        {selectMode && (
+                          // Visual-only checkbox — the outer <button> handles
+                          // clicks so we suppress pointer events here to avoid
+                          // nesting an interactive control inside a button.
+                          <div
+                            className="flex items-center pt-1 flex-shrink-0 pointer-events-none"
+                            data-testid={`row-${it.key}-checkbox`}
+                            aria-hidden="true"
+                          >
+                            <Checkbox checked={isChecked} tabIndex={-1} />
+                          </div>
+                        )}
                         <div
                           className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-medium flex-shrink-0 ${
                             !it.isRead ? "bg-primary" : "bg-muted-foreground"
@@ -1448,6 +1599,117 @@ export default function AdminInbox() {
               {t("inboxLoadMore")}
             </Button>
           </div>
+        )}
+
+        {/* Bulk-action bar — fixed to the bottom of the viewport while in
+            select mode. Shows the selection count, a Select-all toggle, and
+            folder-aware action buttons. The padding spacer above the bar
+            (h-24) prevents the last list row from being obscured. */}
+        {selectMode && (
+          <>
+            <div className="h-24" aria-hidden />
+            <div
+              className="fixed inset-x-0 bottom-0 z-30 border-t bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 shadow-[0_-2px_10px_rgba(0,0,0,0.06)]"
+              data-testid="bulk-action-bar"
+              role="toolbar"
+              aria-label="Bulk actions"
+            >
+              <div className="container mx-auto px-4 py-3 flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 mr-auto">
+                  <Checkbox
+                    checked={allVisibleSelected && filtered.length > 0}
+                    onCheckedChange={() => toggleSelectAll()}
+                    data-testid="checkbox-select-all"
+                    aria-label={t("inboxBulkSelectAll")}
+                  />
+                  <span className="text-sm font-medium" data-testid="text-bulk-count">
+                    {selectedItems.length} {t("inboxBulkSelectedCount")}
+                  </span>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={toggleSelectAll}
+                    disabled={filtered.length === 0 || bulkRunning}
+                    data-testid="button-bulk-select-all"
+                  >
+                    {t("inboxBulkSelectAll")}
+                  </Button>
+                </div>
+                {folder !== "trash" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runBulkAction("markRead", selectedItems)}
+                    disabled={selectedItems.length === 0 || bulkRunning}
+                    data-testid="button-bulk-mark-read"
+                  >
+                    <Eye className="h-4 w-4 mr-1.5" />
+                    {t("inboxBulkMarkRead")}
+                  </Button>
+                )}
+                {folder === "inbox" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runBulkAction("archive", selectedItems)}
+                    disabled={selectedItems.length === 0 || bulkRunning}
+                    data-testid="button-bulk-archive"
+                  >
+                    <Archive className="h-4 w-4 mr-1.5" />
+                    {t("inboxBulkArchive")}
+                  </Button>
+                )}
+                {folder === "inbox" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runBulkAction("spam", selectedItems)}
+                    disabled={selectedItems.length === 0 || bulkRunning}
+                    data-testid="button-bulk-spam"
+                  >
+                    <ShieldAlert className="h-4 w-4 mr-1.5" />
+                    {t("inboxBulkReportSpam")}
+                  </Button>
+                )}
+                {folder === "spam" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runBulkAction("notSpam", selectedItems)}
+                    disabled={selectedItems.length === 0 || bulkRunning}
+                    data-testid="button-bulk-not-spam"
+                  >
+                    <ShieldCheck className="h-4 w-4 mr-1.5" />
+                    {t("inboxBulkNotSpam")}
+                  </Button>
+                )}
+                {folder === "trash" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => runBulkAction("restore", selectedItems)}
+                    disabled={selectedItems.length === 0 || bulkRunning}
+                    data-testid="button-bulk-restore"
+                  >
+                    <Undo2 className="h-4 w-4 mr-1.5" />
+                    {t("inboxBulkRestore")}
+                  </Button>
+                )}
+                {folder !== "trash" && (
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={() => runBulkAction("trash", selectedItems)}
+                    disabled={selectedItems.length === 0 || bulkRunning}
+                    data-testid="button-bulk-trash"
+                  >
+                    <Trash2 className="h-4 w-4 mr-1.5" />
+                    {bulkRunning ? t("inboxBulkRunning") : t("inboxBulkTrash")}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </>
         )}
       </div>
     </div>

@@ -602,6 +602,22 @@ export const translations = {
     inboxSpamEmpty: "Nothing flagged as spam.",
     inboxTrashEmpty: "Trash is empty.",
 
+    // Inbox bulk-select (Task #23)
+    inboxBulkSelect: "Select",
+    inboxBulkExit: "Done",
+    inboxBulkSelectedCount: "selected",
+    inboxBulkSelectAll: "Select all",
+    inboxBulkMarkRead: "Mark read",
+    inboxBulkArchive: "Archive",
+    inboxBulkTrash: "Trash",
+    inboxBulkReportSpam: "Report spam",
+    inboxBulkNotSpam: "Not spam",
+    inboxBulkRestore: "Restore",
+    inboxBulkRunning: "Working...",
+    inboxBulkAllSucceeded: "All done",
+    inboxBulkPartial: "Some actions failed",
+    inboxBulkAllFailed: "Action failed",
+
     // Founder's tribute (landing page)
     tapToReadStory: "· tap to read her story ·",
     tributeAriaLabel: "Learn the story behind this organization",
@@ -1736,6 +1752,22 @@ export const translations = {
     inboxSwipeHint: "טיפ: החלקה ימינה לסימון כלא נקרא, שמאלה להעברה לארכיון, או שמאלה רחוק למחיקה.",
     inboxSpamEmpty: "אין הודעות שסומנו כספאם.",
     inboxTrashEmpty: "האשפה ריקה.",
+
+    // Inbox bulk-select (Task #23)
+    inboxBulkSelect: "בחירה",
+    inboxBulkExit: "סיום",
+    inboxBulkSelectedCount: "נבחרו",
+    inboxBulkSelectAll: "בחר הכל",
+    inboxBulkMarkRead: "סמן כנקרא",
+    inboxBulkArchive: "ארכיון",
+    inboxBulkTrash: "אשפה",
+    inboxBulkReportSpam: "דווח כספאם",
+    inboxBulkNotSpam: "לא ספאם",
+    inboxBulkRestore: "שחזר",
+    inboxBulkRunning: "מעבד...",
+    inboxBulkAllSucceeded: "הסתיים בהצלחה",
+    inboxBulkPartial: "חלק מהפעולות נכשלו",
+    inboxBulkAllFailed: "הפעולה נכשלה",
 
     contactMessages: "הודעות יצירת קשר",
     msgPageSubtitle: "צפייה ומענה להודעות מטופס יצירת הקשר",
