@@ -158,6 +158,14 @@ export default function AdminInbox() {
     queryKey: ["/api/admin/emails/status"],
   });
 
+  // Gmail backlog counts (UNREAD/SPAM/TRASH labels) for folder chips.
+  // The endpoint returns zeros if Gmail is unavailable, so this is safe to render unconditionally.
+  const gmailLabelCountsQuery = useQuery<{ unread: number; spam: number; trash: number }>({
+    queryKey: ["/api/admin/emails/labels"],
+    enabled: !!gmailStatusQuery.data?.configured,
+    refetchInterval: 60_000,
+  });
+
   // Contacts query
   const contactsQuery = useQuery<Contact[]>({
     queryKey: ["/api/contact"],
@@ -229,8 +237,8 @@ export default function AdminInbox() {
         snippet: c.message.slice(0, 140),
         date: safeDate(c.submittedAt),
         isRead: !!c.isRead,
-        isArchived: !!(c as any).isArchived,
-        isSpam: !!(c as any).isSpam,
+        isArchived: !!c.isArchived,
+        isSpam: !!c.isSpam,
       });
     }
     for (const e of allEmails) {
@@ -291,10 +299,10 @@ export default function AdminInbox() {
   );
   const unreadCount = inboxItems.filter((u) => !u.isRead).length;
   const formSpamCount = (contactsQuery.data ?? []).filter(
-    (c) => (c as any).isSpam && !(c as any).isArchived
+    (c) => c.isSpam && !c.isArchived
   ).length;
   const formTrashCount = (contactsQuery.data ?? []).filter(
-    (c) => (c as any).isArchived
+    (c) => c.isArchived
   ).length;
 
   // Mutations
@@ -372,11 +380,17 @@ export default function AdminInbox() {
   };
   const performTrash = (item: UnifiedItem) => {
     const failure = () => toast({ title: t("inboxTrashFailed"), variant: "destructive" });
-    const success = () => undoToast(t("inboxTrashSuccess"), () => performRestore(item));
     if (item.source === "email") {
+      // Gmail trash is reversible — show an undo toast to mirror iOS Mail.
+      const success = () => undoToast(t("inboxTrashSuccess"), () => performRestore(item));
       trashEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
     } else {
-      updateContactFlags.mutate({ id: Number(item.id), isArchived: true }, { onSuccess: success, onError: failure });
+      // Contact form messages are hard-deleted (preserves the existing
+      // /api/contact/:id DELETE behavior). No undo since the row is gone.
+      deleteContact.mutate(Number(item.id), {
+        onSuccess: () => toast({ title: t("msgDeletedSuccess") }),
+        onError: failure,
+      });
     }
   };
   const performRestore = (item: UnifiedItem) => {
@@ -1150,13 +1164,18 @@ export default function AdminInbox() {
           </div>
         </div>
 
-        {/* Folder tabs (Inbox / Spam / Trash) — primary filter */}
+        {/* Folder tabs (Inbox / Spam / Trash) — primary filter.
+            Counts combine contact-form totals with Gmail label backlog so the
+            chip reflects the full queue, not just one source. */}
         <div className="flex items-center gap-2 mb-3 flex-wrap">
-          {([
-            { key: "inbox" as Folder, label: t("inboxFolderInbox"), icon: InboxIcon, count: unreadCount },
-            { key: "spam" as Folder, label: t("inboxFolderSpam"), icon: ShieldAlert, count: formSpamCount },
-            { key: "trash" as Folder, label: t("inboxFolderTrash"), icon: Trash2, count: formTrashCount },
-          ]).map(({ key, label, icon: Icon, count }) => {
+          {(() => {
+            const gmailCounts = gmailLabelCountsQuery.data ?? { unread: 0, spam: 0, trash: 0 };
+            return [
+              { key: "inbox" as Folder, label: t("inboxFolderInbox"), icon: InboxIcon, count: unreadCount + gmailCounts.unread },
+              { key: "spam" as Folder, label: t("inboxFolderSpam"), icon: ShieldAlert, count: formSpamCount + gmailCounts.spam },
+              { key: "trash" as Folder, label: t("inboxFolderTrash"), icon: Trash2, count: formTrashCount + gmailCounts.trash },
+            ];
+          })().map(({ key, label, icon: Icon, count }) => {
             const active = folder === key;
             return (
               <button
@@ -1327,22 +1346,15 @@ export default function AdminInbox() {
             ) : (
               <div className="divide-y">
                 {filtered.map((it) => {
-                  // Swipe action wiring depends on which folder we're in.
-                  // Inbox: right=mark unread, left short=archive, left long=delete.
-                  // Spam:  right=mark unread, left long=delete (no "archive spam").
-                  // Trash: right=restore (re-uses unread visual since it's the "recovery" gesture), no destructive long-swipe.
+                  // Swipe action wiring per Task #22 spec:
+                  // - Right swipe ALWAYS = Mark unread (in Trash it doubles as Restore since "unread"
+                  //   on a trashed item is meaningless — Restore is the equivalent recovery gesture).
+                  // - Short left = Archive (Inbox only).
+                  // - Long left = Delete (hard-delete for contacts, Gmail trash for emails). Disabled in Trash.
                   const rightAction =
                     folder === "trash"
                       ? { label: t("inboxDetailRestore"), icon: Undo2, color: "bg-blue-500", onCommit: () => performRestore(it) }
-                      : it.isRead
-                      ? { label: t("inboxSwipeMarkUnread"), icon: EyeOff, color: "bg-blue-500", onCommit: () => performMarkUnread(it) }
-                      : { label: t("markAsRead"), icon: Eye, color: "bg-blue-500", onCommit: () => {
-                          if (it.source === "email") {
-                            markEmailRead.mutate(String(it.id), { onSuccess: () => invalidateEmailLists() });
-                          } else {
-                            markContactRead.mutate({ id: Number(it.id), isRead: true });
-                          }
-                        } };
+                      : { label: t("inboxSwipeMarkUnread"), icon: EyeOff, color: "bg-blue-500", onCommit: () => performMarkUnread(it) };
                   const leftAction =
                     folder === "inbox"
                       ? { label: t("inboxSwipeArchive"), icon: Archive, color: "bg-amber-600", onCommit: () => performArchive(it) }

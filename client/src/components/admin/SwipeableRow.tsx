@@ -54,7 +54,7 @@ export function SwipeableRow({
   const leftBg = useTransform(x, [-COMMIT_THRESHOLD, -REVEAL_THRESHOLD, 0], [1, 0.7, 0]);
   const leftLongBg = useTransform(x, [-LONG_THRESHOLD, -COMMIT_THRESHOLD, -REVEAL_THRESHOLD], [1, 0, 0]);
 
-  const handleDragEnd = (_e: any, info: PanInfo) => {
+  const handleDragEnd = (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const offset = info.offset.x;
     if (disabled) {
       x.set(0);

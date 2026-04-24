@@ -371,6 +371,26 @@ export async function markAsSpam(messageId: string): Promise<void> {
   });
 }
 
+export interface LabelCounts {
+  unread: number;
+  spam: number;
+  trash: number;
+}
+
+export async function getLabelCounts(): Promise<LabelCounts> {
+  const gmail = await getUncachableGmailClient();
+  const ids = ['UNREAD', 'SPAM', 'TRASH'] as const;
+  const settled = await Promise.all(
+    ids.map((id) =>
+      gmail.users.labels
+        .get({ userId: 'me', id })
+        .then((r) => r.data?.messagesTotal ?? 0)
+        .catch(() => 0)
+    )
+  );
+  return { unread: settled[0], spam: settled[1], trash: settled[2] };
+}
+
 export async function unmarkSpam(messageId: string): Promise<void> {
   const gmail = await getUncachableGmailClient();
   await gmail.users.messages.modify({

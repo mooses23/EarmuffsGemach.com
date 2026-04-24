@@ -12,7 +12,7 @@ import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
 import { PayLaterService } from "./payLaterService.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
-import { listEmails, getEmail, markAsRead, markAsUnread, archiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, sendReply, sendNewEmail, getGmailConfigStatus, type GmailListMode } from "./gmail-client.js";
+import { listEmails, getEmail, markAsRead, markAsUnread, archiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, type GmailListMode } from "./gmail-client.js";
 import { scoreContactSpam } from "./spam-heuristic.js";
 import {
   generateEmailResponse, translateText, generateWelcomeOpener,
@@ -52,6 +52,7 @@ import {
   operatorLoginSchema,
   HEADBAND_COLORS,
   type InsertReplyExample,
+  type Contact,
 } from "../shared/schema.js";
 import { setupAuth, requireRole, requireOperatorForLocation, createTestUsers } from "./auth.js";
 
@@ -1044,8 +1045,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           contact.isSpam = true;
           console.log(`[contact ${contact.id}] auto-tagged as spam (score=${spam.score}): ${spam.reasons.join('; ')}`);
         }
-      } catch (e: any) {
-        console.error("Spam-scoring error (non-fatal):", e?.message || e);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("Spam-scoring error (non-fatal):", msg);
       }
       res.status(201).json(contact);
     } catch (error) {
@@ -1088,10 +1090,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Contact not found" });
       }
       const { subject, message, isRead, isArchived, isSpam } = req.body;
-      const updateData: any = {};
-      if (subject !== undefined) updateData.subject = subject;
-      if (message !== undefined) updateData.message = message;
-      if (isRead !== undefined) updateData.isRead = isRead;
+      const updateData: Partial<Pick<Contact, 'subject' | 'message' | 'isRead' | 'isArchived' | 'isSpam'>> = {};
+      if (typeof subject === 'string') updateData.subject = subject;
+      if (typeof message === 'string') updateData.message = message;
+      if (typeof isRead === 'boolean') updateData.isRead = isRead;
       if (isArchived !== undefined) updateData.isArchived = !!isArchived;
       if (isSpam !== undefined) updateData.isSpam = !!isSpam;
       const updatedContact = await storage.updateContact(id, updateData);
@@ -2124,9 +2126,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const status = getGmailConfigStatus();
       res.json(status);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error checking Gmail status:", error);
-      res.status(500).json({ message: error.message || "Failed to check Gmail status" });
+      const msg = error instanceof Error ? error.message : "Failed to check Gmail status";
+      res.status(500).json({ message: msg });
+    }
+  });
+
+  // Aggregate Gmail label counts (used by inbox folder chips for backlog hints)
+  app.get("/api/admin/emails/labels", async (req, res) => {
+    try {
+      if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
+      const user = req.user as Express.User;
+      if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
+      const counts = await getLabelCounts();
+      res.json(counts);
+    } catch (error: unknown) {
+      // Counts are a soft enhancement — never break the inbox UI if Gmail is down/unconfigured.
+      const msg = error instanceof Error ? error.message : "Failed to fetch label counts";
+      console.error("Error fetching Gmail label counts:", msg);
+      res.status(200).json({ unread: 0, spam: 0, trash: 0, error: msg });
     }
   });
 
@@ -2144,20 +2163,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const maxResults = parseInt(req.query.maxResults as string) || 25;
       const pageToken = (req.query.pageToken as string) || undefined;
       const rawMode = String(req.query.mode || 'inbox').toLowerCase();
-      const mode: GmailListMode = (['inbox','spam','trash','archive','all'] as const)
-        .includes(rawMode as any) ? (rawMode as GmailListMode) : 'inbox';
+      const allowedModes = ['inbox', 'spam', 'trash', 'archive', 'all'] as const;
+      const mode: GmailListMode = (allowedModes as readonly string[]).includes(rawMode)
+        ? (rawMode as GmailListMode)
+        : 'inbox';
       const result = await listEmails(maxResults, pageToken, mode);
       res.json(result);
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error fetching emails:", error);
-      const raw = String(error?.message || error?.response?.data?.error || "");
+      const errObj = error as { message?: string; response?: { data?: { error?: string } } } | undefined;
+      const raw = String(errObj?.message || errObj?.response?.data?.error || "");
       if (/invalid_grant/i.test(raw)) {
         return res.status(401).json({
           code: "gmail_invalid_grant",
           message: "Gmail refresh token is invalid or expired. Generate a new GMAIL_REFRESH_TOKEN and update the environment variable.",
         });
       }
-      res.status(500).json({ message: error.message || "Failed to fetch emails" });
+      res.status(500).json({ message: errObj?.message || "Failed to fetch emails" });
     }
   });
 
