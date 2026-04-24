@@ -405,8 +405,15 @@ export default function AdminInbox() {
   const performTrash = (item: UnifiedItem) => {
     const failure = () => toast({ title: t("inboxTrashFailed"), variant: "destructive" });
     if (item.source === "email") {
-      // Gmail trash is reversible — show an undo toast to mirror iOS Mail.
-      const success = () => undoToast(t("inboxTrashSuccess"), () => performRestore(item));
+      // Bind the inverse (untrash) at trigger time so the undo button still
+      // works correctly even if the user navigates to a different folder
+      // before clicking it.
+      const undo = () => {
+        const ok = () => toast({ title: t("inboxRestoreSuccess") });
+        const ko = () => toast({ title: t("inboxRestoreFailed"), variant: "destructive" });
+        untrashEmailMut.mutate(String(item.id), { onSuccess: ok, onError: ko });
+      };
+      const success = () => undoToast(t("inboxTrashSuccess"), undo);
       trashEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
     } else {
       // Contact form messages are hard-deleted (preserves the existing
@@ -434,15 +441,6 @@ export default function AdminInbox() {
       );
     }
   };
-  const performMarkSpam = (item: UnifiedItem) => {
-    const failure = () => toast({ title: t("inboxSpamFailed"), variant: "destructive" });
-    const success = () => undoToast(t("inboxSpamSuccess"), () => performUnmarkSpam(item));
-    if (item.source === "email") {
-      spamEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
-    } else {
-      updateContactFlags.mutate({ id: Number(item.id), isSpam: true }, { onSuccess: success, onError: failure });
-    }
-  };
   const performUnmarkSpam = (item: UnifiedItem) => {
     const success = () => toast({ title: t("inboxNotSpamSuccess") });
     const failure = () => toast({ title: t("inboxNotSpamFailed"), variant: "destructive" });
@@ -450,6 +448,17 @@ export default function AdminInbox() {
       notSpamEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
     } else {
       updateContactFlags.mutate({ id: Number(item.id), isSpam: false }, { onSuccess: success, onError: failure });
+    }
+  };
+  const performMarkSpam = (item: UnifiedItem) => {
+    const failure = () => toast({ title: t("inboxSpamFailed"), variant: "destructive" });
+    // Bind the inverse explicitly so undo works regardless of folder state.
+    const undo = () => performUnmarkSpam(item);
+    const success = () => undoToast(t("inboxSpamSuccess"), undo);
+    if (item.source === "email") {
+      spamEmailMut.mutate(String(item.id), { onSuccess: success, onError: failure });
+    } else {
+      updateContactFlags.mutate({ id: Number(item.id), isSpam: true }, { onSuccess: success, onError: failure });
     }
   };
   const deleteContact = useMutation({

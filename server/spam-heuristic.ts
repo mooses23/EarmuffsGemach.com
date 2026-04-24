@@ -105,6 +105,16 @@ export function scoreContactSpam(input: {
     reasons.push('body is essentially just a link');
   }
 
+  // 8) Suspiciously long single URL (often tracker/payload links pasted by bots)
+  const longestUrl = (message.match(URL_RE) || []).reduce(
+    (max, u) => Math.max(max, u.length),
+    0,
+  );
+  if (longestUrl >= 120) {
+    score += 1;
+    reasons.push(`very long URL in body (${longestUrl} chars)`);
+  }
+
   return {
     score,
     isSpam: score >= 3,

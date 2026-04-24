@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage.js";
 import { PaymentSyncService } from "./payment-sync.js";
@@ -2310,19 +2310,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Unmark spam (restore to inbox)
-  app.post("/api/admin/emails/:id/not-spam", async (req, res) => {
+  // Unmark spam (restore to inbox). Both `/not-spam` and `/unspam` are accepted
+  // so callers using either spelling work without surprise.
+  const unmarkSpamHandler = async (req: Request, res: Response) => {
     try {
       if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
       const user = req.user as Express.User;
       if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
       await unmarkSpam(req.params.id);
       res.json({ success: true });
-    } catch (error: any) {
-      console.error("Error unmarking spam:", error);
-      res.status(500).json({ message: error.message || "Failed to unmark spam" });
+    } catch (error: unknown) {
+      const msg = error instanceof Error ? error.message : "Failed to unmark spam";
+      console.error("Error unmarking spam:", msg);
+      res.status(500).json({ message: msg });
     }
-  });
+  };
+  app.post("/api/admin/emails/:id/not-spam", unmarkSpamHandler);
+  app.post("/api/admin/emails/:id/unspam", unmarkSpamHandler);
 
   // Generate AI response for an email
   app.post("/api/admin/emails/:id/generate-response", async (req, res) => {
