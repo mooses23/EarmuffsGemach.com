@@ -35,6 +35,7 @@ import {
   Trash2,
   AlertCircle,
   ChevronDown,
+  ChevronUp,
   Pencil,
   Eye,
   EyeOff,
@@ -134,6 +135,56 @@ function safeDate(input: string | Date | null | undefined): string {
 function sanitizeHtml(body: string): string {
   const html = body.includes("<") ? body : body.replace(/\n/g, "<br/>");
   return DOMPurify.sanitize(html);
+}
+
+// Strip leading "Re:" / "Fwd:" / "Aw:" / "Tr:" prefixes and collapse
+// whitespace so two messages with the same underlying subject group together
+// in the thread view. Mirrors the server-side helper in openai-client.ts /
+// the /api/admin/inbox/thread endpoint so client and server agree on what
+// counts as "the same conversation".
+function normalizeSubject(s: string): string {
+  return String(s || "")
+    .replace(/^\s*((re|fw|fwd|aw|tr)\s*:\s*)+/i, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+// Stable per-conversation key. Email items thread by Gmail's native threadId
+// (with id fallback when threadId is missing). Form items thread by the
+// (lowercased sender email + normalized subject) tuple — the closest analog
+// to Gmail threading we can compute without any schema changes.
+function groupKey(item: UnifiedItem): string {
+  if (item.source === "email") return `email::${item.threadId || item.id}`;
+  const email = (item.fromEmail || "").toLowerCase();
+  return `form::${email}::${normalizeSubject(item.subject)}`;
+}
+
+interface InboxThread {
+  key: string;
+  latest: UnifiedItem;
+  members: UnifiedItem[];
+  messageCount: number;
+  unreadCount: number;
+}
+
+interface ThreadEntry {
+  id: string;
+  direction: "inbound" | "outbound";
+  from: string;
+  to?: string;
+  subject: string;
+  body: string;
+  date: string;
+  isRead?: boolean;
+  source: "gmail" | "form" | "saved";
+  messageRef?: string;
+}
+
+interface ThreadResponse {
+  source: "email" | "form";
+  threadKey: string;
+  messages: ThreadEntry[];
 }
 
 export default function AdminInbox() {
@@ -338,13 +389,73 @@ export default function AdminInbox() {
     return true;
   });
 
+  // Collapse the flat per-message feed into one row per conversation.
+  // The list now shows the latest message in each thread (with a "{N}
+  // messages" pill when multiple messages are grouped) instead of repeating
+  // the same sender/subject pair on every back-and-forth turn. Bulk-select
+  // and swipe gestures still operate on the latest message — opening a
+  // thread loads the full transcript via /api/admin/inbox/thread.
+  const threadGroups: InboxThread[] = useMemo(() => {
+    const groups = new Map<string, InboxThread>();
+    for (const it of filtered) {
+      const k = groupKey(it);
+      const existing = groups.get(k);
+      if (!existing) {
+        groups.set(k, {
+          key: k,
+          latest: it,
+          members: [it],
+          messageCount: 1,
+          unreadCount: it.isRead ? 0 : 1,
+        });
+        continue;
+      }
+      existing.members.push(it);
+      existing.messageCount += 1;
+      if (!it.isRead) existing.unreadCount += 1;
+      const tNew = new Date(it.date).getTime();
+      const tCur = new Date(existing.latest.date).getTime();
+      if ((isNaN(tNew) ? 0 : tNew) > (isNaN(tCur) ? 0 : tCur)) {
+        existing.latest = it;
+      }
+    }
+    return Array.from(groups.values()).sort((a, b) => {
+      const ta = new Date(a.latest.date).getTime();
+      const tb = new Date(b.latest.date).getTime();
+      return (isNaN(tb) ? 0 : tb) - (isNaN(ta) ? 0 : ta);
+    });
+  }, [filtered]);
+
+  // Replied-state lookup at the thread level. For Gmail threads every
+  // member shares the same threadId so the existing per-item lookup is
+  // sufficient. For form threads the saved reply is keyed by the original
+  // contact id, so we walk every sibling and surface the most recent
+  // replied-at timestamp.
+  const lookupRepliedForGroup = (g: InboxThread): string | null => {
+    if (g.latest.source === "email") return lookupReplied(g.latest);
+    let latest: string | null = null;
+    for (const m of g.members) {
+      const r = lookupReplied(m);
+      if (r === null) continue;
+      if (latest === null || (r && r.localeCompare(latest) > 0)) latest = r;
+    }
+    return latest;
+  };
+
   // Items currently selected in bulk mode, resolved against the visible list.
   // Looking up by key (rather than caching items at click-time) keeps the
   // selection in sync if the underlying data refetches mid-selection.
-  const filteredKeySet = useMemo(() => new Set(filtered.map((it) => it.key)), [filtered]);
+  // Bulk selection now operates at the conversation (thread) level — the
+  // visible "key set" is the latest message of each thread, matching the
+  // rows the user actually sees. Bulk actions still apply to that latest
+  // message just like the swipe gestures on a single row.
+  const filteredKeySet = useMemo(
+    () => new Set(threadGroups.map((g) => g.latest.key)),
+    [threadGroups]
+  );
   const selectedItems = useMemo(
-    () => filtered.filter((it) => selectedKeys.has(it.key)),
-    [filtered, selectedKeys]
+    () => threadGroups.map((g) => g.latest).filter((it) => selectedKeys.has(it.key)),
+    [threadGroups, selectedKeys]
   );
 
   // Drop any selected keys that no longer appear in the visible list (e.g.
@@ -375,12 +486,12 @@ export default function AdminInbox() {
       return next;
     });
   };
-  const allVisibleSelected = filtered.length > 0 && selectedItems.length === filtered.length;
+  const allVisibleSelected = threadGroups.length > 0 && selectedItems.length === threadGroups.length;
   const toggleSelectAll = () => {
     if (allVisibleSelected) {
       setSelectedKeys(new Set());
     } else {
-      setSelectedKeys(new Set(filtered.map((it) => it.key)));
+      setSelectedKeys(new Set(threadGroups.map((g) => g.latest.key)));
     }
   };
 
@@ -617,6 +728,54 @@ export default function AdminInbox() {
     setSelectMode(false);
     setBulkRunning(false);
   };
+
+  // Thread-scoped action helper. Since list rows now represent a whole
+  // conversation (not a single message), spam/archive/trash/restore from
+  // a row must apply to EVERY message in the thread — otherwise older
+  // siblings stay behind in the inbox and the row "reappears". Uses the
+  // existing per-id endpoints (`runOneBulk`) and surfaces ONE summary
+  // toast plus optional undo. For single-message threads it falls
+  // through to the same code path so we keep one set of semantics.
+  const performThreadAction = async (
+    items: UnifiedItem[],
+    kind: BulkKind,
+    successTitle: string,
+    failTitle: string,
+    undoKind?: BulkKind,
+    undoTitle?: string,
+    undoFailTitle?: string,
+  ) => {
+    if (items.length === 0 || bulkRunning) return;
+    setBulkRunning(true);
+    const results = await Promise.allSettled(items.map((it) => runOneBulk(it, kind)));
+    const ok = results.filter((r) => r.status === "fulfilled").length;
+    const fail = results.length - ok;
+    qc.invalidateQueries({ queryKey: ["/api/contact"] });
+    invalidateEmailLists();
+    if (fail === 0) {
+      if (undoKind) {
+        // Undo replays the inverse on the same items snapshot. We don't
+        // chain a third-level undo (no undo-of-undo) to keep the toast
+        // surface tidy.
+        undoToast(successTitle, () => {
+          performThreadAction(
+            items,
+            undoKind,
+            undoTitle || successTitle,
+            undoFailTitle || failTitle,
+          );
+        });
+      } else {
+        toast({ title: successTitle });
+      }
+    } else if (ok === 0) {
+      toast({ title: failTitle, variant: "destructive" });
+    } else {
+      toast({ title: t("inboxBulkPartial"), description: `${ok} ✓ · ${fail} ✗`, variant: "destructive" });
+    }
+    setBulkRunning(false);
+  };
+
   const deleteContact = useMutation({
     mutationFn: async (id: number) => apiRequest("DELETE", `/api/contact/${id}`),
     onSuccess: () => {
@@ -890,6 +1049,14 @@ export default function AdminInbox() {
   });
 
   // ============ DETAIL VIEW ============
+  // Look up the full conversation group for the currently-selected
+  // message so detail-view actions (spam/restore) can apply across the
+  // whole thread, not just the latest entry.
+  const currentGroup: InboxThread | null = selected
+    ? threadGroups.find((g) => g.key === groupKey(selected)) ?? null
+    : null;
+  const currentItems: UnifiedItem[] = currentGroup?.items ?? (selected ? [selected] : []);
+
   if (selected) {
     return (
       <div className="py-10">
@@ -919,13 +1086,19 @@ export default function AdminInbox() {
                   </>
                 )}
               </Button>
-              {/* Spam / Not spam toggle (works for both email + form) */}
+              {/* Spam / Not spam toggle — applied to the whole thread so
+                  older siblings move with the latest message. */}
               {selected.isSpam || folder === "spam" ? (
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    performUnmarkSpam(selected);
+                    performThreadAction(
+                      currentItems,
+                      "notSpam",
+                      t("inboxNotSpamSuccess"),
+                      t("inboxNotSpamFailed"),
+                    );
                     setSelected(null);
                   }}
                   data-testid="button-not-spam"
@@ -938,7 +1111,15 @@ export default function AdminInbox() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    performMarkSpam(selected);
+                    performThreadAction(
+                      currentItems,
+                      "spam",
+                      t("inboxSpamSuccess"),
+                      t("inboxSpamFailed"),
+                      "notSpam",
+                      t("inboxNotSpamSuccess"),
+                      t("inboxNotSpamFailed"),
+                    );
                     setSelected(null);
                   }}
                   data-testid="button-report-spam"
@@ -953,7 +1134,12 @@ export default function AdminInbox() {
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    performRestore(selected);
+                    performThreadAction(
+                      currentItems,
+                      "restore",
+                      t("inboxRestoreSuccess"),
+                      t("inboxRestoreFailed"),
+                    );
                     setSelected(null);
                   }}
                   data-testid="button-restore"
@@ -988,84 +1174,18 @@ export default function AdminInbox() {
             </div>
           </div>
 
-          <Card className="mb-6">
-            <CardHeader>
-              <div className="space-y-2">
-                <div className="flex items-start justify-between gap-2">
-                  <CardTitle className="text-xl">{selected.subject || t("noSubject")}</CardTitle>
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {(() => {
-                      const repliedAt = lookupReplied(selected);
-                      if (repliedAt === null) return null;
-                      const label = repliedAt
-                        ? t("inboxRepliedOn").replace("{date}", formatDate(repliedAt))
-                        : t("inboxReplied");
-                      return (
-                        <Badge
-                          variant="outline"
-                          className="border-green-600 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300 dark:border-green-700 font-semibold"
-                          data-testid="badge-replied-detail"
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-                          {label}
-                        </Badge>
-                      );
-                    })()}
-                    {/* Quieter outline-style source marker (matches the list). */}
-                    <span
-                      className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground"
-                      data-testid={`source-tag-detail-${selected.source}`}
-                    >
-                      {selected.source === "email"
-                        ? <Mail className="h-3.5 w-3.5" />
-                        : <MessageSquare className="h-3.5 w-3.5" />}
-                      {selected.source === "email" ? t("inboxSourceEmail") : t("inboxSourceForm")}
-                    </span>
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1 text-sm text-muted-foreground">
-                  <div className="flex items-center gap-2">
-                    <User className="h-4 w-4" />
-                    <span className="font-medium text-foreground">{selected.fromName}</span>
-                    {selected.fromEmail && (
-                      <a href={`mailto:${selected.fromEmail}`} className="hover:underline">
-                        &lt;{selected.fromEmail}&gt;
-                      </a>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    <span>{formatDate(selected.date)}</span>
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <div
-                className="whitespace-pre-wrap bg-muted/30 p-4 rounded-lg text-sm leading-relaxed"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(translatedBody ?? selected.body) }}
-              />
-              <div className="mt-3 flex items-center gap-2">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={handleTranslateMessage}
-                  disabled={translateMutation.isPending}
-                  data-testid="button-translate-message"
-                >
-                  <Languages className="h-4 w-4 mr-2" />
-                  {translatedBody ? t("inboxShowOriginal") : t("inboxTranslate")}
-                </Button>
-                {translatedBody && <span className="text-xs text-muted-foreground">{t("inboxTranslated")}</span>}
-              </div>
-            </CardContent>
-          </Card>
-
-          <SentRepliesPanel
-            item={selected}
+          {/* Gmail-style transcript: every message in this conversation
+              (inbound + our outbound replies) rendered oldest → newest.
+              Falls back to the single selected message if the thread fetch
+              fails. The translate-message button still acts on the latest
+              inbound message body to keep parity with the prior single-card
+              behavior. */}
+          <ThreadTranscriptPanel
+            selected={selected}
             t={t}
-            sourceRef={replyRefForItem(selected)}
-            legacyMessageId={selected.source === "email" ? String(selected.id) : undefined}
+            translatedBody={translatedBody}
+            onTranslateLatestInbound={handleTranslateMessage}
+            isTranslating={translateMutation.isPending}
           />
 
           <Card>
@@ -1575,7 +1695,7 @@ export default function AdminInbox() {
                   </div>
                 ))}
               </div>
-            ) : filtered.length === 0 ? (
+            ) : threadGroups.length === 0 ? (
               <div className="p-12 text-center">
                 <InboxIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
                 <h3 className="text-lg font-medium">
@@ -1589,26 +1709,79 @@ export default function AdminInbox() {
               </div>
             ) : (
               <div className="divide-y">
-                {filtered.map((it) => {
+                {threadGroups.map((g) => {
+                  // Each row represents an entire conversation. We surface
+                  // the LATEST message as the row preview (sender, subject,
+                  // snippet) and add a "{N} messages" pill when the thread
+                  // has more than one. Swipe + select actions still target
+                  // the latest message — opening the row loads the full
+                  // transcript via /api/admin/inbox/thread.
+                  const it = g.latest;
+                  const isThreadUnread = g.unreadCount > 0;
                   // Right = mark unread (Restore in Trash). Short left = archive
                   // (Inbox only). Long left = delete (hard-delete for contacts,
                   // Gmail trash for emails); disabled in Trash.
+                  // Apply destructive actions to ALL messages in the
+                  // thread so older siblings don't linger in the previous
+                  // folder. Mark-unread stays on the latest only since
+                  // group unread state derives from latest.
                   const rightAction =
                     folder === "trash"
-                      ? { label: t("inboxDetailRestore"), icon: Undo2, color: "bg-blue-500", onCommit: () => performRestore(it) }
+                      ? {
+                          label: t("inboxDetailRestore"),
+                          icon: Undo2,
+                          color: "bg-blue-500",
+                          onCommit: () =>
+                            performThreadAction(
+                              g.items,
+                              "restore",
+                              t("inboxRestoreSuccess"),
+                              t("inboxRestoreFailed"),
+                            ),
+                        }
                       : { label: t("inboxSwipeMarkUnread"), icon: EyeOff, color: "bg-blue-500", onCommit: () => performMarkUnread(it) };
                   const leftAction =
                     folder === "inbox"
-                      ? { label: t("inboxSwipeArchive"), icon: Archive, color: "bg-gray-500", onCommit: () => performArchive(it) }
+                      ? {
+                          label: t("inboxSwipeArchive"),
+                          icon: Archive,
+                          color: "bg-gray-500",
+                          onCommit: () =>
+                            performThreadAction(
+                              g.items,
+                              "archive",
+                              t("inboxArchiveSuccess"),
+                              t("inboxArchiveFailed"),
+                              "restore",
+                              t("inboxRestoreSuccess"),
+                              t("inboxRestoreFailed"),
+                            ),
+                        }
                       : undefined;
                   const leftLongAction =
                     folder === "trash"
                       ? undefined
-                      : { label: t("inboxSwipeDelete"), icon: Trash2, color: "bg-red-600", onCommit: () => performTrash(it) };
+                      : {
+                          label: t("inboxSwipeDelete"),
+                          icon: Trash2,
+                          color: "bg-red-600",
+                          onCommit: () =>
+                            performThreadAction(
+                              g.items,
+                              "trash",
+                              t("inboxTrashSuccess"),
+                              t("inboxTrashFailed"),
+                              // Contacts are hard-deleted on trash, so undo
+                              // would 404. Only emails support untrash.
+                              g.items.every((m) => m.source === "email") ? "restore" : undefined,
+                              t("inboxRestoreSuccess"),
+                              t("inboxRestoreFailed"),
+                            ),
+                        };
                   const isChecked = selectedKeys.has(it.key);
                   return (
                     <SwipeableRow
-                      key={it.key}
+                      key={g.key}
                       testId={`row-${it.key}`}
                       rightAction={rightAction}
                       leftAction={leftAction}
@@ -1621,7 +1794,7 @@ export default function AdminInbox() {
                         type="button"
                         onClick={() => (selectMode ? toggleRowSelection(it.key) : openItem(it))}
                         className={`w-full p-4 text-left hover-elevate active-elevate-2 transition-colors flex items-start gap-3 ${
-                          !it.isRead ? "bg-primary/10 dark:bg-primary/15" : ""
+                          isThreadUnread ? "bg-primary/10 dark:bg-primary/15" : ""
                         } ${selectMode && isChecked ? "bg-primary/20" : ""}`}
                         data-testid={`row-${it.key}-button`}
                         aria-pressed={selectMode ? isChecked : undefined}
@@ -1643,13 +1816,13 @@ export default function AdminInbox() {
                             for read so list rows still align. */}
                         <div
                           className={`self-stretch w-1 rounded-full flex-shrink-0 ${
-                            !it.isRead ? "bg-primary" : "bg-transparent"
+                            isThreadUnread ? "bg-primary" : "bg-transparent"
                           }`}
                           aria-hidden="true"
                         />
                         <div
                           className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-medium flex-shrink-0 ${
-                            !it.isRead ? "bg-primary" : "bg-muted-foreground/60"
+                            isThreadUnread ? "bg-primary" : "bg-muted-foreground/60"
                           }`}
                         >
                           {(it.fromName || "?").charAt(0).toUpperCase()}
@@ -1657,9 +1830,23 @@ export default function AdminInbox() {
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center justify-between gap-2">
                             <div className="flex items-center gap-2 min-w-0">
-                              <span className={`truncate ${!it.isRead ? "font-bold text-foreground" : "font-normal text-muted-foreground"}`}>
+                              <span className={`truncate ${isThreadUnread ? "font-bold text-foreground" : "font-normal text-muted-foreground"}`}>
                                 {it.fromName}
                               </span>
+                              {/* "N messages" pill — only shown when this row
+                                  represents more than one message. Mirrors the
+                                  Gmail thread-count chip and is the main visible
+                                  payoff of the inbox-grouping change. */}
+                              {g.messageCount > 1 && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 h-5 flex-shrink-0 font-medium tabular-nums"
+                                  data-testid={`badge-thread-count-${it.key}`}
+                                  title={t("inboxThreadCountMany").replace("{count}", String(g.messageCount))}
+                                >
+                                  {g.messageCount}
+                                </Badge>
+                              )}
                               {/* Quiet outline-style source marker so it stops
                                   competing with the sender name. */}
                               <span
@@ -1679,7 +1866,7 @@ export default function AdminInbox() {
                                 // list there isn't visually noisy; replied
                                 // state is still visible in the detail view.
                                 if (folder === "spam" || folder === "trash") return null;
-                                const repliedAt = lookupReplied(it);
+                                const repliedAt = lookupRepliedForGroup(g);
                                 if (repliedAt === null) return null;
                                 const dateLabel = repliedAt ? formatDate(repliedAt) : "";
                                 return (
@@ -1704,14 +1891,14 @@ export default function AdminInbox() {
                                 </Badge>
                               )}
                             </div>
-                            <span className={`text-xs whitespace-nowrap ${!it.isRead ? "text-foreground font-semibold" : "text-muted-foreground"}`}>{formatDate(it.date)}</span>
+                            <span className={`text-xs whitespace-nowrap ${isThreadUnread ? "text-foreground font-semibold" : "text-muted-foreground"}`}>{formatDate(it.date)}</span>
                           </div>
-                          <p className={`text-sm truncate ${!it.isRead ? "font-semibold text-foreground" : "font-normal text-muted-foreground"}`}>
+                          <p className={`text-sm truncate ${isThreadUnread ? "font-semibold text-foreground" : "font-normal text-muted-foreground"}`}>
                             {it.subject || t("noSubject")}
                           </p>
                           <p className="text-xs text-muted-foreground truncate mt-1">{it.snippet}</p>
                         </div>
-                        {!it.isRead && <div className="w-2.5 h-2.5 rounded-full bg-primary mt-2 flex-shrink-0 ring-2 ring-primary/30" />}
+                        {isThreadUnread && <div className="w-2.5 h-2.5 rounded-full bg-primary mt-2 flex-shrink-0 ring-2 ring-primary/30" />}
                       </button>
                     </SwipeableRow>
                   );
@@ -1746,7 +1933,7 @@ export default function AdminInbox() {
               <div className="container mx-auto px-4 py-3 flex flex-wrap items-center gap-2">
                 <div className="flex items-center gap-2 mr-auto">
                   <Checkbox
-                    checked={allVisibleSelected && filtered.length > 0}
+                    checked={allVisibleSelected && threadGroups.length > 0}
                     onCheckedChange={() => toggleSelectAll()}
                     data-testid="checkbox-select-all"
                     aria-label={t("inboxBulkSelectAll")}
@@ -1758,7 +1945,7 @@ export default function AdminInbox() {
                     variant="ghost"
                     size="sm"
                     onClick={toggleSelectAll}
-                    disabled={filtered.length === 0 || bulkRunning}
+                    disabled={threadGroups.length === 0 || bulkRunning}
                     data-testid="button-bulk-select-all"
                   >
                     {t("inboxBulkSelectAll")}
@@ -1915,114 +2102,222 @@ function SaveToFaqPanel({
   );
 }
 
-// Unified "Sent replies" panel for the message detail view. For Gmail
-// items it merges saved reply records (this app) AND messages on the
-// Gmail thread that we sent ourselves (label SENT) — so an admin can
-// see prior replies regardless of where they were sent from. For form
-// items it shows the saved replies for that contact id. Hidden when
-// there are no entries to avoid adding noise.
-type SentReplyEntry = {
-  id: string;
-  source: "saved" | "gmail";
-  sentReply: string;
-  createdAt: string;
-  senderEmail: string | null;
-  senderName: string | null;
-  wasEdited?: boolean;
-};
-function SentRepliesPanel({
-  item,
+// Unified Gmail-style transcript for the inbox detail view. Shows EVERY
+// message in the conversation (inbound + our outbound replies) oldest →
+// newest, replacing the old "single message + sent-replies dropdown"
+// layout. The selected message is auto-expanded; older messages are
+// collapsed behind a one-line summary the admin can click to expand.
+// On Gmail-fetch failure we fall back to the single selected-message
+// body so the detail view always renders something.
+function ThreadTranscriptPanel({
+  selected,
   t,
-  sourceRef,
-  legacyMessageId,
+  translatedBody,
+  onTranslateLatestInbound,
+  isTranslating,
 }: {
-  item: UnifiedItem;
+  selected: UnifiedItem;
   t: (k: TranslationKey) => string;
-  sourceRef: string;
-  legacyMessageId?: string;
+  translatedBody: string | null;
+  onTranslateLatestInbound: () => void;
+  isTranslating: boolean;
 }) {
-  const [open, setOpen] = useState(true);
-  const query = useQuery<SentReplyEntry[]>({
-    queryKey: ["/api/admin/reply-examples/by-ref", item.source, sourceRef, legacyMessageId ?? null],
+  const ref = selected.source === "email"
+    ? String(selected.threadId || selected.id)
+    : String(selected.id);
+  const query = useQuery<ThreadResponse>({
+    queryKey: ["/api/admin/inbox/thread", selected.source, ref],
     queryFn: async () => {
-      const params = new URLSearchParams({ sourceType: item.source, sourceRef });
-      if (legacyMessageId && legacyMessageId !== sourceRef) {
-        params.set("legacyMessageId", legacyMessageId);
-      }
-      const res = await fetch(`/api/admin/reply-examples/by-ref?${params.toString()}`, { credentials: "include" });
-      if (!res.ok) throw new Error("Failed to load reply history");
+      const params = new URLSearchParams({ source: selected.source, ref });
+      const res = await fetch(`/api/admin/inbox/thread?${params.toString()}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load conversation");
       return res.json();
     },
   });
-  const replies = query.data ?? [];
-  if (query.isLoading) {
-    return (
-      <Card className="mb-6" data-testid="panel-sent-replies-loading">
-        <CardContent className="py-4">
-          <Skeleton className="h-4 w-40" />
-        </CardContent>
-      </Card>
-    );
-  }
-  if (replies.length === 0) return null;
+
+  // Fallback transcript: when the thread fetch hasn't returned yet (or
+  // failed), render just the selected message so the detail view still
+  // has content.
+  const fallbackEntry: ThreadEntry = useMemo(() => ({
+    id: `${selected.source}:${selected.id}`,
+    direction: "inbound",
+    from: selected.fromEmail
+      ? `${selected.fromName} <${selected.fromEmail}>`
+      : selected.fromName,
+    subject: selected.subject,
+    body: selected.body,
+    date: safeDate(selected.date),
+    isRead: selected.isRead,
+    source: selected.source === "email" ? "gmail" : "form",
+    messageRef: String(selected.id),
+  }), [selected]);
+
+  const messages: ThreadEntry[] = query.data?.messages?.length
+    ? query.data.messages
+    : [fallbackEntry];
+
+  // The "current" message is the one the user clicked into from the list
+  // (the latest in the group). It's always expanded by default; older
+  // messages collapse so a long thread isn't a wall of text.
+  const currentRef = String(selected.id);
+  const isCurrent = (m: ThreadEntry) => {
+    if (selected.source === "email") return m.source === "gmail" && m.messageRef === currentRef;
+    return m.source === "form" && m.messageRef === currentRef;
+  };
+  const latestIdx = messages.length - 1;
+
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const isExpanded = (m: ThreadEntry, idx: number) => {
+    if (m.id in expanded) return expanded[m.id];
+    return isCurrent(m) || idx === latestIdx;
+  };
+  const toggle = (id: string, current: boolean) =>
+    setExpanded((p) => ({ ...p, [id]: !current }));
+
+  // Replied state at the conversation level: any outbound message means we
+  // already replied. Picks the latest outbound date so the badge can show
+  // "Replied {date}".
+  const repliedAt = useMemo(() => {
+    const outbound = messages.filter((m) => m.direction === "outbound");
+    if (!outbound.length) return null;
+    return outbound[outbound.length - 1].date;
+  }, [messages]);
+
   return (
-    <Card className="mb-6 border-green-300 dark:border-green-800" data-testid="panel-sent-replies">
-      <CardHeader className="pb-2">
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          className="w-full flex items-center justify-between text-left"
-          data-testid="button-toggle-sent-replies"
-        >
-          <CardTitle className="text-base flex items-center gap-2 text-green-800 dark:text-green-300">
-            <CheckCircle2 className="h-4 w-4" />
-            {t("inboxSentReplies")}
-            <Badge variant="outline" className="border-green-600 text-green-800 dark:text-green-300 dark:border-green-700 font-mono">
-              {t("inboxSentRepliesCount").replace("{count}", String(replies.length))}
-            </Badge>
-          </CardTitle>
-          <span className="text-muted-foreground text-sm">{open ? "−" : "+"}</span>
-        </button>
-      </CardHeader>
-      {open && (
-        <CardContent className="space-y-3 pt-0">
-          {replies.map((r, idx) => {
-            const senderLabel = r.senderName || r.senderEmail || "—";
-            return (
-              <div
-                key={r.id}
-                className="rounded-md border bg-muted/30 p-3 text-sm"
-                data-testid={`sent-reply-${r.id}`}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground mb-2">
-                  <span className="flex items-center gap-2">
-                    <span className="font-semibold text-foreground">#{idx + 1}</span>
-                    <User className="h-3 w-3" />
-                    <span className="font-medium text-foreground" data-testid={`sent-reply-sender-${r.id}`}>
-                      {senderLabel}
-                    </span>
-                    {r.senderName && r.senderEmail && (
-                      <span className="text-muted-foreground/80">&lt;{r.senderEmail}&gt;</span>
-                    )}
-                    <Badge
-                      variant="outline"
-                      className="text-[9px] py-0 h-4 uppercase tracking-wide"
-                      title={r.source === "gmail" ? t("inboxSentReplyTooltipGmail") : t("inboxSentReplyTooltipApp")}
-                    >
-                      {r.source === "gmail" ? t("inboxSentReplySourceGmail") : t("inboxSentReplySourceApp")}
-                    </Badge>
+    <Card className="mb-6" data-testid="panel-thread-transcript">
+      <CardHeader>
+        <div className="space-y-2">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <CardTitle className="text-xl truncate" data-testid="text-thread-subject">
+                {selected.subject || t("noSubject")}
+              </CardTitle>
+              <div className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+                <Badge variant="outline" className="text-[10px] py-0 h-5 font-medium tabular-nums" data-testid="badge-thread-message-count">
+                  {messages.length === 1
+                    ? t("inboxThreadCountSingle")
+                    : t("inboxThreadCountMany").replace("{count}", String(messages.length))}
+                </Badge>
+                {query.isLoading && (
+                  <span className="text-xs text-muted-foreground" data-testid="text-thread-loading">
+                    {t("inboxLoadingThread")}
                   </span>
-                  <span className="flex items-center gap-1">
-                    <Clock className="h-3 w-3" />
-                    {formatDate(r.createdAt)}
+                )}
+                {query.isError && (
+                  <span className="text-xs text-amber-700 dark:text-amber-300" data-testid="text-thread-error">
+                    {t("inboxThreadLoadFailed")}
+                  </span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2 flex-shrink-0">
+              {repliedAt && (
+                <Badge
+                  variant="outline"
+                  className="border-green-600 bg-green-50 text-green-800 dark:bg-green-950/40 dark:text-green-300 dark:border-green-700 font-semibold"
+                  data-testid="badge-replied-detail"
+                >
+                  <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+                  {t("inboxRepliedOn").replace("{date}", formatDate(repliedAt))}
+                </Badge>
+              )}
+              <span
+                className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-muted-foreground"
+                data-testid={`source-tag-detail-${selected.source}`}
+              >
+                {selected.source === "email"
+                  ? <Mail className="h-3.5 w-3.5" />
+                  : <MessageSquare className="h-3.5 w-3.5" />}
+                {selected.source === "email" ? t("inboxSourceEmail") : t("inboxSourceForm")}
+              </span>
+            </div>
+          </div>
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {messages.length === 1 && !query.isLoading && (
+          <div className="text-xs text-muted-foreground italic" data-testid="text-thread-only-message">
+            {t("inboxThreadOnlyMessage")}
+          </div>
+        )}
+        {messages.map((m, idx) => {
+          const open = isExpanded(m, idx);
+          const outbound = m.direction === "outbound";
+          // Only the current selected (inbound) message shows the
+          // translation toggle — translating sent / older messages would
+          // require new mutation plumbing and offers little value here.
+          const showTranslate = isCurrent(m) && !outbound;
+          const body = showTranslate && translatedBody ? translatedBody : m.body;
+          return (
+            <div
+              key={m.id}
+              className={`rounded-md border ${
+                outbound
+                  ? "bg-blue-50/60 border-blue-200 dark:bg-blue-950/30 dark:border-blue-900"
+                  : "bg-muted/20 border-border"
+              } ${isCurrent(m) ? "ring-1 ring-primary/50" : ""}`}
+              data-testid={`thread-entry-${m.id}`}
+            >
+              <button
+                type="button"
+                onClick={() => toggle(m.id, open)}
+                className="w-full flex items-center justify-between gap-3 p-3 text-left hover-elevate"
+                data-testid={`thread-entry-toggle-${m.id}`}
+                aria-expanded={open}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Badge
+                    variant="outline"
+                    className={`text-[10px] py-0 h-5 uppercase tracking-wide ${
+                      outbound
+                        ? "border-blue-600 text-blue-800 dark:text-blue-300"
+                        : "border-muted-foreground/40 text-muted-foreground"
+                    }`}
+                    data-testid={`thread-entry-direction-${m.id}`}
+                  >
+                    {outbound ? t("inboxThreadOutbound") : t("inboxThreadInbound")}
+                  </Badge>
+                  <span className="font-medium truncate text-sm" data-testid={`thread-entry-from-${m.id}`}>
+                    {m.from || (outbound ? "us" : "—")}
                   </span>
                 </div>
-                <div className="whitespace-pre-wrap leading-relaxed">{r.sentReply}</div>
-              </div>
-            );
-          })}
-        </CardContent>
-      )}
+                <div className="flex items-center gap-2 flex-shrink-0 text-xs text-muted-foreground">
+                  <Clock className="h-3 w-3" />
+                  <span data-testid={`thread-entry-date-${m.id}`}>{formatDate(m.date)}</span>
+                  {open
+                    ? <ChevronUp className="h-3.5 w-3.5" />
+                    : <ChevronDown className="h-3.5 w-3.5" />}
+                </div>
+              </button>
+              {open && (
+                <div className="px-3 pb-3" data-testid={`thread-entry-body-${m.id}`}>
+                  <div
+                    className="whitespace-pre-wrap text-sm leading-relaxed"
+                    dangerouslySetInnerHTML={{ __html: sanitizeHtml(body) }}
+                  />
+                  {showTranslate && (
+                    <div className="mt-2 flex items-center gap-2">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={onTranslateLatestInbound}
+                        disabled={isTranslating}
+                        data-testid="button-translate-message"
+                      >
+                        <Languages className="h-4 w-4 mr-2" />
+                        {translatedBody ? t("inboxShowOriginal") : t("inboxTranslate")}
+                      </Button>
+                      {translatedBody && (
+                        <span className="text-xs text-muted-foreground">{t("inboxTranslated")}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </CardContent>
     </Card>
   );
 }

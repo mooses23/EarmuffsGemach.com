@@ -311,7 +311,7 @@ export async function listSentThreadIds(maxThreads: number = 500): Promise<strin
   return Array.from(ids);
 }
 
-export async function getThreadMessages(threadId: string, max: number = 6): Promise<EmailMessage[]> {
+export async function getThreadMessages(threadId: string, max: number = 50): Promise<EmailMessage[]> {
   const gmail = await getUncachableGmailClient();
   try {
     const thread = await gmail.users.threads.get({ userId: 'me', id: threadId, format: 'full' });

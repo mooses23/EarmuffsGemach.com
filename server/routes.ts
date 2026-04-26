@@ -2781,6 +2781,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (e: any) { res.status(500).json({ message: e.message }); }
   });
 
+  // Full conversation transcript for a single inbox item.
+  // For Gmail items the conversation is the underlying Gmail thread (every
+  // message — inbound + outbound — oldest first). For contact-form items we
+  // group prior submissions from the same sender that share the same
+  // normalized subject and interleave any saved replies. The inbox detail
+  // view uses this to render a Gmail-style transcript instead of one isolated
+  // message at a time.
+  app.get("/api/admin/inbox/thread", requireAdminMW, async (req, res) => {
+    try {
+      const source = String(req.query.source || '').trim();
+      const ref = String(req.query.ref || '').trim();
+      if (!source || !ref) {
+        return res.status(400).json({ message: "source and ref are required" });
+      }
+      if (source !== 'email' && source !== 'form') {
+        return res.status(400).json({ message: "source must be 'email' or 'form'" });
+      }
+
+      const norm = (s: string) => String(s || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const normSubject = (s: string) => norm(String(s || '').replace(/^\s*((re|fw|fwd|aw|tr)\s*:\s*)+/i, ''));
+
+      type ThreadEntry = {
+        id: string;
+        direction: 'inbound' | 'outbound';
+        from: string;
+        to?: string;
+        subject: string;
+        body: string;
+        date: string;          // ISO
+        isRead?: boolean;
+        source: 'gmail' | 'form' | 'saved';
+        messageRef?: string;   // backend id (Gmail message id or contact id)
+      };
+
+      if (source === 'email') {
+        // ref = Gmail threadId
+        const [threadMessages, savedReplies] = await Promise.all([
+          getThreadMessages(ref, 100).catch(() => []),
+          storage.getReplyExamplesByRef('email', ref).catch(() => []),
+        ]);
+        const entries: ThreadEntry[] = [];
+        const seenSentBodies = new Set<string>();
+        for (const m of threadMessages) {
+          const isSent = Array.isArray(m.labels) && m.labels.includes('SENT');
+          if (isSent) seenSentBodies.add(norm(m.body || m.snippet || ''));
+          const dateRaw = m.date ? new Date(m.date) : new Date();
+          entries.push({
+            id: `gmail:${m.id}`,
+            direction: isSent ? 'outbound' : 'inbound',
+            from: m.from,
+            to: m.to,
+            subject: m.subject,
+            body: m.body || m.snippet || '',
+            date: isNaN(dateRaw.getTime()) ? new Date().toISOString() : dateRaw.toISOString(),
+            isRead: m.isRead,
+            source: 'gmail',
+            messageRef: m.id,
+          });
+        }
+        // Defensive: include saved-only replies that didn't appear in the
+        // Gmail thread (e.g. send failed at Gmail but we still recorded it).
+        for (const r of savedReplies) {
+          if (seenSentBodies.has(norm(r.sentReply))) continue;
+          entries.push({
+            id: `saved:${r.id}`,
+            direction: 'outbound',
+            from: r.senderName ? `${r.senderName} <${r.senderEmail || ''}>` : (r.senderEmail || 'us'),
+            subject: r.incomingSubject,
+            body: r.sentReply,
+            date: (r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt)).toISOString(),
+            source: 'saved',
+          });
+        }
+        entries.sort((a, b) => a.date.localeCompare(b.date));
+        return res.json({ source: 'email', threadKey: ref, messages: entries });
+      }
+
+      // source === 'form': ref = contact id
+      const contactId = parseInt(ref, 10);
+      if (Number.isNaN(contactId)) {
+        return res.status(400).json({ message: "ref must be a contact id for form source" });
+      }
+      const seedContact = await storage.getContact(contactId);
+      if (!seedContact) {
+        return res.status(404).json({ message: "Contact not found" });
+      }
+      const seedNormSubj = normSubject(seedContact.subject);
+      const allContacts = await storage.getContactsByEmail(seedContact.email).catch(() => []);
+      const siblings = allContacts.filter((c) => normSubject(c.subject) === seedNormSubj);
+      const repliesArrays = await Promise.all(
+        siblings.map((c) => storage.getReplyExamplesByRef('form', String(c.id)).catch(() => []))
+      );
+      const entries: ThreadEntry[] = [];
+      siblings.forEach((c, i) => {
+        const ts = (c.submittedAt instanceof Date ? c.submittedAt : new Date(c.submittedAt));
+        entries.push({
+          id: `form:${c.id}`,
+          direction: 'inbound',
+          from: `${c.name} <${c.email}>`,
+          subject: c.subject,
+          body: c.message,
+          date: (isNaN(ts.getTime()) ? new Date() : ts).toISOString(),
+          isRead: !!c.isRead,
+          source: 'form',
+          messageRef: String(c.id),
+        });
+        for (const r of repliesArrays[i] || []) {
+          entries.push({
+            id: `saved:${r.id}`,
+            direction: 'outbound',
+            from: r.senderName ? `${r.senderName} <${r.senderEmail || ''}>` : 'us',
+            subject: r.incomingSubject,
+            body: r.sentReply,
+            date: (r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt)).toISOString(),
+            source: 'saved',
+          });
+        }
+      });
+      entries.sort((a, b) => a.date.localeCompare(b.date));
+      return res.json({
+        source: 'form',
+        threadKey: `${(seedContact.email || '').toLowerCase()}::${seedNormSubj}`,
+        messages: entries,
+      });
+    } catch (e: any) {
+      console.error("Failed to load inbox thread:", e);
+      res.status(500).json({ message: e.message || "Failed to load conversation" });
+    }
+  });
+
   // Backfill embeddings (best-effort, idempotent)
   app.post("/api/admin/embeddings/backfill", requireAdminMW, async (_req, res) => {
     try {
@@ -2876,7 +3006,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         contact.subject,
         contact.message,
         contact.name,
-        contact.email
+        contact.email,
+        undefined,
+        String(contact.id),
       );
       res.json({
         response: result.draft,

@@ -79,6 +79,17 @@ function cosine(a: number[], b: number[]): number {
   return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
 }
 
+// Strip leading "Re:" / "Fwd:" / "Aw:" / "Tr:" prefixes and collapse
+// whitespace so two messages with the same underlying subject group together.
+// Used for both the AI's form-side thread context and the inbox UI's grouping.
+function normalizeSubject(s: string): string {
+  return String(s || '')
+    .replace(/^\s*((re|fw|fwd|aw|tr)\s*:\s*)+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 function chunkText(text: string, chunkSize = 900, overlap = 150): string[] {
   const t = String(text || '').trim();
   if (!t) return [];
@@ -540,18 +551,64 @@ async function gatherContext(
     console.warn('retrieval block failed:', (err as Error)?.message);
   }
 
-  // 5. Thread history (prior messages in this Gmail thread)
+  // 5. Thread / conversation history. Two cases:
+  //    a) Gmail email with a threadId — pull the full Gmail thread (up to 50
+  //       messages) so the AI sees every prior turn, not just a 6-message
+  //       window. This was the cause of replies that contradicted earlier
+  //       answers in long threads.
+  //    b) Contact-form message (no threadId) — build a virtual thread from
+  //       sibling contacts on the same normalized subject from the same
+  //       sender, plus any saved replies, so the AI also has context for
+  //       repeat senders who wrote in via the website form.
   let threadHistoryCount = 0;
   try {
     if (threadId) {
-      const msgs = await getThreadMessages(threadId, 6);
+      const msgs = await getThreadMessages(threadId, 50);
       const prior = msgs.filter(m => m.id !== currentMessageId);
       threadHistoryCount = prior.length;
       if (prior.length) {
         sections.push(
           'PRIOR MESSAGES IN THIS THREAD (oldest first — use this so you do not repeat info or contradict yourself):\n' +
-          prior.map(m => `[${m.date}] From: ${m.from}\nSubject: ${m.subject}\n${m.body.slice(0, 1200)}`).join('\n---\n')
+          prior.map(m => {
+            const dir = (m.labels || []).includes('SENT') ? 'OUR REPLY (sent)' : `INBOUND from ${m.from}`;
+            return `[${m.date}] ${dir}\nSubject: ${m.subject}\n${(m.body || m.snippet || '').slice(0, 1500)}`;
+          }).join('\n---\n')
         );
+      }
+    } else if (senderEmail) {
+      const normSubj = normalizeSubject(emailSubject);
+      const allContacts = await storage.getContactsByEmail(senderEmail).catch(() => [] as Contact[]);
+      const currentId = currentMessageId ? Number(currentMessageId) : NaN;
+      const siblings = allContacts.filter(c =>
+        normalizeSubject(c.subject) === normSubj && c.id !== currentId
+      );
+      if (siblings.length) {
+        const repliesPerSibling = await Promise.all(
+          siblings.map(s => storage.getReplyExamplesByRef('form', String(s.id)).catch(() => [] as ReplyExample[]))
+        );
+        const events: { ts: number; line: string }[] = [];
+        siblings.forEach((s, i) => {
+          const ts = (s.submittedAt instanceof Date ? s.submittedAt : new Date(s.submittedAt)).getTime() || 0;
+          events.push({
+            ts,
+            line: `[${new Date(ts).toISOString()}] INBOUND from ${s.name} <${s.email}>\nSubject: ${s.subject}\n${(s.message || '').slice(0, 1500)}`,
+          });
+          for (const r of repliesPerSibling[i] || []) {
+            const rts = (r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt)).getTime() || 0;
+            events.push({
+              ts: rts,
+              line: `[${new Date(rts).toISOString()}] OUR PRIOR REPLY (sent)\n${(r.sentReply || '').slice(0, 1500)}`,
+            });
+          }
+        });
+        events.sort((a, b) => a.ts - b.ts);
+        threadHistoryCount = events.length;
+        if (events.length) {
+          sections.push(
+            'PRIOR MESSAGES IN THIS CONVERSATION (oldest first — same sender + subject; use to avoid repeating info or contradicting yourself):\n' +
+            events.map(e => e.line).join('\n---\n')
+          );
+        }
       }
     }
   } catch {}
