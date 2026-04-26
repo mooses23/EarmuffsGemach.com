@@ -551,16 +551,10 @@ async function gatherContext(
     console.warn('retrieval block failed:', (err as Error)?.message);
   }
 
-  // 5. Thread / conversation history. Two cases:
-  //    a) Gmail email with a threadId — pull the FULL Gmail thread so the AI
-  //       sees every prior turn (was capped at 6, now uncapped).
-  //    b) Contact-form message (no threadId) — build a virtual thread from
-  //       sibling contacts on the same normalized subject from the same
-  //       sender, plus any saved replies.
-  // Both branches build a unified `events` list and then run the same
-  // prompt-budget compressor: keep the most recent ~10 turns verbatim and
-  // collapse anything older into a short "Earlier in this conversation"
-  // summary so we never silently drop context (per task #29).
+  // 5. Thread / conversation history.
+  //    Gmail: pull full thread via threadId.
+  //    Form: build virtual thread from sibling contacts (same sender + normalized subject) + saved replies.
+  //    Then compress: keep recent turns verbatim, summarize older ones.
   let threadHistoryCount = 0;
   try {
     type ThreadEvent = {
@@ -574,8 +568,6 @@ async function gatherContext(
     let headerLabel = 'PRIOR MESSAGES IN THIS THREAD';
 
     if (threadId) {
-      // No cap — return EVERY message in the Gmail thread so the
-      // budget-compressor below operates on the true full history.
       const msgs = await getThreadMessages(threadId);
       const prior = msgs.filter(m => m.id !== currentMessageId);
       events = prior.map((m) => {
@@ -626,10 +618,7 @@ async function gatherContext(
     threadHistoryCount = events.length;
 
     if (events.length) {
-      // Prompt-budget compression. We keep the most recent KEEP_VERBATIM
-      // turns in full and squeeze the rest into a single "Earlier in this
-      // conversation" summary so the AI never loses the long-tail context
-      // even on huge threads.
+      // Keep the most recent KEEP_VERBATIM turns in full; summarize the rest.
       const KEEP_VERBATIM = 10;
       const VERBATIM_BODY_CHARS = 4000;
       const SUMMARY_BODY_CHARS = 240;

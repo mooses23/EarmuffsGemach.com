@@ -79,19 +79,13 @@ interface GmailEmail {
   date: string;
   isRead: boolean;
   labels: string[];
-  // Optional server-authoritative thread metadata. Populated by the
-  // /api/admin/emails/threads endpoint which returns ONE entry per
-  // Gmail conversation (latest message as representative) plus the
-  // total message count and unread count of the full thread — not
-  // just the messages that happen to be loaded on this page.
+  // Server-authoritative thread totals (from /api/admin/emails/threads).
   messageCount?: number;
   unreadCount?: number;
 }
 
 interface EmailsResponse {
-  // The new thread-grouped endpoint returns `threads`. The legacy
-  // per-message endpoint returned `emails`. We accept both shapes so
-  // the page degrades cleanly if the new endpoint isn't deployed yet.
+  // `threads` from the new thread-grouped endpoint; `emails` from the legacy one.
   threads?: GmailEmail[];
   emails?: GmailEmail[];
   nextPageToken?: string;
@@ -111,9 +105,7 @@ interface UnifiedItem {
   isRead: boolean;
   isArchived?: boolean;
   isSpam?: boolean;
-  // Server-authoritative thread counts from the thread-grouped list
-  // endpoints. When set, takes precedence over the client-derived
-  // count in the inbox row.
+  // Server-authoritative thread counts; preferred over client-derived counts when set.
   serverMessageCount?: number;
   serverUnreadCount?: number;
 }
@@ -280,12 +272,7 @@ export default function AdminInbox() {
     return null;
   };
 
-  // Paginated email THREADS (using infinite query for proper cache + refresh
-  // behavior). Hits the server-authoritative thread-grouped endpoint that
-  // returns ONE entry per Gmail conversation with messageCount/unreadCount
-  // computed from the FULL thread membership — so paging, counts, and unread
-  // state always reflect the real conversation state, never just whatever
-  // messages happen to be loaded.
+  // Paginated thread-grouped email list (one entry per Gmail conversation).
   const emailQueries = useInfiniteQuery<EmailsResponse>({
     queryKey: ["/api/admin/emails/threads", "infinite", folder],
     initialPageParam: undefined as string | undefined,
@@ -307,15 +294,10 @@ export default function AdminInbox() {
 
   const invalidateEmailLists = () => {
     qc.invalidateQueries({ queryKey: ["/api/admin/emails/threads", "infinite"] });
-    // Folder-chip backlog counts also depend on the just-changed Gmail label,
-    // so refresh them immediately rather than waiting for the 60s poll.
     qc.invalidateQueries({ queryKey: ["/api/admin/emails/labels"] });
   };
 
   const allEmails: GmailEmail[] = useMemo(() => {
-    // Accept both response shapes (`threads` from the new endpoint, `emails`
-    // from the legacy one) so a single page-load failure doesn't blank the
-    // inbox if/when the server is rolled back.
     const merged = (emailQueries.data?.pages ?? []).flatMap((p) => p.threads ?? p.emails ?? []);
     const ids = new Set<string>();
     return merged.filter((e) => {
@@ -336,7 +318,7 @@ export default function AdminInbox() {
   const handleRefresh = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["/api/contact"] }),
-      queryClient.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] }),
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/emails/threads", "infinite"] }),
       queryClient.invalidateQueries({ queryKey: ["/api/admin/emails/status"] }),
     ]);
   };
@@ -374,9 +356,6 @@ export default function AdminInbox() {
         snippet: e.snippet,
         date: safeDate(e.date),
         isRead: e.isRead,
-        // Carry server-authoritative thread metadata onto the unified item
-        // so the inbox row's "{N} messages" pill reflects the FULL Gmail
-        // thread, not just the messages currently loaded on this page.
         serverMessageCount: e.messageCount,
         serverUnreadCount: e.unreadCount,
       });
@@ -453,10 +432,7 @@ export default function AdminInbox() {
         existing.latest = it;
       }
     }
-    // Apply server-authoritative counts when present. The thread-grouped
-    // Gmail endpoint returns ONE entry per conversation with the FULL
-    // thread's messageCount/unreadCount, so we trust those over our
-    // client-derived tally (which only reflects loaded messages).
+    // Prefer server-supplied counts (full thread) over client-derived ones (loaded only).
     Array.from(groups.values()).forEach((g) => {
       if (typeof g.latest.serverMessageCount === 'number') {
         g.messageCount = g.latest.serverMessageCount;
@@ -748,23 +724,13 @@ export default function AdminInbox() {
   };
 
   // ===== Bulk actions =====
-  // Each bulk action is implemented as a single async function that runs the
-  // existing per-id endpoints in a loop. We fan out with Promise.allSettled so
-  // a single failure doesn't stop the rest, then surface ONE summary toast.
-  // `unarchive` is the inverse of `archive` (Gmail: re-add INBOX label;
-  // form: clear isArchived). It's distinct from `restore`, which only
-  // applies to the Trash/Spam folders and untrashes / unmarks-spam.
-  // Mixing them was a real undo bug — undoing an archive used to call
-  // /untrash, which is a no-op for archived (but not trashed) threads.
+  // `unarchive` is the inverse of `archive`; `restore` only applies in Trash/Spam.
   type BulkKind = "markRead" | "markUnread" | "archive" | "unarchive" | "trash" | "spam" | "notSpam" | "restore";
   const runOneBulk = async (item: UnifiedItem, kind: BulkKind): Promise<void> => {
     const idStr = String(item.id);
     const idNum = Number(item.id);
     if (item.source === "email") {
-      // Prefer thread-level endpoints when we have a Gmail threadId — Gmail's
-      // `users.threads.*` API moves every message in the thread atomically,
-      // so older siblings the client hadn't loaded still get the action.
-      // Falls back to the per-message endpoint when threadId is missing.
+      // Prefer the thread endpoint so all siblings move atomically.
       const tid = item.threadId;
       const base = tid
         ? `/api/admin/emails/thread/${tid}`
@@ -778,7 +744,6 @@ export default function AdminInbox() {
         case "spam": await apiRequest("POST", `${base}/spam`); return;
         case "notSpam": await apiRequest("POST", `${base}/not-spam`); return;
         case "restore":
-          // Spam folder uses not-spam; Trash folder uses untrash.
           if (folder === "spam") {
             await apiRequest("POST", `${base}/not-spam`);
           } else {
@@ -797,7 +762,7 @@ export default function AdminInbox() {
         case "unarchive":
           await apiRequest("PATCH", `/api/contact/${idNum}`, { isArchived: false }); return;
         case "trash":
-          // Contacts are hard-deleted from Trash actions (mirrors single-row behavior).
+          // Contacts are hard-deleted on trash.
           await apiRequest("DELETE", `/api/contact/${idNum}`); return;
         case "spam":
           await apiRequest("PATCH", `/api/contact/${idNum}`, { isSpam: true }); return;
@@ -808,8 +773,7 @@ export default function AdminInbox() {
       }
     }
   };
-  // Dedupe items so we make ONE request per Gmail thread (not one per
-  // sibling). Form items have no thread endpoint and are kept per-row.
+  // One request per Gmail thread; form items kept per-row (no thread endpoint).
   const dedupeForBulk = (items: UnifiedItem[]): UnifiedItem[] => {
     const seen = new Set<string>();
     const out: UnifiedItem[] = [];
@@ -830,10 +794,8 @@ export default function AdminInbox() {
     const results = await Promise.allSettled(targets.map((it) => runOneBulk(it, kind)));
     const ok = results.filter((r) => r.status === "fulfilled").length;
     const fail = results.length - ok;
-    // Refresh affected caches (one shot, not per-row) to repaint the list.
     qc.invalidateQueries({ queryKey: ["/api/contact"] });
     invalidateEmailLists();
-    // Single summary toast — counts succeeded/failed.
     if (fail === 0) {
       toast({ title: t("inboxBulkAllSucceeded"), description: `${ok}` });
     } else if (ok === 0) {
@@ -846,13 +808,7 @@ export default function AdminInbox() {
     setBulkRunning(false);
   };
 
-  // Thread-scoped action helper. Since list rows now represent a whole
-  // conversation (not a single message), spam/archive/trash/restore from
-  // a row must apply to EVERY message in the thread — otherwise older
-  // siblings stay behind in the inbox and the row "reappears". Uses the
-  // existing per-id endpoints (`runOneBulk`) and surfaces ONE summary
-  // toast plus optional undo. For single-message threads it falls
-  // through to the same code path so we keep one set of semantics.
+  // Apply a bulk action to all members of a thread, with optional undo toast.
   const performThreadAction = async (
     items: UnifiedItem[],
     kind: BulkKind,
@@ -872,9 +828,6 @@ export default function AdminInbox() {
     invalidateEmailLists();
     if (fail === 0) {
       if (undoKind) {
-        // Undo replays the inverse on the same items snapshot. We don't
-        // chain a third-level undo (no undo-of-undo) to keep the toast
-        // surface tidy.
         undoToast(successTitle, () => {
           performThreadAction(
             items,
@@ -943,7 +896,7 @@ export default function AdminInbox() {
       setFaqCategory(mapped || "general");
       setShowSaveFaq(true);
       qc.invalidateQueries({ queryKey: ["/api/contact"] });
-      qc.invalidateQueries({ queryKey: ["/api/admin/emails", "infinite"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/emails/threads", "infinite"] });
       // Refresh "Replied" badges everywhere and the per-message thread for
       // the selected item so the new reply appears immediately. Email items
       // are keyed by Gmail threadId so the entire conversation gets marked.
@@ -1125,11 +1078,7 @@ export default function AdminInbox() {
     }
   };
 
-  // Thread-level read toggle: marking the open conversation read/unread
-  // applies the change to EVERY message in the thread.
-  //   - Gmail items → ONE call to the thread endpoint (server moves all
-  //     siblings atomically, even ones the client never loaded).
-  //   - Form items → fan out across loaded sibling rows.
+  // Toggle read state for the whole conversation.
   const toggleReadStatus = (item: UnifiedItem) => {
     const newIsRead = !item.isRead;
     const members = groupMembersFor(item);
@@ -1835,25 +1784,10 @@ export default function AdminInbox() {
             ) : (
               <div className="divide-y">
                 {threadGroups.map((g) => {
-                  // Each row represents an entire conversation. We surface
-                  // the LATEST message as the row preview (sender, subject,
-                  // snippet) and add a "{N} messages" pill when the thread
-                  // has more than one. Swipe + select actions still target
-                  // the latest message — opening the row loads the full
-                  // transcript via /api/admin/inbox/thread.
+                  // One row per conversation; latest message is the preview.
                   const it = g.latest;
                   const isThreadUnread = g.unreadCount > 0;
-                  // Right = mark unread (Restore in Trash). Short left = archive
-                  // (Inbox only). Long left = delete (hard-delete for contacts,
-                  // Gmail trash for emails); disabled in Trash.
-                  // Apply destructive actions to ALL messages in the
-                  // thread so older siblings don't linger in the previous
-                  // folder. Mark-unread stays on the latest only since
-                  // group unread state derives from latest.
-                  // Resolve sibling members from the canonical (unfiltered)
-                  // thread map so a search/read/source filter that hides
-                  // some siblings doesn't leave them behind in the wrong
-                  // folder. `g.members` only contains the visible subset.
+                  // Use canonical (unfiltered) members so hidden siblings move with the row.
                   const canonicalMembers = groupMembersFor(it);
                   const rightAction =
                     folder === "trash"
@@ -1873,8 +1807,6 @@ export default function AdminInbox() {
                           label: t("inboxSwipeMarkUnread"),
                           icon: EyeOff,
                           color: "bg-blue-500",
-                          // One thread-endpoint call per Gmail thread (server
-                          // unreads every sibling); fan-out for form rows.
                           onCommit: () =>
                             performThreadAction(
                               canonicalMembers,
@@ -1889,11 +1821,8 @@ export default function AdminInbox() {
                           label: t("inboxSwipeArchive"),
                           icon: Archive,
                           color: "bg-gray-500",
+                          // Archive's inverse is `unarchive` (not `restore`/untrash).
                           onCommit: () =>
-                            // Undo of archive is `unarchive` (re-add INBOX
-                            // label / clear isArchived). `restore` would
-                            // route to /untrash for emails, which is a
-                            // no-op for archived (but not trashed) threads.
                             performThreadAction(
                               canonicalMembers,
                               "archive",
@@ -1918,8 +1847,7 @@ export default function AdminInbox() {
                               "trash",
                               t("inboxTrashSuccess"),
                               t("inboxTrashFailed"),
-                              // Contacts are hard-deleted on trash, so undo
-                              // would 404. Only emails support untrash.
+                              // Only emails support untrash; contacts are hard-deleted.
                               canonicalMembers.every((m) => m.source === "email") ? "restore" : undefined,
                               t("inboxRestoreSuccess"),
                               t("inboxRestoreFailed"),
@@ -2271,11 +2199,7 @@ function ThreadTranscriptPanel({
   isTranslating: boolean;
   uiTarget: "en" | "he";
 }) {
-  // Per-entry translations for OLDER inbound messages. The latest inbound
-  // (the one matched by `isCurrent`) keeps using the parent-owned
-  // `translatedBody` so the transcript card and the reply panel stay in
-  // sync. Everything else translates locally — the cache is keyed by
-  // ThreadEntry.id so toggles persist while the panel stays mounted.
+  // Per-entry translations for older inbound messages (latest uses parent state).
   const [entryTranslations, setEntryTranslations] = useState<Record<string, string>>({});
   const [translatingId, setTranslatingId] = useState<string | null>(null);
   const translateEntryMutation = useMutation({
@@ -2317,9 +2241,7 @@ function ThreadTranscriptPanel({
     },
   });
 
-  // Fallback transcript: when the thread fetch hasn't returned yet (or
-  // failed), render just the selected message so the detail view still
-  // has content.
+  // Fallback when the thread fetch is loading or failed.
   const fallbackEntry: ThreadEntry = useMemo(() => ({
     id: `${selected.source}:${selected.id}`,
     direction: "inbound",
@@ -2338,9 +2260,7 @@ function ThreadTranscriptPanel({
     ? query.data.messages
     : [fallbackEntry];
 
-  // The "current" message is the one the user clicked into from the list
-  // (the latest in the group). It's always expanded by default; older
-  // messages collapse so a long thread isn't a wall of text.
+  // The clicked-into message; always expanded by default.
   const currentRef = String(selected.id);
   const isCurrent = (m: ThreadEntry) => {
     if (selected.source === "email") return m.source === "gmail" && m.messageRef === currentRef;
@@ -2356,9 +2276,7 @@ function ThreadTranscriptPanel({
   const toggle = (id: string, current: boolean) =>
     setExpanded((p) => ({ ...p, [id]: !current }));
 
-  // Replied state at the conversation level: any outbound message means we
-  // already replied. Picks the latest outbound date so the badge can show
-  // "Replied {date}".
+  // Latest outbound date, if any (drives the "Replied {date}" badge).
   const repliedAt = useMemo(() => {
     const outbound = messages.filter((m) => m.direction === "outbound");
     if (!outbound.length) return null;
@@ -2425,12 +2343,7 @@ function ThreadTranscriptPanel({
         {messages.map((m, idx) => {
           const open = isExpanded(m, idx);
           const outbound = m.direction === "outbound";
-          // Translation is offered on EVERY inbound message in the
-          // transcript so admins can read older customer messages in
-          // their UI language. The latest inbound (the "current" one)
-          // is wired to the parent-owned `translatedBody` so it stays
-          // in sync with the reply panel; older inbound messages
-          // translate locally with their own per-entry cache.
+          // Translate is offered on every inbound entry.
           const showTranslate = !outbound;
           const isLatestInbound = isCurrent(m);
           const entryTranslated = isLatestInbound

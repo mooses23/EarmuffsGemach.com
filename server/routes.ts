@@ -2189,11 +2189,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Thread-grouped contact-form list (server-authoritative). Groups every
-  // contact-form submission by (lower(email), normalized subject) — the same
-  // bucket used for Gmail-style threading on the form side — and returns one
-  // row per conversation with authoritative messageCount/unreadCount derived
-  // from the FULL contact set.
+  // Contact-form list grouped by (lower(email), normalized subject).
   app.get("/api/admin/contacts/threads", async (req, res) => {
     try {
       if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
@@ -2253,10 +2249,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Thread-grouped Gmail list (server-authoritative). Returns one entry per
-  // Gmail conversation with messageCount/unreadCount derived from the FULL
-  // thread membership (not just whichever messages happen to be loaded).
-  // Pagination is thread-based via Gmail's `threads.list` page tokens.
+  // Gmail list grouped by thread; paginated via threads.list page tokens.
   app.get("/api/admin/emails/threads", async (req, res) => {
     try {
       if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
@@ -2434,11 +2427,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/admin/emails/:id/not-spam", unmarkSpamHandler);
   app.post("/api/admin/emails/:id/unspam", unmarkSpamHandler);
 
-  // ===== Thread-level Gmail mutations (Task #29) =====
-  // These wrap Gmail's `users.threads.*` APIs which apply the change to
-  // EVERY message in the thread atomically. They are the
-  // server-authoritative path the inbox UI uses for any per-thread action,
-  // so older siblings that the client hadn't loaded still move correctly.
+  // Thread-level Gmail mutations (atomic across all messages in the thread).
   const requireAdmin = (req: Request, res: Response): boolean => {
     if (!req.isAuthenticated()) {
       res.status(401).json({ message: "Authentication required" });
@@ -2954,9 +2943,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       };
 
       if (source === 'email') {
-        // ref = Gmail threadId. No cap — pull the entire Gmail thread so
-        // the transcript view always shows every message in the
-        // conversation, never a silently-truncated tail.
+        // ref = Gmail threadId. Pull every message in the thread (no cap).
         const [threadMessages, savedReplies] = await Promise.all([
           getThreadMessages(ref).catch(() => []),
           storage.getReplyExamplesByRef('email', ref).catch(() => []),

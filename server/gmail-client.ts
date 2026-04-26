@@ -252,14 +252,7 @@ export async function listEmails(
   };
 }
 
-// ====================== Thread-grouped list (Task #29) ======================
-// Server-authoritative listing that returns one row per Gmail conversation
-// (not per message). Uses Gmail's `threads.list` for thread-level paging and
-// `threads.get(format=full)` to compute the authoritative messageCount /
-// unreadCount per thread. The latest message in the thread is surfaced as
-// the row representative. This is what the inbox UI consumes so paging,
-// counts, and unread state always reflect the full conversation — not just
-// whichever messages happen to be loaded.
+// One entry per Gmail conversation, with full-thread message/unread counts.
 export interface EmailThreadSummary extends EmailMessage {
   messageCount: number;
   unreadCount: number;
@@ -393,9 +386,7 @@ export async function getThreadMessages(threadId: string, max?: number): Promise
   try {
     const thread = await gmail.users.threads.get({ userId: 'me', id: threadId, format: 'full' });
     const messages = thread.data.messages || [];
-    // No cap by default — return EVERY message in the thread so the
-    // transcript view and AI context never silently drop history. A `max`
-    // is only honored when the caller explicitly opts in.
+    // No cap by default; callers must opt in via `max` to truncate.
     const sliced = typeof max === 'number' && max > 0 ? messages.slice(-max) : messages;
     return sliced.map((m: any) => {
       const headers = m.payload?.headers || [];
@@ -525,12 +516,7 @@ export async function unmarkSpam(messageId: string): Promise<void> {
   });
 }
 
-// ====================== Thread-level mutations ======================
-// Gmail's `users.threads.*` APIs apply the change to EVERY message in the
-// thread atomically — so when an admin archives / trashes / spams /
-// marks-read a conversation, every sibling moves together regardless of
-// whether the client had loaded all of them. This is the server-authoritative
-// path used for Task #29 thread-level mutations.
+// Thread-level mutations: wrap users.threads.* so all messages move atomically.
 
 export async function markThreadAsRead(threadId: string): Promise<void> {
   const gmail = await getUncachableGmailClient();
