@@ -4,13 +4,20 @@
  *
  * Run with: npx tsx scripts/test-inbox-threading.ts
  *
- * Locks in the behavior of the helpers that power the threaded inbox so a
- * future change can't silently regress: list collapsing into one row per
- * conversation, atomic per-thread mutations (every sibling moves together),
- * and the AI draft endpoint receiving the full thread.
+ * Locks in the behavior that powers the threaded admin inbox:
+ * 1. Helper-level: subject normalization + list collapsing + memberIds.
+ * 2. Integration: the real generateEmailResponse() — with storage and the
+ *    OpenAI client stubbed in-process — pulls the FULL form-side thread
+ *    into the AI context (threadHistoryCount === N siblings).
+ *
+ * No external services are contacted. Exits non-zero on failure.
  */
+process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-stub-key";
+
 import { normalizeSubject, groupContactsByThread } from "../server/inbox-threading.js";
-import type { Contact } from "../shared/schema.js";
+import { storage } from "../server/storage.js";
+import { generateEmailResponse } from "../server/openai-client.js";
+import type { Contact, ReplyExample, Transaction, GemachApplication, Location, PlaybookFact } from "../shared/schema.js";
 
 type Result = { name: string; ok: boolean; err?: string };
 const results: Result[] = [];
@@ -194,6 +201,125 @@ test("AI form-thread: selects siblings with normalized subject and excludes the 
   const siblings = selectFormThreadSiblings(contacts, "102", "Fwd: Need stroller");
   eq(siblings.map((c) => c.id).sort(), [100, 101], "AI sees prior siblings, not the current msg or unrelated subject");
 });
+
+// ---------- Integration: generateEmailResponse pulls the full form thread ----------
+// Stubs storage + Location matching + retrieval so the test runs without a
+// database or any network. The OpenAI call itself fails fast (fake key) and
+// gatherContext returns its assembled context anyway — including
+// `threadHistoryCount`, which is what we assert.
+
+type StorageOverride = Partial<Record<keyof typeof storage, unknown>>;
+
+function patchStorage(over: StorageOverride): () => void {
+  const target = storage as unknown as Record<string, unknown>;
+  const originals: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(over)) {
+    originals[k] = target[k];
+    target[k] = v;
+  }
+  return () => {
+    for (const [k, v] of Object.entries(originals)) {
+      target[k] = v;
+    }
+  };
+}
+
+async function runIntegration(): Promise<void> {
+  const senderEmail = "borrower@example.com";
+  const senderName = "Borrower";
+  const seedSubject = "Re: Borrow request";
+  const currentMessageId = "100";
+
+  const siblings: Contact[] = [
+    {
+      id: 101, name: senderName, email: senderEmail,
+      subject: "Borrow request",
+      message: "Hi, can I borrow a stroller for next Tuesday?",
+      submittedAt: new Date("2026-01-01T10:00:00Z"),
+      isRead: true, isArchived: false, isSpam: false,
+    },
+    {
+      id: 102, name: senderName, email: senderEmail,
+      subject: "Re: Borrow request",
+      message: "Adding: I also need a car seat if possible.",
+      submittedAt: new Date("2026-01-02T10:00:00Z"),
+      isRead: true, isArchived: false, isSpam: false,
+    },
+    // The current incoming message — must be excluded from prior thread.
+    {
+      id: Number(currentMessageId), name: senderName, email: senderEmail,
+      subject: seedSubject,
+      message: "Just checking in — any update on availability?",
+      submittedAt: new Date("2026-01-03T10:00:00Z"),
+      isRead: false, isArchived: false, isSpam: false,
+    },
+  ];
+
+  const restore = patchStorage({
+    getContactsByEmail: async (e: string) =>
+      e.toLowerCase() === senderEmail ? siblings : [],
+    getReplyExamplesBySender: async (): Promise<ReplyExample[]> => [],
+    getReplyExamplesByRef: async (): Promise<ReplyExample[]> => [],
+    getTransactionsByEmail: async (): Promise<Transaction[]> => [],
+    getAllApplications: async (): Promise<GemachApplication[]> => [],
+    getAllLocations: async (): Promise<Location[]> => [],
+    getAllPlaybookFacts: async (): Promise<PlaybookFact[]> => [],
+  } as StorageOverride);
+
+  try {
+    const result = await generateEmailResponse(
+      seedSubject,
+      "Just checking in — any update on availability?",
+      senderName,
+      senderEmail,
+      undefined,           // no Gmail threadId — exercises the form-thread branch
+      currentMessageId,
+    );
+
+    test("generateEmailResponse: form-thread context includes both prior siblings", () => {
+      assert(
+        result.threadHistoryCount === 2,
+        `expected threadHistoryCount=2 (the two prior siblings), got ${result.threadHistoryCount}`,
+      );
+    });
+  } finally {
+    restore();
+  }
+
+  // Same fixtures, but now mark the current message as the only one — the
+  // AI must NOT find a thread to pull from (count goes to 0).
+  const restore2 = patchStorage({
+    getContactsByEmail: async (e: string) =>
+      e.toLowerCase() === senderEmail ? [siblings[2]] : [],
+    getReplyExamplesBySender: async (): Promise<ReplyExample[]> => [],
+    getReplyExamplesByRef: async (): Promise<ReplyExample[]> => [],
+    getTransactionsByEmail: async (): Promise<Transaction[]> => [],
+    getAllApplications: async (): Promise<GemachApplication[]> => [],
+    getAllLocations: async (): Promise<Location[]> => [],
+    getAllPlaybookFacts: async (): Promise<PlaybookFact[]> => [],
+  } as StorageOverride);
+
+  try {
+    const lone = await generateEmailResponse(
+      seedSubject,
+      "Just checking in.",
+      senderName,
+      senderEmail,
+      undefined,
+      currentMessageId,
+    );
+    test("generateEmailResponse: zero prior siblings → threadHistoryCount=0", () => {
+      assert(
+        lone.threadHistoryCount === 0,
+        `expected threadHistoryCount=0 with no siblings, got ${lone.threadHistoryCount}`,
+      );
+    });
+  } finally {
+    restore2();
+  }
+}
+
+await runIntegration();
 
 // ---------- Print results ----------
 
