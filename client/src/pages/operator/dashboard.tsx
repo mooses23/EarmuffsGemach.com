@@ -969,6 +969,7 @@ function LendWizard({
                   const dc = Math.round((parseFloat(depositAmount) || 0) * 100);
                   return (dc + Math.ceil(dc * (location.processingFeePercent ?? 300) / 10000) + (location.processingFeeFixed ?? 30)) / 100;
                 })()}
+            feeBreakdown={serverFeeQuote ?? undefined}
             currency="usd"
             onSuccess={async () => {
               try {

@@ -3722,9 +3722,17 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       // Persist consent from the magic-link flow (borrower accepted on /status/:id).
+      // Security: look up the transaction by SetupIntent ID (1:1 mapping in DB) so
+      // we never update consent for a transaction the caller doesn't own. The
+      // transactionId body field, when provided, must match to prevent any
+      // cross-transaction mutation.
       if (consentText && typeof consentText === 'string') {
         const tx = await storage.getTransactionBySetupIntentId(setupIntentId);
         if (tx) {
+          // Reject if caller supplied a transactionId that doesn't match.
+          if (transactionId !== undefined && Number(transactionId) !== tx.id) {
+            return res.status(403).json({ message: "transactionId does not match SetupIntent owner" });
+          }
           await storage.updateTransaction(tx.id, {
             consentText,
             consentAcceptedAt: new Date(),

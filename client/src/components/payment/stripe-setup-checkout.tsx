@@ -10,9 +10,16 @@ import { apiRequest } from "@/lib/queryClient";
 
 const OPERATOR_DASHBOARD_URL = "/operator/dashboard";
 
-function buildConsentText(gemachName: string, maxChargeAmount: number, currency: string) {
+interface FeeBreakdown {
+  depositCents: number;
+  feeCents: number;
+  totalCents: number;
+}
+
+function buildConsentText(gemachName: string, totalCents: number, currency: string) {
   const symbol = currency.toUpperCase() === "USD" ? "$" : `${currency.toUpperCase()} `;
-  return `By saving this card, I authorize ${gemachName} to charge up to ${symbol}${maxChargeAmount.toFixed(2)} plus a small processing fee if I do not return the borrowed item.`;
+  const total = (totalCents / 100).toFixed(2);
+  return `By saving this card, I authorize ${gemachName} to charge up to ${symbol}${total} (deposit + processing fee) if I do not return the borrowed item.`;
 }
 
 interface StripeSetupCheckoutFormProps {
@@ -20,6 +27,7 @@ interface StripeSetupCheckoutFormProps {
   gemachName: string;
   maxChargeAmount: number;
   currency: string;
+  feeBreakdown?: FeeBreakdown;
   onSuccess: () => void;
   onError: (error: string) => void;
 }
@@ -29,6 +37,7 @@ function StripeSetupCheckoutForm({
   gemachName,
   maxChargeAmount,
   currency,
+  feeBreakdown,
   onSuccess,
   onError,
 }: StripeSetupCheckoutFormProps) {
@@ -39,8 +48,9 @@ function StripeSetupCheckoutForm({
   const [consentChecked, setConsentChecked] = useState(false);
   const { toast } = useToast();
 
-  const consentText = buildConsentText(gemachName, maxChargeAmount, currency);
-  const consentMaxChargeCents = Math.round(maxChargeAmount * 100);
+  const totalCents = feeBreakdown?.totalCents ?? Math.round(maxChargeAmount * 100);
+  const consentText = buildConsentText(gemachName, totalCents, currency);
+  const consentMaxChargeCents = totalCents;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -127,6 +137,22 @@ function StripeSetupCheckoutForm({
             <div className="flex items-start gap-2">
               <ShieldAlert className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
               <div className="space-y-3 flex-1">
+                {feeBreakdown && (
+                  <div className="text-xs text-amber-800 bg-amber-100 rounded p-2 space-y-0.5">
+                    <div className="flex justify-between">
+                      <span>Deposit</span>
+                      <span>${(feeBreakdown.depositCents / 100).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span>Processing fee</span>
+                      <span>${(feeBreakdown.feeCents / 100).toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between font-semibold border-t border-amber-300 pt-0.5 mt-0.5">
+                      <span>Max charge</span>
+                      <span>${(feeBreakdown.totalCents / 100).toFixed(2)}</span>
+                    </div>
+                  </div>
+                )}
                 <p className="text-sm text-amber-900 font-medium leading-relaxed">
                   {consentText}
                 </p>
@@ -182,6 +208,7 @@ interface StripeSetupCheckoutProps {
   gemachName: string;
   maxChargeAmount: number;
   currency?: string;
+  feeBreakdown?: FeeBreakdown;
   onSuccess: () => void;
   onError: (error: string) => void;
 }
@@ -192,6 +219,7 @@ export default function StripeSetupCheckout({
   gemachName,
   maxChargeAmount,
   currency = "usd",
+  feeBreakdown,
   onSuccess,
   onError,
 }: StripeSetupCheckoutProps) {
@@ -204,6 +232,7 @@ export default function StripeSetupCheckout({
         gemachName={gemachName}
         maxChargeAmount={maxChargeAmount}
         currency={currency}
+        feeBreakdown={feeBreakdown}
         onSuccess={onSuccess}
         onError={onError}
       />

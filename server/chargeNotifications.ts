@@ -4,13 +4,15 @@
 // message ("we are about to charge $X for the unreturned earmuffs from
 // {gemach name} — reply if there's a mistake").
 //
-// Channel selection (best effort, never blocks the charge):
+// Channel selection:
 //   1. SMS   — if borrower has a phone and Twilio is configured
 //   2. Email — fallback if no SMS could be sent
 //
-// We do NOT throw on send failure — caller will charge anyway. The result
-// (channel + sentAt) is persisted on the transaction so operators can
-// see what was attempted.
+// Whether a send failure blocks the charge is determined by the caller:
+// chargeTransaction reads `requirePreChargeNotification` (global_settings key
+// stripe.requirePreChargeNotification, default TRUE) and returns an error if
+// notification fails and the setting is enabled. The result (channel + sentAt)
+// is always persisted on the transaction so operators can see what was attempted.
 
 import twilio from 'twilio';
 import { getTwilioConfigStatus } from './twilio-client.js';
