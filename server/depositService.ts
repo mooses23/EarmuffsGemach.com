@@ -1,6 +1,6 @@
 import { getUncachableStripeClient, getStripePublishableKey } from './stripeClient.js';
 import { storage } from './storage.js';
-import { computeFeeForLocation } from './depositFees.js';
+import { computeFeeForPaymentMethod } from './depositFees.js';
 import type { Payment, Transaction, Location } from '../shared/schema.js';
 
 export interface DepositRequest {
@@ -67,10 +67,13 @@ export class DepositService {
       }
 
       const depositAmount = location.depositAmount || 20;
-      // Task #39: fee math now includes BOTH percent + per-tx fixed fee
-      // (default $0.30) so the gemach is always made whole on small deposits.
-      const { feeCents: processingFee, totalCents: totalAmount } = computeFeeForLocation(
+      // Task #39: fee hierarchy: Stripe payment-method config > location defaults > hard defaults.
+      // Both direct-deposit and pay-later flows use the same source of truth.
+      const allPaymentMethods = await storage.getAllPaymentMethods();
+      const stripePaymentMethod = allPaymentMethods.find(pm => pm.provider === 'stripe' && pm.isActive);
+      const { feeCents: processingFee, totalCents: totalAmount } = computeFeeForPaymentMethod(
         depositAmount * 100,
+        stripePaymentMethod,
         location
       );
 

@@ -163,5 +163,14 @@ feeCents   = ceil(depositCents * percentBp / 10000) + fixedCents
 totalCents = depositCents + feeCents
 ```
 
-This is the single source of truth — used by Direct Deposit, Pay Later setup,
-and the consent text shown to the borrower.
+**Fee source hierarchy (both flows):**
+1. `payment_methods` row where `provider = 'stripe'` (set in the admin payment-method
+   configuration) — highest priority.
+2. Location-level `processingFeePercent` / `processingFeeFixed` (set per-location in
+   admin Stripe settings) — fallback.
+3. Hard defaults: 300 bp (3.00%) + 30 cents — last resort.
+
+Both the **Direct Deposit** flow (`server/depositService.ts`) and the **Pay Later** flow
+(`server/payLaterService.ts`) resolve fees through the same helper
+`computeFeeForPaymentMethod()` in `server/depositFees.ts`, ensuring consistent amounts
+across all Stripe charges and consent disclosures.

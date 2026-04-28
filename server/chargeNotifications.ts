@@ -15,6 +15,8 @@
 import twilio from 'twilio';
 import { getTwilioConfigStatus } from './twilio-client.js';
 import { sendNewEmail } from './gmail-client.js';
+import { storage } from './storage.js';
+import { randomBytes, createHash } from 'crypto';
 import type { Transaction, Location } from '../shared/schema.js';
 
 export type ChargeNotificationChannel = 'sms' | 'whatsapp' | 'email' | 'none';
@@ -35,21 +37,39 @@ function normalizePhoneForSms(raw: string | null | undefined): string | null {
   return null;
 }
 
-function buildStatusUrl(transaction: Transaction): string | null {
-  if (!transaction.magicToken) return null;
-  const base = process.env.APP_ORIGIN || process.env.VITE_APP_URL || 'https://earmuffsgemach.com';
-  return `${base}/status/${transaction.magicToken}`;
+/**
+ * Generate a fresh 30-day magic token, persist the hashed form on the transaction,
+ * and return both the raw token (for embedding in the URL) and the status URL.
+ *
+ * The status route expects /status/:id?token=<rawToken> — the server hashes the
+ * raw token at validation time and compares against the stored hash.
+ */
+async function buildFreshStatusUrl(transaction: Transaction): Promise<string | null> {
+  try {
+    const rawToken = randomBytes(32).toString('hex');
+    const hashed = createHash('sha256').update(rawToken).digest('hex');
+    const expiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+    await storage.updateTransaction(transaction.id, {
+      magicToken: hashed,
+      magicTokenExpiresAt: expiresAt,
+    });
+    const base = process.env.APP_ORIGIN || process.env.VITE_APP_URL || 'https://earmuffsgemach.com';
+    return `${base}/status/${transaction.id}?token=${rawToken}`;
+  } catch (err) {
+    console.error('buildFreshStatusUrl failed:', err);
+    return null;
+  }
 }
 
 function buildSmsBody(
   transaction: Transaction,
   location: Location,
   amountCents: number,
+  statusUrl: string | null,
   operatorNote?: string,
 ): string {
   const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
   const dollars = (amountCents / 100).toFixed(2);
-  const statusUrl = buildStatusUrl(transaction);
   const noteLine = operatorNote ? ` Note from the gemach: "${operatorNote}"` : '';
   const linkLine = statusUrl ? ` Check status: ${statusUrl}` : '';
   return (
@@ -65,11 +85,11 @@ function buildEmailBody(
   transaction: Transaction,
   location: Location,
   amountCents: number,
+  statusUrl: string | null,
   operatorNote?: string,
 ): string {
   const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
   const dollars = (amountCents / 100).toFixed(2);
-  const statusUrl = buildStatusUrl(transaction);
   const noteSection = operatorNote
     ? `\nAdditional note from the gemach coordinator:\n  "${operatorNote}"\n`
     : '';
@@ -98,6 +118,7 @@ async function trySendSms(
   transaction: Transaction,
   location: Location,
   amountCents: number,
+  statusUrl: string | null,
   operatorNote?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const status = getTwilioConfigStatus();
@@ -114,7 +135,7 @@ async function trySendSms(
     await client.messages.create({
       to,
       from: process.env.TWILIO_FROM_NUMBER!,
-      body: buildSmsBody(transaction, location, amountCents, operatorNote),
+      body: buildSmsBody(transaction, location, amountCents, statusUrl, operatorNote),
     });
     return { ok: true };
   } catch (e: any) {
@@ -126,6 +147,7 @@ async function trySendEmail(
   transaction: Transaction,
   location: Location,
   amountCents: number,
+  statusUrl: string | null,
   operatorNote?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!transaction.borrowerEmail) return { ok: false, error: 'No email on file' };
@@ -133,7 +155,7 @@ async function trySendEmail(
     await sendNewEmail(
       transaction.borrowerEmail,
       buildEmailSubject(location),
-      buildEmailBody(transaction, location, amountCents, operatorNote),
+      buildEmailBody(transaction, location, amountCents, statusUrl, operatorNote),
     );
     return { ok: true };
   } catch (e: any) {
@@ -143,7 +165,9 @@ async function trySendEmail(
 
 /**
  * Notify the borrower that an off-session charge is about to be made.
- * Tries SMS first, falls back to email. Never throws.
+ * Generates a fresh valid status URL (with raw token) so the borrower can
+ * check their loan status in real time. Tries SMS first, falls back to email.
+ * Never throws.
  *
  * @param operatorNote Optional free-text note from the operator (e.g. "your
  *   borrow was 45 days ago") included verbatim in the message so borrowers
@@ -155,10 +179,14 @@ export async function notifyBorrowerBeforeCharge(
   amountCents: number,
   operatorNote?: string,
 ): Promise<ChargeNotificationResult> {
-  const sms = await trySendSms(transaction, location, amountCents, operatorNote);
+  // Build a fresh, usable status link. Raw token embedded in URL; hashed token
+  // stored in DB. The pre-charge URL doubles as the post-charge receipt URL.
+  const statusUrl = await buildFreshStatusUrl(transaction);
+
+  const sms = await trySendSms(transaction, location, amountCents, statusUrl, operatorNote);
   if (sms.ok) return { channel: 'sms', sent: true };
 
-  const email = await trySendEmail(transaction, location, amountCents, operatorNote);
+  const email = await trySendEmail(transaction, location, amountCents, statusUrl, operatorNote);
   if (email.ok) return { channel: 'email', sent: true };
 
   return {
@@ -180,11 +208,11 @@ function buildReceiptSmsBody(
   transaction: Transaction,
   location: Location,
   amountCents: number,
+  statusUrl: string | null,
   operatorNote?: string,
 ): string {
   const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
   const dollars = (amountCents / 100).toFixed(2);
-  const statusUrl = buildStatusUrl(transaction);
   const noteLine = operatorNote ? ` Note: "${operatorNote}"` : '';
   const linkLine = statusUrl ? ` View receipt: ${statusUrl}` : '';
   return (
@@ -200,11 +228,11 @@ function buildReceiptEmailBody(
   transaction: Transaction,
   location: Location,
   amountCents: number,
+  statusUrl: string | null,
   operatorNote?: string,
 ): string {
   const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
   const dollars = (amountCents / 100).toFixed(2);
-  const statusUrl = buildStatusUrl(transaction);
   const noteSection = operatorNote
     ? `\nNote from the gemach coordinator:\n  "${operatorNote}"\n`
     : '';
@@ -227,6 +255,7 @@ ${location.name} Baby Banz Earmuffs Gemach
 
 /**
  * Send a post-charge receipt notification to the borrower confirming the charge landed.
+ * Generates a fresh valid status URL so the borrower can view their loan details.
  * Includes the same operator note/reason as the pre-charge notification for context.
  * Tries SMS first, falls back to email. Never throws.
  */
@@ -236,6 +265,9 @@ export async function notifyBorrowerAfterCharge(
   amountCents: number,
   operatorNote?: string,
 ): Promise<ChargeNotificationResult> {
+  // Generate a fresh valid status link (raw token in URL, hashed stored in DB).
+  const statusUrl = await buildFreshStatusUrl(transaction);
+
   // Try SMS
   const smsStatus = getTwilioConfigStatus();
   if (smsStatus.configured) {
@@ -248,7 +280,7 @@ export async function notifyBorrowerAfterCharge(
         await client.messages.create({
           to,
           from: process.env.TWILIO_FROM_NUMBER!,
-          body: buildReceiptSmsBody(transaction, location, amountCents, operatorNote),
+          body: buildReceiptSmsBody(transaction, location, amountCents, statusUrl, operatorNote),
         });
         return { channel: 'sms', sent: true };
       } catch (e: any) {
@@ -263,7 +295,7 @@ export async function notifyBorrowerAfterCharge(
       await sendNewEmail(
         transaction.borrowerEmail,
         buildReceiptEmailSubject(location),
-        buildReceiptEmailBody(transaction, location, amountCents, operatorNote),
+        buildReceiptEmailBody(transaction, location, amountCents, statusUrl, operatorNote),
       );
       return { channel: 'email', sent: true };
     } catch (e: any) {
