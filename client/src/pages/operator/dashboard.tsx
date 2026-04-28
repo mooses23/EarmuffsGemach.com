@@ -1771,6 +1771,24 @@ function ReturnWizard({
                       <span>{t('cardWillBeCharged').replace('${amount}', selectedTransaction.depositAmount.toFixed(2))}</span>
                     </div>
                   </div>
+                  <div
+                    className="p-3 bg-blue-500/15 border border-blue-500/30 rounded-lg"
+                    data-testid="text-pre-charge-notice"
+                  >
+                    <div className="flex items-start gap-2 text-blue-200 text-xs">
+                      <BellRing className="h-4 w-4 flex-shrink-0 mt-0.5" />
+                      <span>
+                        Before this card is charged, the borrower will receive a heads-up
+                        notification via{" "}
+                        <strong>
+                          {selectedTransaction.borrowerPhone
+                            ? "SMS (with email as fallback)"
+                            : "email"}
+                        </strong>
+                        . This dramatically reduces &quot;I don&apos;t recognize this charge&quot; disputes.
+                      </span>
+                    </div>
+                  </div>
                   <div>
                     <label className="block text-xs text-slate-400 mb-1">
                       Note to borrower (optional — included in the heads-up notification)

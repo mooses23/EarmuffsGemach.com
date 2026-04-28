@@ -93,9 +93,13 @@ export class DepositService {
       });
 
       // Persist the payment intent ID on the transaction so dispute webhooks can
-      // back-link to the originating transaction and location.
+      // back-link to the originating transaction and location. Also persist
+      // depositFeeCents (Task #39) so the same source-of-truth fee math is
+      // visible from the transaction row, matching the pay-later flow.
       await storage.updateTransaction(transactionId, {
         stripePaymentIntentId: paymentIntent.id,
+        depositFeeCents: processingFee,
+        amountPlannedCents: totalAmount,
       });
 
       const payment = await storage.createPayment({
