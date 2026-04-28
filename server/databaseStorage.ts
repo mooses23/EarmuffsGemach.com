@@ -597,10 +597,7 @@ export class DatabaseStorage implements IStorage {
     const transaction = await this.getTransaction(id);
     if (!transaction) return null;
     if (transaction.isReturned) return null;
-    // CAS on isReturned=false guards against concurrent return-marking. We
-    // intentionally do NOT touch refundAmount — the route has just persisted
-    // the cumulative partial refund total via recordTransactionRefund and
-    // overwriting it would corrupt partial-refund accounting.
+    // CAS on isReturned=false; do NOT set refundAmount (refund total is owned by recordTransactionRefund).
     const result = await db.update(transactions)
       .set({
         isReturned: true,

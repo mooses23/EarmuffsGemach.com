@@ -658,9 +658,6 @@ function RefundChargedDialog({
             />
           </div>
 
-          {/* Physical-return checkbox is always actionable. When isReturned is
-              already true, the server records an audit-only confirmation
-              (no inventory change). When false, server flips state + restocks. */}
           <label className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
             <input
               type="checkbox"
@@ -1797,14 +1794,13 @@ function ReturnWizard({
                     <div className="flex items-start gap-2 text-blue-200 text-xs">
                       <BellRing className="h-4 w-4 flex-shrink-0 mt-0.5" />
                       <span>
-                        Before this card is charged, the borrower will receive a heads-up
-                        notification via{" "}
+                        Borrower will get a heads-up via{" "}
                         <strong>
                           {selectedTransaction.borrowerPhone
-                            ? "SMS (with email as fallback)"
+                            ? "SMS (email fallback)"
                             : "email"}
-                        </strong>
-                        . This dramatically reduces &quot;I don&apos;t recognize this charge&quot; disputes.
+                        </strong>{" "}
+                        before the charge.
                       </span>
                     </div>
                   </div>

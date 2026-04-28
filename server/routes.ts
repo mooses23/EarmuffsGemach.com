@@ -4128,21 +4128,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newRefundedCents = finalCumulativeCents;
       const newStatus = finalStatus;
 
-      // Inventory restock + return-state recording are opt-in: only when the
-      // operator confirms the item is physically being returned alongside the
-      // refund. Idempotency: we only restock and only flip isReturned=true if
-      // the transaction was NOT already marked returned. This guards against
-      // repeated refund retries (e.g., a network-flaky operator clicking twice)
-      // double-restocking inventory or overwriting an earlier actualReturnDate.
+      // Optional physical-return recording. First-time → flip + restock; already-returned → audit only.
       if (itemPhysicallyReturned) {
         if (!transaction.isReturned) {
-          // First-time physical return: flip isReturned + restock inventory
-          // (helper does both atomically, never touches refundAmount).
+          // First-time physical return: flip isReturned + restock atomically.
           await storage.markPhysicallyReturnedForRefund(transactionId, true);
         } else {
-          // Already-returned row: operator is confirming again at refund
-          // time. Inventory was restocked at original return, so we record
-          // an audit-only confirmation — no state change, no double-restock.
+          // Already-returned: audit-only confirmation, no state/inventory change.
           await storage.createAuditLog({
             actorUserId: operatorUserId,
             actorType: operatorUserId ? "operator" : "system",

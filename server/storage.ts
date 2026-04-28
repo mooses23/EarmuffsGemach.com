@@ -123,18 +123,9 @@ export interface IStorage {
   createTransaction(transaction: InsertTransaction): Promise<Transaction>;
   updateTransaction(id: number, data: Partial<InsertTransaction>): Promise<Transaction>;
   markTransactionReturned(id: number, refundAmount?: number): Promise<Transaction>;
-  /**
-   * Task #38 refund flow: when an operator issues a refund AND simultaneously
-   * confirms the borrower physically handed the item back, we need to flip
-   * isReturned + actualReturnDate AND restock inventory — but we MUST NOT
-   * touch refundAmount (the route has just persisted the cumulative partial
-   * refund total via recordTransactionRefund and overwriting it would corrupt
-   * partial-refund accounting).
-   *
-   * Idempotent: returns null without mutating anything if the transaction is
-   * already returned (caller should treat null as "no-op, item was already
-   * returned earlier"). Restock is opt-in via the `restock` flag.
-   */
+  // Refund-flow physical-return marker: flips isReturned + actualReturnDate
+  // (without touching refundAmount) and optionally restocks. Idempotent:
+  // returns null if already isReturned=true.
   markPhysicallyReturnedForRefund(id: number, restock: boolean): Promise<Transaction | null>;
   recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null }): Promise<Transaction>;
   getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEventWithSender[]>;
