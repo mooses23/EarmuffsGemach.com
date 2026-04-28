@@ -63,6 +63,7 @@ import {
   type InsertReplyExample,
   type Contact,
   type Location as LocationRow,
+  type Transaction,
 } from "../shared/schema.js";
 import { setupAuth, requireRole, requireOperatorForLocation, createTestUsers } from "./auth.js";
 
@@ -4027,45 +4028,82 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(502).json({ message: stripeErr.message || "Stripe refund failed" });
       }
 
-      // Persist cumulative total, latest refund id, and updated status via an
-      // atomic compare-and-swap on (payLaterStatus, refundAmount). If a
-      // concurrent refund slipped in between our read and this write, the CAS
-      // returns null and we surface a 409 — Stripe has already deduped its
-      // side via the deterministic idempotency key, so the worst case is the
-      // operator retrying with the now-current remaining balance.
-      const newRefundedCents = alreadyRefundedCents + requestedCents;
-      const newStatus: PayLaterStatus =
-        newRefundedCents >= maxRefundCents ? "REFUNDED" : "PARTIALLY_REFUNDED";
-      const updated = await storage.recordTransactionRefund({
-        id: transactionId,
-        expectedPriorStatus: transaction.payLaterStatus as PayLaterStatus,
-        expectedPriorRefundAmount: (transaction.refundAmount ?? null) as number | null,
-        newStatus,
-        newRefundAmount: newRefundedCents / 100,
-        stripeRefundId: stripeRefund.id,
-      });
+      // Stripe has now actually refunded `requestedCents` (under a deterministic
+      // idempotency key, so retries dedupe). We MUST persist this on top of
+      // whatever the current DB cumulative is, even if a concurrent refund
+      // also landed in between our initial read and this write. Strategy:
+      // re-read current refundAmount, compute newCumulative = current + ours,
+      // and CAS. On CAS conflict (another concurrent refund just committed
+      // at the same instant), retry with the freshly re-read state. Limit to
+      // a small number of attempts; the loop converges quickly because each
+      // committed concurrent refund advances the read state.
+      let updated: Transaction | undefined | null = null;
+      let attempts = 0;
+      let lastReadRefundedCents = alreadyRefundedCents;
+      let lastReadStatus = transaction.payLaterStatus;
+      let finalStatus: PayLaterStatus = "PARTIALLY_REFUNDED";
+      let finalCumulativeCents = alreadyRefundedCents + requestedCents;
+      while (attempts < 5 && !updated) {
+        attempts++;
+        const cur = await storage.getTransaction(transactionId);
+        if (!cur) {
+          // Transaction vanished between Stripe call and persist. Audit and bail.
+          await storage.createAuditLog({
+            actorUserId: operatorUserId,
+            actorType: operatorUserId ? "operator" : "system",
+            action: "refund_pay_later_persist_orphaned",
+            entityType: "transaction",
+            entityId: transactionId,
+            metadata: JSON.stringify({
+              stripeRefundId: stripeRefund.id,
+              refundedCents: requestedCents,
+              note: "transaction missing after Stripe refund succeeded",
+            }),
+          });
+          return res.status(500).json({
+            message: "Refund succeeded at Stripe but transaction record is missing. Audit logged.",
+            stripeRefundId: stripeRefund.id,
+          });
+        }
+        lastReadRefundedCents = Math.round(((cur.refundAmount ?? 0) as number) * 100);
+        lastReadStatus = cur.payLaterStatus;
+        finalCumulativeCents = Math.min(maxRefundCents, lastReadRefundedCents + requestedCents);
+        finalStatus =
+          finalCumulativeCents >= maxRefundCents ? "REFUNDED" : "PARTIALLY_REFUNDED";
+        updated = await storage.recordTransactionRefund({
+          id: transactionId,
+          expectedPriorStatus: lastReadStatus as PayLaterStatus,
+          expectedPriorRefundAmount: (cur.refundAmount ?? null) as number | null,
+          newStatus: finalStatus,
+          newRefundAmount: finalCumulativeCents / 100,
+          stripeRefundId: stripeRefund.id,
+        });
+      }
       if (!updated) {
-        // Stripe has the refund recorded under our deterministic key and will
-        // not double-charge on retry. We log a critical audit so an admin can
-        // reconcile manually if the totals look off.
+        // Highly unlikely after 5 retries (would require 5 concurrent successful
+        // refunds in milliseconds). Stripe has the refund recorded under our
+        // deterministic key. Log a critical audit row so an admin can reconcile.
         await storage.createAuditLog({
           actorUserId: operatorUserId,
           actorType: operatorUserId ? "operator" : "system",
-          action: "refund_pay_later_cas_conflict",
+          action: "refund_pay_later_persist_failed_after_retries",
           entityType: "transaction",
           entityId: transactionId,
           metadata: JSON.stringify({
             stripeRefundId: stripeRefund.id,
             requestedCents,
-            expectedPriorStatus: transaction.payLaterStatus,
-            expectedPriorRefundCents: alreadyRefundedCents,
+            attempts,
+            lastReadRefundedCents,
+            lastReadStatus,
           }),
         });
-        return res.status(409).json({
-          message: "Another refund was processed for this transaction at the same moment. Please refresh and try again with the now-current remaining balance.",
+        return res.status(500).json({
+          message: "Refund succeeded at Stripe but the database could not be updated after multiple attempts. Audit logged for manual reconciliation.",
           stripeRefundId: stripeRefund.id,
         });
       }
+      const newRefundedCents = finalCumulativeCents;
+      const newStatus = finalStatus;
 
       // Inventory restock is opt-in: only when the operator confirms the item
       // is physically being returned alongside the refund.

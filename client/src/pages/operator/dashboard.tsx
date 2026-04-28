@@ -596,11 +596,11 @@ function RefundChargedDialog({
 
         <div className="space-y-4">
           <div className="text-sm text-slate-300">
-            <div>{(t as any)("originalChargeLabel") || "Original charge"}: <span className="text-white font-medium">${(depositCents / 100).toFixed(2)}</span></div>
+            <div>{t("originalChargeLabel")}: <span className="text-white font-medium">${(depositCents / 100).toFixed(2)}</span></div>
             {alreadyRefundedCents > 0 && (
-              <div>{(t as any)("alreadyRefundedLabel") || "Already refunded"}: <span className="text-amber-300 font-medium">${(alreadyRefundedCents / 100).toFixed(2)}</span></div>
+              <div>{t("alreadyRefundedLabel")}: <span className="text-amber-300 font-medium">${(alreadyRefundedCents / 100).toFixed(2)}</span></div>
             )}
-            <div>{(t as any)("remainingRefundableLabel") || "Refundable now"}: <span className="text-white font-medium">${remaining.toFixed(2)}</span></div>
+            <div>{t("remainingRefundableLabel")}: <span className="text-white font-medium">${remaining.toFixed(2)}</span></div>
           </div>
 
           <div className="flex items-center gap-2">
@@ -610,7 +610,7 @@ function RefundChargedDialog({
               onClick={() => { setIsPartial(false); setAmount(remaining.toFixed(2)); }}
               data-testid="button-refund-full"
             >
-              {(t as any)("fullRefund") || "Full"}
+              {t("fullRefund")}
             </Button>
             <Button
               size="sm"
@@ -618,7 +618,7 @@ function RefundChargedDialog({
               onClick={() => { setIsPartial(true); setAmount(""); }}
               data-testid="button-refund-partial"
             >
-              {(t as any)("partialRefund") || "Partial"}
+              {t("partialRefund")}
             </Button>
           </div>
 
@@ -640,27 +640,37 @@ function RefundChargedDialog({
           )}
 
           <div>
-            <Label className="text-slate-300 text-sm">{(t as any)("reasonLabel") || "Reason (optional)"}</Label>
+            <Label className="text-slate-300 text-sm">{t("reasonLabel")}</Label>
             <Input
               value={reason}
               onChange={(e) => setReason(e.target.value)}
-              placeholder={(t as any)("reasonPlaceholder") || "e.g. borrower returned item late"}
+              placeholder={t("reasonPlaceholder")}
               maxLength={500}
               className="bg-white/5 border-white/10 text-white"
               data-testid="input-refund-reason"
             />
           </div>
 
-          <label className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={physicallyReturned}
-              onChange={(e) => setPhysicallyReturned(e.target.checked)}
-              className="mt-1"
-              data-testid="checkbox-item-physically-returned"
-            />
-            <span>{(t as any)("itemPhysicallyReturnedLabel") || "Item is being physically returned now (restock inventory)"}</span>
-          </label>
+          {/*
+            Physical-return toggle is only meaningful when the item has NOT
+            already been marked returned. If it is already returned (the
+            common "borrower brought item back AFTER charge" case), the
+            inventory was already restocked at return time, so the toggle
+            is hidden and physicallyReturned stays false to avoid
+            double-restocking.
+          */}
+          {!tx.isReturned && (
+            <label className="flex items-start gap-2 text-sm text-slate-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={physicallyReturned}
+                onChange={(e) => setPhysicallyReturned(e.target.checked)}
+                className="mt-1"
+                data-testid="checkbox-item-physically-returned"
+              />
+              <span>{t("itemPhysicallyReturnedLabel")}</span>
+            </label>
+          )}
         </div>
 
         <DialogFooter className="gap-2">
@@ -670,7 +680,7 @@ function RefundChargedDialog({
             disabled={!validPartial || refundMutation.isPending || remaining <= 0}
             data-testid="button-confirm-refund"
           >
-            {refundMutation.isPending ? (t as any)("processing") || "..." : (t as any)("confirmRefund") || t("refundDeposit")}
+            {refundMutation.isPending ? t("processing") : t("confirmRefund")}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -752,9 +762,9 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
                   <div className="text-right">
                     <Badge variant={tx.isReturned ? "outline" : "default"} className={tx.isReturned ? "mb-1 border-white/20 text-slate-300" : "mb-1"}>
                       {tx.payLaterStatus === "REFUNDED"
-                        ? ((t as any)("refundedLabel") || t("returned"))
+                        ? t("refundedLabel")
                         : tx.payLaterStatus === "PARTIALLY_REFUNDED"
-                          ? ((t as any)("partiallyRefundedLabel") || "Partially refunded")
+                          ? t("partiallyRefundedLabel")
                           : tx.isReturned ? t("returned") : t("activeBorrow")}
                     </Badge>
                     <div className="text-xs font-medium text-white">${tx.depositAmount.toFixed(2)}</div>
@@ -785,7 +795,7 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
             onClick={() => setShowFindPast(true)}
             data-testid="button-find-past-charged"
           >
-            {(t as any)("findPastChargedTransaction") || "Find a past charged transaction to refund →"}
+            {t("findPastChargedTransaction")}
           </Button>
         </div>
       </CardContent>
@@ -802,13 +812,13 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
       <Dialog open={showFindPast} onOpenChange={setShowFindPast}>
         <DialogContent className="glass-card max-w-lg">
           <DialogHeader>
-            <DialogTitle className="text-white">{(t as any)("findPastChargedTitle") || "Find a past charged transaction"}</DialogTitle>
+            <DialogTitle className="text-white">{t("findPastChargedTitle")}</DialogTitle>
             <DialogDescription className="text-slate-400">
-              {(t as any)("findPastChargedDescription") || "Search by borrower name or transaction ID to refund older charges."}
+              {t("findPastChargedDescription")}
             </DialogDescription>
           </DialogHeader>
           <Input
-            placeholder={(t as any)("searchBorrowerOrId") || "Borrower name or #ID"}
+            placeholder={t("searchBorrowerOrId")}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="bg-white/5 border-white/10 text-white"
@@ -817,7 +827,7 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
           <div className="max-h-80 overflow-y-auto space-y-2 mt-2">
             {filteredCharged.length === 0 ? (
               <div className="text-center py-4 text-slate-400">
-                {(t as any)("noChargedTransactionsFound") || "No matching charged transactions."}
+                {t("noChargedTransactionsFound")}
               </div>
             ) : (
               filteredCharged.map(tx => {
@@ -1506,7 +1516,7 @@ function ReturnWizard({
       setStep(step + 1);
     } else {
       // Check if this is a card deposit transaction
-      if (selectedTransaction?.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED") {
+      if (selectedTransaction?.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && selectedTransaction.payLaterStatus !== "PARTIALLY_REFUNDED") {
         if (cardAction === "charge") {
           // First charge the card, then process return
           chargeCardMutation.mutate(selectedTransaction.id, {
@@ -1558,7 +1568,7 @@ function ReturnWizard({
     switch (step) {
       case 1: return selectedTransaction !== null;
       case 2: 
-        if (selectedTransaction?.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED") {
+        if (selectedTransaction?.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && selectedTransaction.payLaterStatus !== "PARTIALLY_REFUNDED") {
           return cardAction !== null;
         }
         return parseFloat(refundAmount) >= 0;
@@ -1643,7 +1653,7 @@ function ReturnWizard({
                     </div>
                     <div className="text-right">
                       <div className="font-bold text-white">${tx.depositAmount.toFixed(2)}</div>
-                      {tx.payLaterStatus && tx.payLaterStatus !== "CHARGED" && (
+                      {tx.payLaterStatus && tx.payLaterStatus !== "CHARGED" && tx.payLaterStatus !== "PARTIALLY_REFUNDED" && (
                         <Badge variant="secondary" className="mt-1">
                           <CreditCard className="h-3 w-3 mr-1" /> {t('card')}
                         </Badge>
@@ -1666,8 +1676,7 @@ function ReturnWizard({
       {step === 2 && selectedTransaction && (
         <div>
           <h3 className="text-lg font-semibold mb-4 text-white">
-            {selectedTransaction.payLaterStatus === "CHARGED"
-              ? "Refund Card Charge"
+            {(selectedTransaction.payLaterStatus === "CHARGED" || selectedTransaction.payLaterStatus === "PARTIALLY_REFUNDED") ? "Refund Card Charge"
               : selectedTransaction.payLaterStatus
               ? t('processCardDeposit')
               : t('refundDeposit')}
@@ -1680,7 +1689,7 @@ function ReturnWizard({
             </div>
             <div className="text-sm text-slate-400 mt-1">
               {t('paidVia')} {selectedTransaction.depositPaymentMethod || t('cashPayment').toLowerCase()}
-              {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && (
+              {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && selectedTransaction.payLaterStatus !== "PARTIALLY_REFUNDED" && (
                 <Badge variant="secondary" className="ml-2">
                   <CreditCard className="h-3 w-3 mr-1" /> {t('cardDeposit')}
                 </Badge>
@@ -1695,7 +1704,7 @@ function ReturnWizard({
           )}
 
           {/* Card deposit specific options */}
-          {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" ? (
+          {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && selectedTransaction.payLaterStatus !== "PARTIALLY_REFUNDED" ? (
             <div className="space-y-4">
               {selectedTransaction.payLaterStatus === "CARD_SETUP_PENDING" ? (
                 <div className="p-4 bg-amber-500/20 border border-amber-500/30 rounded-lg">
@@ -1816,7 +1825,7 @@ function ReturnWizard({
             </div>
           ) : (
             <>
-              {selectedTransaction.payLaterStatus === "CHARGED" ? (
+              {(selectedTransaction.payLaterStatus === "CHARGED" || selectedTransaction.payLaterStatus === "PARTIALLY_REFUNDED") ? (
                 <div className="mb-4 p-3 bg-purple-500/20 border border-purple-500/30 rounded-lg">
                   <div className="flex items-center gap-2 text-purple-200 text-sm">
                     <CreditCard className="h-4 w-4 flex-shrink-0" />
@@ -1895,7 +1904,7 @@ function ReturnWizard({
             </div>
             
             {/* Show card deposit action if applicable */}
-            {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" ? (
+            {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && selectedTransaction.payLaterStatus !== "PARTIALLY_REFUNDED" ? (
               <>
                 <div className="flex justify-between items-center py-2 border-b border-white/10">
                   <span className="text-slate-400">{t('action')}</span>

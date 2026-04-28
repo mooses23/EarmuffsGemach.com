@@ -1183,6 +1183,22 @@ export const translations = {
     updatePin: "Update PIN",
     pinUpdated: "PIN Updated",
     pinUpdatedDescription: "Your PIN has been changed successfully.",
+
+    // Refund / pay-later refund flow (Task #38)
+    originalChargeLabel: "Original charge",
+    alreadyRefundedLabel: "Already refunded",
+    remainingRefundableLabel: "Remaining refundable",
+    reasonLabel: "Reason (optional)",
+    reasonPlaceholder: "e.g. Borrower returned the earmuffs after the charge went through",
+    itemPhysicallyReturnedLabel: "Item is being physically returned now (restock inventory)",
+    confirmRefund: "Confirm refund",
+    refundedLabel: "Refunded",
+    partiallyRefundedLabel: "Partially refunded",
+    findPastChargedTransaction: "Find a past charged transaction to refund →",
+    findPastChargedTitle: "Find a past charged transaction",
+    findPastChargedDescription: "Search by borrower name or transaction ID to refund older charges.",
+    searchBorrowerOrId: "Borrower name or #ID",
+    noChargedTransactionsFound: "No matching charged transactions.",
   },
   he: {
     // Header/Navigation
@@ -2366,6 +2382,22 @@ export const translations = {
     tributePara2: "היא מעולם לא הסתפקה ברעיון על הנייר. מסניף יחיד היא הרחיבה אותו ליותר ממאה סניפים ברחבי העולם, ועזרה למשפחות בצורה מוחשית ומעשית.",
     tributePara3: "במקביל היא ייסדה ארגון נוסף, המוקדש לילדים בעלי צרכים מיוחדים — אחת מני דרכים רבות שבהן חיה חיים של עשייה למען הזולת.",
     tributePara4: "המורשת שלה ממשיכה לעשות שינוי בכל יום מחדש.",
+
+    // Refund / pay-later refund flow (Task #38)
+    originalChargeLabel: "חיוב מקורי",
+    alreadyRefundedLabel: "כבר הוחזר",
+    remainingRefundableLabel: "יתרה ניתנת להחזר",
+    reasonLabel: "סיבה (אופציונלי)",
+    reasonPlaceholder: "למשל: השואל החזיר את האטמים אחרי שהחיוב התבצע",
+    itemPhysicallyReturnedLabel: "הפריט מוחזר פיזית כעת (החזרה למלאי)",
+    confirmRefund: "אשר החזר",
+    refundedLabel: "הוחזר",
+    partiallyRefundedLabel: "הוחזר חלקית",
+    findPastChargedTransaction: "חפש עסקה שחויבה בעבר להחזר →",
+    findPastChargedTitle: "חפש עסקה שחויבה בעבר",
+    findPastChargedDescription: "חפש לפי שם השואל או מספר עסקה כדי להחזיר חיובים ישנים.",
+    searchBorrowerOrId: "שם שואל או #מזהה",
+    noChargedTransactionsFound: "לא נמצאו עסקאות שחויבו תואמות.",
   }
 } as const;
 
