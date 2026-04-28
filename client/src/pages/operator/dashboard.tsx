@@ -1154,6 +1154,24 @@ function ReturnWizard({
     },
   });
   
+  const refundPayLaterMutation = useMutation({
+    mutationFn: async ({ transactionId, refundAmount }: { transactionId: number; refundAmount?: number }) => {
+      const res = await apiRequest("POST", `/api/operator/transactions/${transactionId}/refund-pay-later`, {
+        refundAmount,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: t('success'), description: "Card charge refunded successfully." });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations", location.id, "transactions"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations", location.id, "inventory"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/operator/location"] });
+    },
+    onError: (error: Error) => {
+      toast({ title: t('error'), description: error.message || "Refund failed.", variant: "destructive" });
+    },
+  });
+
   const returnMutation = useMutation({
     mutationFn: async (overrideRefund?: { refundAmount: number }) => {
       if (!selectedTransaction) throw new Error("No transaction selected");
@@ -1241,6 +1259,13 @@ function ReturnWizard({
             }
           });
         }
+      } else if (selectedTransaction?.payLaterStatus === "CHARGED") {
+        // Already-charged card: refund via Stripe
+        const refund = isPartialRefund ? parseFloat(refundAmount) : undefined;
+        refundPayLaterMutation.mutate(
+          { transactionId: selectedTransaction.id, refundAmount: refund },
+          { onSuccess: onComplete }
+        );
       } else {
         returnMutation.mutate(undefined);
       }
@@ -1251,7 +1276,6 @@ function ReturnWizard({
     switch (step) {
       case 1: return selectedTransaction !== null;
       case 2: 
-        // For card deposit transactions, must select an action
         if (selectedTransaction?.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED") {
           return cardAction !== null;
         }
@@ -1360,8 +1384,10 @@ function ReturnWizard({
       {step === 2 && selectedTransaction && (
         <div>
           <h3 className="text-lg font-semibold mb-4 text-white">
-            {selectedTransaction.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" 
-              ? t('processCardDeposit') 
+            {selectedTransaction.payLaterStatus === "CHARGED"
+              ? "Refund Card Charge"
+              : selectedTransaction.payLaterStatus
+              ? t('processCardDeposit')
               : t('refundDeposit')}
           </h3>
           
@@ -1490,7 +1516,14 @@ function ReturnWizard({
             </div>
           ) : (
             <>
-              {selectedTransaction.depositPaymentMethod === "stripe" && (
+              {selectedTransaction.payLaterStatus === "CHARGED" ? (
+                <div className="mb-4 p-3 bg-purple-500/20 border border-purple-500/30 rounded-lg">
+                  <div className="flex items-center gap-2 text-purple-200 text-sm">
+                    <CreditCard className="h-4 w-4 flex-shrink-0" />
+                    <span>This borrower's card was already charged. A full or partial refund will be sent back to their card via Stripe.</span>
+                  </div>
+                </div>
+              ) : selectedTransaction.depositPaymentMethod === "stripe" && (
                 <div className="mb-4 p-3 bg-blue-500/20 border border-blue-500/30 rounded-lg">
                   <div className="flex items-center gap-2 text-blue-300 text-sm">
                     <CreditCard className="h-4 w-4" />
@@ -1609,16 +1642,16 @@ function ReturnWizard({
         <Button
           variant="outline"
           onClick={() => step > 1 ? setStep(step - 1) : onCancel()}
-          disabled={returnMutation.isPending || chargeCardMutation.isPending || releaseCardMutation.isPending}
+          disabled={returnMutation.isPending || chargeCardMutation.isPending || releaseCardMutation.isPending || refundPayLaterMutation.isPending}
         >
           <ArrowLeft className="h-4 w-4 mr-2" />
           {step === 1 ? t('cancel') : t('back')}
         </Button>
         <Button 
           onClick={handleNext} 
-          disabled={!canProceed() || returnMutation.isPending || chargeCardMutation.isPending || releaseCardMutation.isPending}
+          disabled={!canProceed() || returnMutation.isPending || chargeCardMutation.isPending || releaseCardMutation.isPending || refundPayLaterMutation.isPending}
         >
-          {(returnMutation.isPending || chargeCardMutation.isPending || releaseCardMutation.isPending) ? (
+          {(returnMutation.isPending || chargeCardMutation.isPending || releaseCardMutation.isPending || refundPayLaterMutation.isPending) ? (
             <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> {t('loading')}...</>
           ) : step === 3 ? (
             <><Check className="h-4 w-4 mr-2" /> {t('confirm')}</>

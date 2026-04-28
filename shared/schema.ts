@@ -13,7 +13,8 @@ export const PAY_LATER_STATUSES = [
   "CHARGE_REQUIRES_ACTION",
   "CHARGE_FAILED",
   "DECLINED",
-  "EXPIRED"
+  "EXPIRED",
+  "REFUNDED"
 ] as const;
 export type PayLaterStatus = typeof PAY_LATER_STATUSES[number];
 

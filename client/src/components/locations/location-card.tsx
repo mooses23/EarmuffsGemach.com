@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent } from "@/components/ui/card";
 import { Location } from "@/lib/types";
-import { User, MapPin, Phone, Package } from "lucide-react";
+import { User, MapPin, Phone, Mail, Package, Star } from "lucide-react";
 import { ContactActionsLight } from "@/components/ui/contact-actions";
 import { useLocation } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
@@ -91,17 +91,35 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
           </div>
           <div className="mb-4 text-neutral-600">
             <p className="flex items-center mb-2">
-              <User className="w-5 h-5 mr-2 text-neutral-500" />
+              <User className="w-5 h-5 mr-2 text-neutral-500 flex-shrink-0" />
               <span>{locContact}</span>
             </p>
             <p className="flex items-center mb-2">
-              <MapPin className="w-5 h-5 mr-2 text-neutral-500" />
+              <MapPin className="w-5 h-5 mr-2 text-neutral-500 flex-shrink-0" />
               <span>{locAddress}</span>
             </p>
-            <p className="flex items-center mb-2">
-              <Phone className="w-5 h-5 mr-2 text-neutral-500" />
-              <a href={`tel:${location.phone?.replace(/[^+\d]/g, "")}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors">{location.phone}</a>
-            </p>
+            {location.phone && (
+              <p className="flex items-center mb-2">
+                <Phone className={`w-5 h-5 mr-2 flex-shrink-0 ${location.contactPreference === "phone" || location.contactPreference === "whatsapp" ? "text-blue-500" : "text-neutral-500"}`} />
+                <a href={`tel:${location.phone.replace(/[^+\d]/g, "")}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors">{location.phone}</a>
+                {(location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
+                  <span className="ml-2 text-xs text-blue-500 font-medium flex items-center gap-0.5">
+                    <Star className="w-3 h-3 fill-current" /> preferred
+                  </span>
+                )}
+              </p>
+            )}
+            {location.email && (
+              <p className="flex items-center mb-2">
+                <Mail className={`w-5 h-5 mr-2 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-500" : "text-neutral-500"}`} />
+                <a href={`mailto:${location.email}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm truncate">{location.email}</a>
+                {location.contactPreference === "email" && (
+                  <span className="ml-2 text-xs text-blue-500 font-medium flex items-center gap-0.5 flex-shrink-0">
+                    <Star className="w-3 h-3 fill-current" /> preferred
+                  </span>
+                )}
+              </p>
+            )}
             <div className="mb-2" data-contact-actions>
               <ContactActionsLight phone={location.phone} locationName={locName} />
             </div>

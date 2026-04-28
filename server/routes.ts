@@ -3919,6 +3919,60 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Operator refunds a pay-later charge that already went through
+  app.post("/api/operator/transactions/:id/refund-pay-later", async (req, res) => {
+    try {
+      const transactionId = parseInt(req.params.id);
+      const operatorLocationId = (req.session as any).operatorLocationId;
+
+      if (!req.isAuthenticated() && !operatorLocationId) {
+        return res.status(401).json({ message: "Authentication required" });
+      }
+
+      const transaction = await storage.getTransaction(transactionId);
+      if (!transaction) return res.status(404).json({ message: "Transaction not found" });
+
+      const locationId = operatorLocationId || (req.user as any)?.locationId;
+      if (transaction.locationId !== locationId) {
+        return res.status(403).json({ message: "Not authorized for this location" });
+      }
+
+      if (transaction.payLaterStatus !== "CHARGED") {
+        return res.status(400).json({ message: "Transaction has not been charged yet" });
+      }
+
+      if (!transaction.stripePaymentIntentId) {
+        return res.status(400).json({ message: "No Stripe payment intent found on this transaction" });
+      }
+
+      const { refundAmount } = req.body;
+      const depositCents = Math.round((transaction.depositAmount || 0) * 100);
+      const feeCents = transaction.depositFeeCents ?? 0;
+      const maxRefundCents = depositCents + feeCents;
+      const amountCents = refundAmount
+        ? Math.min(Math.round(refundAmount * 100), maxRefundCents)
+        : maxRefundCents;
+
+      const stripe = getStripeClient();
+      await stripe.refunds.create({
+        payment_intent: transaction.stripePaymentIntentId,
+        amount: amountCents,
+      });
+
+      await storage.updateTransactionPayLaterStatus(transactionId, "REFUNDED");
+
+      // Add headband back to inventory if applicable
+      if (transaction.headbandColor && transaction.locationId) {
+        await storage.adjustInventory(transaction.locationId, transaction.headbandColor, 1);
+      }
+
+      res.json({ success: true, refundedCents: amountCents });
+    } catch (error: any) {
+      console.error("Refund pay-later error:", error);
+      res.status(500).json({ message: error.message || "Refund failed" });
+    }
+  });
+
   // Operator declines a transaction (no charge)
   app.post("/api/operator/transactions/:id/decline", async (req, res) => {
     try {
