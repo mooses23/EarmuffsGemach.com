@@ -63,14 +63,18 @@ async function reconcileOne(tx: Transaction): Promise<void> {
     return;
   }
 
-  // List ALL refunds for this payment_intent (auto-paginates up to 100).
-  const refundList = await stripe.refunds.list({
+  // Paginate through ALL refunds for this payment_intent so we don't miss
+  // any on transactions with more than 100 refund objects (rare, but safe).
+  const allRefunds: Array<{ id: string; amount: number; status: string }> = [];
+  for await (const refund of stripe.refunds.list({
     payment_intent: tx.stripePaymentIntentId,
     limit: 100,
-  });
+  })) {
+    allRefunds.push({ id: refund.id, amount: refund.amount, status: refund.status ?? "" });
+  }
 
   // Sum only succeeded refunds.
-  const totalStripeRefundedCents = refundList.data
+  const totalStripeRefundedCents = allRefunds
     .filter(r => r.status === "succeeded")
     .reduce((sum, r) => sum + r.amount, 0);
 
@@ -86,7 +90,7 @@ async function reconcileOne(tx: Transaction): Promise<void> {
       newCumulativeCents >= maxRefundCents ? "REFUNDED" : "PARTIALLY_REFUNDED";
 
     // Latest succeeded refund id (sorted by created desc by Stripe).
-    const latestRefundId = refundList.data.find(r => r.status === "succeeded")!.id;
+    const latestRefundId = allRefunds.find(r => r.status === "succeeded")!.id;
 
     const updated = await storage.recordTransactionRefund({
       id: txId,
@@ -139,8 +143,11 @@ async function rollBack(tx: Transaction, reason: string): Promise<void> {
   );
 
   if (rolled) {
-    console.warn(
-      `[refund-reconciliation] tx ${txId} rolled back to ${rollbackTo} (reason: ${reason}).`
+    // console.error so this surfaces as an error-level event in production
+    // monitoring/logging (e.g. Vercel logs, Datadog) and acts as an admin alert.
+    console.error(
+      `[refund-reconciliation] ADMIN ACTION REQUIRED: tx ${txId} rolled back to ${rollbackTo} ` +
+      `(reason: ${reason}). The operator should verify the borrower status and re-issue the refund if needed.`
     );
     await storage.createAuditLog({
       actorType: "system",
