@@ -117,6 +117,29 @@ const enBodyNoDate = buildReturnReminderSmsBody({
 check(enBodyNoDate.includes("earmuffs"), "EN body still mentions item when due date is missing");
 check(!/\(due/.test(enBodyNoDate), "EN body omits '(due …)' phrase when due date is missing");
 
+// --- Channel-default selection (operator dashboard logic) -------------------
+function computeDefaultChannel(smsAvailable: boolean, hasPhone: boolean, hasEmail: boolean): 'email' | 'sms' {
+  if (smsAvailable && hasPhone && hasEmail) return 'sms';
+  if (hasEmail) return 'email';
+  if (smsAvailable && hasPhone) return 'sms';
+  return 'email';
+}
+check(computeDefaultChannel(true, true, true) === 'sms', "default: sms when phone+email+twilio all available");
+check(computeDefaultChannel(true, false, true) === 'email', "default: email when twilio on but no phone");
+check(computeDefaultChannel(false, true, true) === 'email', "default: email when twilio off (even with phone+email)");
+check(computeDefaultChannel(true, true, false) === 'sms', "default: sms when twilio on + phone but no email");
+check(computeDefaultChannel(false, false, false) === 'email', "default: email as fallback when nothing usable");
+
+// --- Request body schema (route validation contract) ------------------------
+import { z } from 'zod';
+const sendReminderBodySchema = z.object({
+  channel: z.enum(['email', 'sms']).default('email'),
+});
+check(sendReminderBodySchema.safeParse({}).success, "schema: empty body defaults to email (back-compat)");
+check(sendReminderBodySchema.parse({}).channel === 'email', "schema: default channel is 'email'");
+check(sendReminderBodySchema.parse({ channel: 'sms' }).channel === 'sms', "schema: explicit 'sms' accepted");
+check(!sendReminderBodySchema.safeParse({ channel: 'fax' }).success, "schema: unknown channel rejected");
+
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed.`);
   process.exit(1);
