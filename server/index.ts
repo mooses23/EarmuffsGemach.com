@@ -108,5 +108,14 @@ app.use((req, res, next) => {
     if (!sms.configured) {
       log(`SMS reminders disabled: ${sms.reason}`);
     }
+    // In production, public links inside borrower SMS/email should come
+    // from a trusted base URL (APP_URL/SITE_URL), not from the inbound
+    // request's Host header (which can be spoofed via proxy). Warn loudly
+    // when neither is configured so an admin sets one before going live.
+    if (process.env.NODE_ENV === 'production'
+        && !process.env.APP_URL?.trim()
+        && !process.env.SITE_URL?.trim()) {
+      log('WARNING: APP_URL/SITE_URL is not set. Borrower status links in reminder SMS/email will fall back to the request Host header, which is unsafe behind untrusted proxies.');
+    }
   });
 })();

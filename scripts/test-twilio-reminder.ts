@@ -68,9 +68,13 @@ withEnv({ TWILIO_ACCOUNT_SID: "AC1234567890abcdef", TWILIO_AUTH_TOKEN: "secret",
 check(normalizePhoneForSms(null) === null, "null phone -> null");
 check(normalizePhoneForSms("") === null, "empty phone -> null");
 check(normalizePhoneForSms("123") === null, "very short phone -> null (won't reach Twilio)");
-check(normalizePhoneForSms("(555) 123-4567") === "5551234567", "US-formatted -> bare digits");
+check(normalizePhoneForSms("(555) 123-4567") === "+15551234567", "10-digit bare US number auto-prefixed to +1 E.164");
+check(normalizePhoneForSms("1-555-123-4567") === "+15551234567", "11-digit US with leading 1 normalized to E.164");
 check(normalizePhoneForSms("+1 (555) 123-4567") === "+15551234567", "+country preserved");
 check(normalizePhoneForSms("+972-50-123-4567") === "+972501234567", "Israeli +country preserved");
+check(normalizePhoneForSms("0501234567") === null, "ambiguous local Israeli format rejected (operator must add +972)");
+check(normalizePhoneForSms("+1") === null, "+ followed by too few digits rejected");
+check(normalizePhoneForSms("+1234567890123456") === null, "more than 15 digits rejected (E.164 max)");
 
 // --- SMS body ---------------------------------------------------------------
 const dueDate = new Date(2026, 3, 28); // Apr 28, 2026 (month is 0-indexed)

@@ -52,17 +52,42 @@ function getClient(): Twilio {
   return cachedClient;
 }
 
-// Strip everything except digits and a leading "+", which is what Twilio's
-// /Messages endpoint accepts. Returns null if the result is too short to be
-// a real number (so callers can fail loudly with a clear message).
+// Normalize a phone number to E.164 (e.g. "+15551234567"), which is the
+// only format Twilio's /Messages endpoint accepts reliably across carriers.
+//
+// Returns null when the input cannot be safely upgraded to E.164:
+//   - empty / too-short numbers
+//   - bare 10-digit US numbers (auto-prefixed with "+1")
+//   - bare 11-digit numbers starting with "1" (auto-prefixed with "+")
+//   - any other ambiguous local format (rejected so the operator gets a
+//     clear "phone format" error instead of Twilio rejecting silently)
+//
+// Callers (the route, tests) treat null as "not sendable" and surface a
+// helpful message to the operator rather than gambling on Twilio's geo
+// guesses, which differ by from-number country.
 export function normalizePhoneForSms(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
   if (!trimmed) return null;
-  const hasPlus = trimmed.startsWith('+');
+
+  if (trimmed.startsWith('+')) {
+    const digits = trimmed.slice(1).replace(/\D/g, '');
+    // E.164 max is 15 digits; min country-code+subscriber length is ~8.
+    if (digits.length < 8 || digits.length > 15) return null;
+    return '+' + digits;
+  }
+
   const digits = trimmed.replace(/\D/g, '');
-  if (digits.length < 7) return null;
-  return (hasPlus ? '+' : '') + digits;
+  // 10 digits → only assume US/CA if the first digit (area code) is 2-9.
+  // Real NANP area codes never start with 0 or 1; numbers like
+  // "0501234567" (Israeli local) would otherwise be wrongly normalized
+  // to "+10501234567" and silently fail at Twilio.
+  if (digits.length === 10 && /^[2-9]/.test(digits)) return '+1' + digits;
+  if (digits.length === 11 && digits.startsWith('1') && /^1[2-9]/.test(digits)) return '+' + digits;
+  // Anything else (e.g. "0501234567" Israeli local, "44…" without a +)
+  // is ambiguous without a country prefix — make the operator add the
+  // explicit "+<country>…" so we never deliver to the wrong country.
+  return null;
 }
 
 export interface ReturnReminderSmsContext {
