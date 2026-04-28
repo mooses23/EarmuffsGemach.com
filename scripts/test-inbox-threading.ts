@@ -17,7 +17,22 @@ process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-stub-key";
 import { normalizeSubject, groupContactsByThread } from "../server/inbox-threading.js";
 import { storage } from "../server/storage.js";
 import { generateEmailResponse } from "../server/openai-client.js";
+import { buildThreadSearchText } from "../server/gmail-client.js";
 import type { Contact, ReplyExample, Transaction, GemachApplication, Location, PlaybookFact } from "../shared/schema.js";
+
+// Build a fake Gmail Schema$Message with given headers + plaintext body.
+function fakeGmailMessage(over: { from: string; subject: string; body: string }) {
+  const bodyB64 = Buffer.from(over.body, "utf-8").toString("base64");
+  return {
+    payload: {
+      headers: [
+        { name: "From", value: over.from },
+        { name: "Subject", value: over.subject },
+      ],
+      body: { data: bodyB64 },
+    },
+  } as Parameters<typeof buildThreadSearchText>[0][number];
+}
 
 type Result = { name: string; ok: boolean; err?: string };
 const results: Result[] = [];
@@ -174,6 +189,38 @@ test("groupContactsByThread: sorts groups newest-first by latest message", () =>
 
 test("groupContactsByThread: empty input → empty output", () => {
   eq(groupContactsByThread([]), [], "empty");
+});
+
+// ---------- buildThreadSearchText (Gmail thread search) ----------
+// Mirrors the requirement for Task #31: the inbox search must surface a thread
+// when a token only appears in an OLDER message of the conversation, not just
+// the latest message rendered in the row. listEmailThreads concatenates every
+// message's From+Subject+Body into a lowercased searchText blob the client
+// uses for substring matching.
+
+test("buildThreadSearchText: matches token from the OLDEST message in the thread", () => {
+  const messages = [
+    fakeGmailMessage({ from: "alice@example.com", subject: "Lulav order", body: "Hi, my deepneedle-token is here." }),
+    fakeGmailMessage({ from: "admin@gemach.org", subject: "Re: Lulav order", body: "Reply 1" }),
+    fakeGmailMessage({ from: "alice@example.com", subject: "Re: Lulav order", body: "thanks" }),
+  ];
+  const text = buildThreadSearchText(messages);
+  assert(text.includes("deepneedle-token"), "token in oldest message must be searchable");
+  assert(text.includes("alice@example.com"), "older sender header must be searchable");
+});
+
+test("buildThreadSearchText: lowercases everything for case-insensitive substring match", () => {
+  const messages = [
+    fakeGmailMessage({ from: "Bob <bob@x.com>", subject: "URGENT QUESTION", body: "MIXED Case Body" }),
+  ];
+  const text = buildThreadSearchText(messages);
+  eq(text, text.toLowerCase(), "result must be all-lowercase");
+  assert(text.includes("urgent question"), "lowercased subject must be in result");
+  assert(text.includes("mixed case body"), "lowercased body must be in result");
+});
+
+test("buildThreadSearchText: empty input → empty string (safe for client substring check)", () => {
+  eq(buildThreadSearchText([]), "", "no messages → empty string");
 });
 
 // ---------- AI form-thread sibling selection ----------

@@ -84,6 +84,10 @@ interface GmailEmail {
   // Server-authoritative thread totals (from /api/admin/emails/threads).
   messageCount?: number;
   unreadCount?: number;
+  // Lowercased concat of from+subject+body across every message in the thread,
+  // populated only by /api/admin/emails/threads. Used by inbox search to match
+  // tokens that only appear in older messages of a Gmail conversation.
+  searchText?: string;
 }
 
 interface EmailsResponse {
@@ -110,6 +114,14 @@ interface UnifiedItem {
   // Server-authoritative thread counts; preferred over client-derived counts when set.
   serverMessageCount?: number;
   serverUnreadCount?: number;
+  // Lowercased concat of from+subject+body across EVERY message in this
+  // Gmail thread (set only on email items by /api/admin/emails/threads).
+  // Lets the inbox search match a token that only appears in an older
+  // message — without it, search would only see this row's "latest" body.
+  // Form items don't need this: every contact in a form thread is a
+  // standalone UnifiedItem already, so per-item body search already
+  // covers the whole conversation via `g.members.some(...)`.
+  searchText?: string;
 }
 
 function parseEmailAddress(from: string): { name: string; email: string } {
@@ -366,6 +378,7 @@ export default function AdminInbox() {
         isRead: e.isRead,
         serverMessageCount: e.messageCount,
         serverUnreadCount: e.unreadCount,
+        searchText: e.searchText,
       });
     }
     return list.sort((a, b) => {
@@ -505,14 +518,21 @@ export default function AdminInbox() {
       }
 
       // Search — match across every message in the thread, not just the
-      // latest. fromName/email tend to be identical across siblings, but
-      // subject and body can differ (especially with Re:/Fwd: variants).
+      // latest. For form threads each contact is its own UnifiedItem so
+      // walking `g.members` covers the full conversation. For Gmail threads
+      // only the latest message lives client-side; older messages are
+      // searched via the server-built `searchText` blob attached to the
+      // email member (lowercased concat of from+subject+body for every
+      // message in the Gmail thread). fromName/email tend to be identical
+      // across siblings, but subject and body can differ (especially with
+      // Re:/Fwd: variants).
       if (q) {
         const hit = g.members.some((m) =>
           m.fromName.toLowerCase().includes(q) ||
           m.fromEmail.toLowerCase().includes(q) ||
           m.subject.toLowerCase().includes(q) ||
-          m.body.toLowerCase().includes(q),
+          m.body.toLowerCase().includes(q) ||
+          (m.searchText ? m.searchText.includes(q) : false),
         );
         if (!hit) return false;
       }

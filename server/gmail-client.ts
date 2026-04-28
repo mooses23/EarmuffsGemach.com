@@ -253,9 +253,29 @@ export async function listEmails(
 }
 
 // One entry per Gmail conversation, with full-thread message/unread counts.
+// `searchText` is a lowercased concatenation of from + subject + body across
+// EVERY message in the thread, so the admin inbox search can match a token
+// that only appears in an older message — not just the latest one. Only the
+// latest message's headers/body are returned in the parent fields, since the
+// list view only renders that one.
 export interface EmailThreadSummary extends EmailMessage {
   messageCount: number;
   unreadCount: number;
+  searchText: string;
+}
+
+// Pure helper — exported for unit tests. Concatenates From + Subject + body
+// across every message in a Gmail thread, lowercased, so the admin inbox
+// search can substring-match a token even when it lives in an older message.
+export function buildThreadSearchText(messages: gmail_v1.Schema$Message[]): string {
+  const parts: string[] = [];
+  for (const m of messages) {
+    const headers = m.payload?.headers || [];
+    parts.push(getHeader(headers, 'From'));
+    parts.push(getHeader(headers, 'Subject'));
+    parts.push(extractBody(m.payload));
+  }
+  return parts.join('\n').toLowerCase();
 }
 
 export interface ListEmailThreadsResult {
@@ -296,6 +316,10 @@ export async function listEmailThreads(
         const unreadCount = messages.filter((m) => (m.labelIds || []).includes('UNREAD')).length;
         const latest = messages[messages.length - 1];
         const headers = latest.payload?.headers || [];
+        // Concatenate every message's From/Subject/Body so search can hit
+        // tokens deep in the thread, not just the latest message. Lowercased
+        // up front so the client can do a simple substring check.
+        const searchText = buildThreadSearchText(messages);
         summaries.push({
           id: latest.id || '',
           threadId: stub.id,
@@ -309,6 +333,7 @@ export async function listEmailThreads(
           labels: latest.labelIds || [],
           messageCount,
           unreadCount,
+          searchText,
         });
       } catch (e) {
         console.warn('listEmailThreads: failed to load thread', stub.id, (e as Error)?.message);
