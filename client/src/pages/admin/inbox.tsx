@@ -2081,6 +2081,7 @@ export default function AdminInbox() {
                           isThreadUnread ? "bg-primary/10 dark:bg-primary/15" : ""
                         } ${selectMode && isChecked ? "bg-primary/20" : ""}`}
                         data-testid={`row-${it.key}-button`}
+                        data-unread={isThreadUnread ? "true" : "false"}
                         aria-pressed={selectMode ? isChecked : undefined}
                       >
                         {selectMode && (
