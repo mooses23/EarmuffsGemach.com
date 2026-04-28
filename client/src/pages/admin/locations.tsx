@@ -1091,9 +1091,9 @@ export default function AdminLocations() {
                                     </TableCell>
                                     <TableCell className="hidden lg:table-cell">
                                       {location.operatorPin ? (
-                                        <Badge variant="secondary" className="text-xs">PIN set</Badge>
+                                        <Badge variant="outline" className="text-xs bg-muted text-muted-foreground border-border">PIN set</Badge>
                                       ) : (
-                                        <Badge variant="destructive" className="text-xs">No PIN</Badge>
+                                        <Badge variant="outline" className="text-xs bg-red-100 text-red-700 border-red-200">No PIN</Badge>
                                       )}
                                     </TableCell>
                                     <TableCell>
