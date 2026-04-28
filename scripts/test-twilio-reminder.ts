@@ -73,15 +73,19 @@ check(normalizePhoneForSms("+1 (555) 123-4567") === "+15551234567", "+country pr
 check(normalizePhoneForSms("+972-50-123-4567") === "+972501234567", "Israeli +country preserved");
 
 // --- SMS body ---------------------------------------------------------------
+const dueDate = new Date(2026, 3, 28); // Apr 28, 2026 (month is 0-indexed)
 const enBody = buildReturnReminderSmsBody({
   borrowerName: "Sara Goldberg",
   borrowerPhone: "+15551234567",
   locationName: "Lakewood",
   language: "en",
+  dueDate,
   statusUrl: "https://example.com/status/42?token=abc",
 });
 check(enBody.startsWith("Hi Sara,"), "EN body uses first name only");
 check(enBody.includes("Lakewood"), "EN body includes location name");
+check(enBody.toLowerCase().includes("earmuffs"), "EN body names the borrowed item");
+check(/Apr\s*28/.test(enBody), "EN body includes the formatted due date");
 check(enBody.includes("https://example.com/status/42?token=abc"), "EN body includes status URL when provided");
 check(enBody.length < 320, "EN body stays under ~2 SMS segments");
 
@@ -90,11 +94,24 @@ const heBody = buildReturnReminderSmsBody({
   borrowerPhone: "+972501234567",
   locationName: "לייקווד",
   language: "he",
+  dueDate,
 });
 check(heBody.startsWith("שלום שרה"), "HE body uses Hebrew greeting + first name");
 check(heBody.includes("לייקווד"), "HE body includes Hebrew location name");
+check(heBody.includes("האוזניות"), "HE body names the borrowed item");
+check(heBody.includes("28"), "HE body includes the day-of-month from the due date");
 check(!heBody.includes("https://"), "HE body without statusUrl omits the URL line");
 check(heBody.length < 320, "HE body stays under ~2 SMS segments");
+
+// Body without due date stays valid (older transactions / missing data).
+const enBodyNoDate = buildReturnReminderSmsBody({
+  borrowerName: "Anon",
+  borrowerPhone: "+15551112222",
+  locationName: "Brooklyn",
+  language: "en",
+});
+check(enBodyNoDate.includes("earmuffs"), "EN body still mentions item when due date is missing");
+check(!/\(due/.test(enBodyNoDate), "EN body omits '(due …)' phrase when due date is missing");
 
 if (failures > 0) {
   console.error(`\n${failures} test(s) failed.`);

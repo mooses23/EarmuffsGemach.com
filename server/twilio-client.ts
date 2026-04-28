@@ -70,20 +70,41 @@ export interface ReturnReminderSmsContext {
   borrowerPhone: string;
   locationName: string;
   language: 'en' | 'he';
+  /** When the loan was/is due back. Rendered as a short localized date when present. */
+  dueDate?: Date | null;
   /** Public status-page URL the borrower can open to see the loan. Optional. */
   statusUrl?: string;
+}
+
+function formatDueDate(d: Date, language: 'en' | 'he'): string {
+  // Short localized date — e.g. "Apr 28" / "28 באפר׳" — keeps body under
+  // 2 SMS segments. Falls back gracefully if Intl is unavailable.
+  try {
+    return new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-US', {
+      month: 'short',
+      day: 'numeric',
+    }).format(d);
+  } catch {
+    return d.toISOString().slice(0, 10);
+  }
 }
 
 // Pure helper — exported for tests. Builds the bilingual SMS body for a
 // return reminder. Kept short (under ~320 chars / 2 SMS segments) to
 // avoid surprise carrier charges and to read well on the lock screen.
+// Includes the gemach name, the borrowed item ("earmuffs" / "האוזניות"),
+// the due date when known, and the borrower status link when provided —
+// mirroring the email reminder template required by the task.
 export function buildReturnReminderSmsBody(ctx: ReturnReminderSmsContext): string {
   const firstName = (ctx.borrowerName || '').trim().split(/\s+/)[0] || ctx.borrowerName || '';
-  const tail = ctx.statusUrl ? `\n${ctx.statusUrl}` : '';
+  const dueStr = ctx.dueDate ? formatDueDate(ctx.dueDate, ctx.language) : '';
+  const link = ctx.statusUrl ? `\n${ctx.statusUrl}` : '';
   if (ctx.language === 'he') {
-    return `שלום ${firstName}, תזכורת ידידותית מגמ"ח אוזניות בייבי בנז ${ctx.locationName} — נשמח אם תחזיר את האוזניות כדי שמשפחה נוספת תוכל ליהנות מהן. אם כבר החזרת, אפשר להתעלם.${tail}`;
+    const dueLine = dueStr ? ` שתאריך ההחזרה שלהן היה ${dueStr}` : '';
+    return `שלום ${firstName}, תזכורת ידידותית מגמ"ח אוזניות בייבי בנז ${ctx.locationName} — נשמח אם תחזיר את האוזניות${dueLine} כדי שמשפחה נוספת תוכל ליהנות מהן. אם כבר החזרת, אפשר להתעלם.${link}`;
   }
-  return `Hi ${firstName}, friendly reminder from the ${ctx.locationName} Baby Banz Earmuffs Gemach — please bring back the earmuffs when you can so the next family can use them. If you've already returned them, ignore this note.${tail}`;
+  const dueLine = dueStr ? ` (due ${dueStr})` : '';
+  return `Hi ${firstName}, friendly reminder from the ${ctx.locationName} Baby Banz Earmuffs Gemach — please bring back the earmuffs${dueLine} when you can so the next family can use them. If you've already returned them, ignore this note.${link}`;
 }
 
 /**

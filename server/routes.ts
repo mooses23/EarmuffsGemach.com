@@ -10,7 +10,7 @@ import { AuditTrailService } from "./audit-trail.js";
 import { PaymentAnalyticsEngine } from "./analytics-engine.js";
 import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
-import { PayLaterService } from "./payLaterService.js";
+import { PayLaterService, mintBorrowerStatusToken } from "./payLaterService.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
 import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
 import { getTwilioConfigStatus, sendReturnReminderSMS, normalizePhoneForSms } from "./twilio-client.js";
@@ -2601,12 +2601,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(502).json({ message: sendErr?.message || "Failed to send reminder email" });
         }
       } else {
+        // Mint a fresh borrower status link so the SMS body can include
+        // a working public URL even for plain (non-PayLater) loans that
+        // never minted a magic token at borrow time. This invalidates
+        // any prior link, which is acceptable for a reminder send: the
+        // borrower will follow the latest link from the most recent ping.
+        let statusUrl: string | undefined;
+        try {
+          const rawToken = await mintBorrowerStatusToken(transactionId);
+          const proto = (req.headers['x-forwarded-proto'] as string)?.split(',')[0]?.trim()
+            || (req.protocol as string)
+            || 'https';
+          const host = req.get('host');
+          if (host) {
+            statusUrl = `${proto}://${host}/status/${transactionId}?token=${rawToken}`;
+          }
+        } catch (tokenErr) {
+          // A token mint failure shouldn't block the SMS send — the
+          // borrower can still get the gist (gemach + due date). Log
+          // and keep going with no link.
+          console.error("Failed to mint borrower status token for reminder SMS:", tokenErr);
+        }
+
         try {
           await sendReturnReminderSMS({
             borrowerName: transaction.borrowerName,
             borrowerPhone: phone!,
             locationName,
             language,
+            dueDate: transaction.expectedReturnDate ?? null,
+            statusUrl,
           });
         } catch (sendErr: any) {
           console.error("Failed to send return reminder SMS:", sendErr);
