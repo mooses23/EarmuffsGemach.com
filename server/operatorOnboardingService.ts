@@ -68,10 +68,16 @@ export interface WelcomePreview {
   welcomeUrl: string;
 }
 
-export function buildWelcomePreview(loc: Location, baseUrl: string, signOff?: string): WelcomePreview {
-  // Use a placeholder token in the preview so we don't accidentally leak
-  // (or allocate) the real one until send-time.
-  const claimUrlPreview = buildClaimUrl(baseUrl, loc.claimToken || 'XXXXXX-CLAIM-LINK');
+export async function buildWelcomePreview(loc: Location, baseUrl: string, signOff?: string): Promise<WelcomePreview> {
+  // Show the REAL outgoing claim URL in the preview so admins see exactly
+  // what each operator will see. Tokens are durable + reusable per spec, so
+  // allocating early (before the admin actually clicks Send) is safe — the
+  // same token will be reused by sendWelcomeForLocation if/when the admin
+  // does send.
+  const ensured = loc.claimToken
+    ? { token: loc.claimToken }
+    : await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
+  const claimUrlPreview = buildClaimUrl(baseUrl, ensured.token);
   const language = detectLanguage(loc);
   const enBody = buildOperatorWelcomeMessageBody({
     locationName: loc.name,

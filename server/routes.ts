@@ -805,7 +805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const loc = await storage.getLocation(id);
       if (!loc) return res.status(404).json({ message: 'Location not found' });
       const baseUrl = getOnboardingBaseUrl(req);
-      res.json(buildWelcomePreview(loc, baseUrl, getOperatorWelcomeSigner()));
+      res.json(await buildWelcomePreview(loc, baseUrl, getOperatorWelcomeSigner()));
     } catch (e: any) {
       res.status(500).json({ message: e?.message || 'Failed to build preview' });
     }

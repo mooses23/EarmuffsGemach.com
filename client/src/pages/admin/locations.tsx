@@ -125,17 +125,19 @@ export default function AdminLocations() {
     refetchOnWindowFocus: false,
   });
 
-  const previewQuery = useQuery<{
+  type WelcomePreviewData = {
     location: { id: number; name: string; locationCode: string };
     language: "en" | "he";
     message: { en: { subject: string; body: string }; he: { subject: string; body: string }; resolvedLanguage: "en" | "he" };
     welcomeUrl: string;
-  }>({
+  };
+
+  const previewQuery = useQuery<WelcomePreviewData>({
     queryKey: ["/api/admin/locations/preview", welcomeTarget && welcomeTarget.kind === "single" ? welcomeTarget.id : null],
     queryFn: async () => {
       if (!welcomeTarget || welcomeTarget.kind !== "single") throw new Error("no preview target");
       const res = await apiRequest("GET", `/api/admin/locations/${welcomeTarget.id}/onboarding-preview`);
-      return res.json();
+      return res.json() as Promise<WelcomePreviewData>;
     },
     enabled: welcomeDialogOpen && welcomeTarget?.kind === "single",
   });
@@ -286,6 +288,40 @@ export default function AdminLocations() {
 
   const { data: locations = [] } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
+  });
+
+  // For bulk and send-all dialogs, pick up to 2 sample sendable recipients
+  // (one EN-resolved + one HE-resolved when both languages are present) and
+  // fetch real previews for them via the same /onboarding-preview endpoint
+  // the single dialog uses. The server determines language by the presence
+  // of nameHe, so we mirror that hint client-side when picking samples.
+  const bulkPreviewSamples = useMemo(() => {
+    if (!welcomeTarget || welcomeTarget.kind === "single") return { en: null as Location | null, he: null as Location | null };
+    const candidates = welcomeTarget.kind === "selected"
+      ? locations.filter((l) => selectedOnboardingIds.has(l.id) && !!l.phone)
+      : locations.filter((l) => l.isActive !== false && !l.onboardedAt && !!l.phone);
+    const en = candidates.find((l) => !l.nameHe) || null;
+    const he = candidates.find((l) => !!l.nameHe) || null;
+    return { en, he };
+  }, [welcomeTarget, locations, selectedOnboardingIds]);
+
+  const bulkPreviewEnQuery = useQuery<WelcomePreviewData>({
+    queryKey: ["/api/admin/locations/preview-bulk-en", bulkPreviewSamples.en?.id ?? null],
+    queryFn: async () => {
+      const id = bulkPreviewSamples.en!.id;
+      const res = await apiRequest("GET", `/api/admin/locations/${id}/onboarding-preview`);
+      return res.json() as Promise<WelcomePreviewData>;
+    },
+    enabled: welcomeDialogOpen && welcomeTarget != null && welcomeTarget.kind !== "single" && !!bulkPreviewSamples.en,
+  });
+  const bulkPreviewHeQuery = useQuery<WelcomePreviewData>({
+    queryKey: ["/api/admin/locations/preview-bulk-he", bulkPreviewSamples.he?.id ?? null],
+    queryFn: async () => {
+      const id = bulkPreviewSamples.he!.id;
+      const res = await apiRequest("GET", `/api/admin/locations/${id}/onboarding-preview`);
+      return res.json() as Promise<WelcomePreviewData>;
+    },
+    enabled: welcomeDialogOpen && welcomeTarget != null && welcomeTarget.kind !== "single" && !!bulkPreviewSamples.he,
   });
 
   const onboardingFiltered = useMemo(() => {
@@ -1204,9 +1240,64 @@ export default function AdminLocations() {
               )}
 
               {welcomeTarget && welcomeTarget.kind !== "single" && (
-                <p className="text-xs text-muted-foreground">
-                  Each location's message uses their own language (Hebrew if Hebrew name is on file, otherwise English) and a unique welcome link.
-                </p>
+                <div>
+                  <Label className="text-sm font-medium">Message preview</Label>
+                  <p className="text-xs text-muted-foreground mt-1 mb-2">
+                    Each location's message uses their own language and a unique welcome link. Sample(s) below show the actual outgoing text using a real recipient from this batch.
+                  </p>
+                  {!bulkPreviewSamples.en && !bulkPreviewSamples.he && (
+                    <div className="text-xs text-muted-foreground italic">No sendable recipients to preview.</div>
+                  )}
+                  {(bulkPreviewSamples.en || bulkPreviewSamples.he) && (() => {
+                    const hasEn = !!bulkPreviewSamples.en;
+                    const hasHe = !!bulkPreviewSamples.he;
+                    const defaultTab = hasEn ? "en" : "he";
+                    return (
+                      <Tabs defaultValue={defaultTab} className="mt-1">
+                        <TabsList className={`grid w-full ${hasEn && hasHe ? "grid-cols-2" : "grid-cols-1"}`}>
+                          {hasEn && (
+                            <TabsTrigger value="en" data-testid="bulk-preview-tab-en">
+                              English sample · {bulkPreviewSamples.en?.locationCode}
+                            </TabsTrigger>
+                          )}
+                          {hasHe && (
+                            <TabsTrigger value="he" data-testid="bulk-preview-tab-he">
+                              עברית sample · {bulkPreviewSamples.he?.locationCode}
+                            </TabsTrigger>
+                          )}
+                        </TabsList>
+                        {hasEn && (
+                          <TabsContent value="en">
+                            {bulkPreviewEnQuery.isLoading && (
+                              <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
+                              </div>
+                            )}
+                            {bulkPreviewEnQuery.data && (
+                              <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-en">
+                                {bulkPreviewEnQuery.data.message.en.body}
+                              </pre>
+                            )}
+                          </TabsContent>
+                        )}
+                        {hasHe && (
+                          <TabsContent value="he">
+                            {bulkPreviewHeQuery.isLoading && (
+                              <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
+                                <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
+                              </div>
+                            )}
+                            {bulkPreviewHeQuery.data && (
+                              <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-he">
+                                {bulkPreviewHeQuery.data.message.he.body}
+                              </pre>
+                            )}
+                          </TabsContent>
+                        )}
+                      </Tabs>
+                    );
+                  })()}
+                </div>
               )}
             </div>
 
