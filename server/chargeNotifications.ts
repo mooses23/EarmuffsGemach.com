@@ -173,3 +173,95 @@ export function describePreferredChannel(transaction: Transaction): ChargeNotifi
   if (transaction.borrowerEmail) return 'email';
   return 'none';
 }
+
+// ── Post-charge receipt ──────────────────────────────────────────────────────
+
+function buildReceiptSmsBody(
+  transaction: Transaction,
+  location: Location,
+  amountCents: number,
+): string {
+  const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
+  const dollars = (amountCents / 100).toFixed(2);
+  const statusUrl = buildStatusUrl(transaction);
+  const linkLine = statusUrl ? ` View receipt: ${statusUrl}` : '';
+  return (
+    `Hi ${firstName} — your $${dollars} deposit has been charged by the ${location.name} Baby Banz Earmuffs Gemach. Questions? Call ${location.phone}.${linkLine}`
+  );
+}
+
+function buildReceiptEmailSubject(location: Location): string {
+  return `Receipt — deposit charge from ${location.name} Baby Banz Earmuffs Gemach`;
+}
+
+function buildReceiptEmailBody(
+  transaction: Transaction,
+  location: Location,
+  amountCents: number,
+): string {
+  const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
+  const dollars = (amountCents / 100).toFixed(2);
+  const statusUrl = buildStatusUrl(transaction);
+  const linkSection = statusUrl
+    ? `\nYou can view the details of your loan at any time:\n  ${statusUrl}\n`
+    : '';
+  return `Hi ${firstName},
+
+This is a confirmation that your deposit of $${dollars} has been charged by the ${location.name} Baby Banz Earmuffs Gemach.
+
+This charge was collected because the borrowed earmuffs were not returned. If you believe this is an error, please contact us right away:
+
+  Phone: ${location.phone}
+  Email: ${location.email}
+${linkSection}
+Thank you,
+${location.name} Baby Banz Earmuffs Gemach
+`;
+}
+
+/**
+ * Send a post-charge receipt notification to the borrower confirming the charge landed.
+ * Tries SMS first, falls back to email. Never throws.
+ */
+export async function notifyBorrowerAfterCharge(
+  transaction: Transaction,
+  location: Location,
+  amountCents: number,
+): Promise<ChargeNotificationResult> {
+  // Try SMS
+  const smsStatus = getTwilioConfigStatus();
+  if (smsStatus.configured) {
+    const to = normalizePhoneForSms(transaction.borrowerPhone);
+    if (to) {
+      try {
+        const accountSid = process.env.TWILIO_ACCOUNT_SID!;
+        const authToken = process.env.TWILIO_AUTH_TOKEN!;
+        const client = twilio(accountSid, authToken);
+        await client.messages.create({
+          to,
+          from: process.env.TWILIO_FROM_NUMBER!,
+          body: buildReceiptSmsBody(transaction, location, amountCents),
+        });
+        return { channel: 'sms', sent: true };
+      } catch (e: any) {
+        console.error('Receipt SMS failed:', e?.message);
+      }
+    }
+  }
+
+  // Fall back to email
+  if (transaction.borrowerEmail) {
+    try {
+      await sendNewEmail(
+        transaction.borrowerEmail,
+        buildReceiptEmailSubject(location),
+        buildReceiptEmailBody(transaction, location, amountCents),
+      );
+      return { channel: 'email', sent: true };
+    } catch (e: any) {
+      console.error('Receipt email failed:', e?.message);
+    }
+  }
+
+  return { channel: 'none', sent: false, error: 'No notification channel available' };
+}

@@ -3,7 +3,7 @@ import { storage } from './storage.js';
 import { randomBytes, createHash } from 'crypto';
 import type { Transaction, PayLaterStatus } from '../shared/schema.js';
 import { computeFeeForLocation } from './depositFees.js';
-import { notifyBorrowerBeforeCharge } from './chargeNotifications.js';
+import { notifyBorrowerBeforeCharge, notifyBorrowerAfterCharge } from './chargeNotifications.js';
 
 // Task #39: stale-card guardrail. Default: 90 days. Admin can override
 // via global_settings('stripe.maxCardAgeDays', '<n>').
@@ -352,6 +352,15 @@ export class PayLaterService {
           afterJson: JSON.stringify({ status: 'CHARGED', stripePaymentIntentId: paymentIntent.id }),
         });
 
+        // Task #39: post-charge receipt — let borrower know the charge landed.
+        try {
+          if (location) {
+            await notifyBorrowerAfterCharge(transaction, location, amountToChargeCents);
+          }
+        } catch (err) {
+          console.error('Post-charge receipt notification failed (non-fatal):', err);
+        }
+
         return { success: true, status: 'CHARGED', paymentIntentId: paymentIntent.id };
       }
 
@@ -522,8 +531,11 @@ export class PayLaterService {
     }
 
     const beforeJson = JSON.stringify(transaction);
+    const chargedAt = new Date(); // Task #39: stamp for dispute-rate denominator
 
-    await storage.updateTransactionPayLaterStatus(transaction.id, 'CHARGED');
+    await storage.updateTransactionPayLaterStatus(transaction.id, 'CHARGED', {
+      chargedAt,
+    });
 
     await storage.createAuditLog({
       actorType: 'webhook',
@@ -531,9 +543,21 @@ export class PayLaterService {
       entityType: 'transaction',
       entityId: transaction.id,
       beforeJson,
-      afterJson: JSON.stringify({ status: 'CHARGED' }),
+      afterJson: JSON.stringify({ status: 'CHARGED', chargedAt }),
       metadata: JSON.stringify({ paymentIntentId }),
     });
+
+    // Task #39: post-charge receipt — notify borrower that the charge landed.
+    try {
+      const location = await storage.getLocation(transaction.locationId);
+      if (location) {
+        const amountCents = transaction.amountPlannedCents
+          ?? Math.round(transaction.depositAmount * 100);
+        await notifyBorrowerAfterCharge(transaction, location, amountCents);
+      }
+    } catch (err) {
+      console.error('Post-charge receipt notification failed (non-fatal):', err);
+    }
   }
 
   static async handlePaymentIntentFailed(paymentIntentId: string, errorMessage?: string): Promise<void> {

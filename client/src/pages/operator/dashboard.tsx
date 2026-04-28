@@ -2151,13 +2151,13 @@ function PayLaterTransactions({ location }: { location: Location }) {
                           {t('decline')}
                         </Button>
                       </div>
-                      {(tx as any).consentText && (
+                      {tx.consentText && (
                         <details className="text-[10px] text-slate-500 max-w-xs">
                           <summary className="cursor-pointer">View borrower consent</summary>
-                          <p className="mt-1 italic">"{(tx as any).consentText}"</p>
-                          {(tx as any).consentAcceptedAt && (
+                          <p className="mt-1 italic">"{tx.consentText}"</p>
+                          {tx.consentAcceptedAt && (
                             <p className="mt-1">
-                              Agreed {formatLocalizedDate(new Date((tx as any).consentAcceptedAt), language)}
+                              Agreed {formatLocalizedDate(new Date(tx.consentAcceptedAt), language)}
                             </p>
                           )}
                         </details>

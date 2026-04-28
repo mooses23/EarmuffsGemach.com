@@ -3787,9 +3787,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         setupIntentClientSecret,
         setupIntentId: transaction.stripeSetupIntentId,
         depositAmount: transaction.depositAmount,
-        depositFeeCents: (transaction as any).depositFeeCents ?? null,
+        depositFeeCents: transaction.depositFeeCents ?? null,
         consentMaxChargeCents:
-          (transaction as any).consentMaxChargeCents ?? transaction.amountPlannedCents ?? null,
+          transaction.consentMaxChargeCents ?? transaction.amountPlannedCents ?? null,
         publishableKey: needsStripe ? getStripePublishableKey() : undefined,
       });
     } catch (error: any) {
