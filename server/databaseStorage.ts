@@ -407,30 +407,11 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async completeOperatorOnboarding(
-    id: number,
-    data: {
-      contactPerson: string;
-      email: string;
-      operatorPin: string;
-      contactPreference: 'phone' | 'whatsapp' | 'email';
-    },
-  ): Promise<Location> {
-    const now = new Date();
-    const result = await db.update(locations).set({
-      contactPerson: data.contactPerson,
-      email: data.email,
-      operatorPin: data.operatorPin,
-      contactPreference: data.contactPreference,
-      contactPreferenceSetAt: now,
-      onboardedAt: now,
-      // Burn the claim token so the link is one-time use. A fresh send from
-      // admin re-allocates a new token via ensureLocationClaimToken.
-      claimToken: null,
-    }).where(eq(locations.id, id)).returning();
-    if (!result[0]) throw new Error(`Location with id ${id} not found`);
-    return result[0];
-  }
+  // NOTE: Operator onboarding completion is handled via
+  // completeOperatorOnboardingByToken() above, which preserves the claim
+  // token (durable + reusable per spec). A by-id variant that burned the
+  // token would conflict with that semantics, so it is intentionally not
+  // provided.
 
   // Inventory operations
   async getInventoryByLocation(locationId: number): Promise<Inventory[]> {

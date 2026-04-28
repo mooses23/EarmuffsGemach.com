@@ -2730,7 +2730,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   type ThreadOp = (threadId: string) => Promise<void>;
   const makeThreadRoute = (path: string, op: ThreadOp, errLabel: string) => {
     app.post(path, async (req, res) => {
-      if (!requireOnboardingAdmin(req, res)) return;
+      if (!requireAdmin(req, res)) return;
       try {
         await op(req.params.threadId);
         res.json({ success: true });
