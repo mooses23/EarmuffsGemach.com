@@ -1097,7 +1097,8 @@ export default function AdminLocations() {
               </DialogTitle>
               <DialogDescription>
                 {welcomeTarget?.kind === "single" && welcomeTarget.loc && (
-                  <>To <strong>{welcomeTarget.loc.name}</strong> · {welcomeTarget.loc.locationCode} · {welcomeTarget.loc.phone || welcomeTarget.loc.email}</>
+                  <>To <strong>{welcomeTarget.loc.name}</strong> · {welcomeTarget.loc.locationCode}{welcomeTarget.loc.phone && ` · ${welcomeTarget.loc.phone}`}{welcomeTarget.loc.email && welcomeTarget.loc.phone !== welcomeTarget.loc.email && ` · ${welcomeTarget.loc.email}`}</>
+
                 )}
                 {welcomeTarget?.kind === "selected" && (
                   <>To <strong>{selectedIds.size} selected location(s)</strong></>
@@ -1208,7 +1209,7 @@ export default function AdminLocations() {
                       >
                         <RadioGroupItem id="channel-both" value="both" disabled={!bothEnabled} className="sr-only" />
                         <span className="flex gap-0.5"><MessageSquare className="h-4 w-4" /><Mail className="h-4 w-4" /></span>
-                        Both
+                        Both (SMS + Email)
                         {serviceStatusQuery.data && !bothEnabled && (
                           <span className="text-[10px] text-muted-foreground">Needs both configured</span>
                         )}
@@ -1239,7 +1240,7 @@ export default function AdminLocations() {
                     onClick={() => setDefaultChannel(welcomeChannel)}
                     className="text-xs text-muted-foreground hover:text-primary mt-1"
                   >
-                    Save "{welcomeChannel}" as my default
+                    Save "{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel}" as my default
                   </button>
                 )}
                 <label className="flex items-center gap-2 mt-3 text-xs cursor-pointer select-none" data-testid="checkbox-remember-default-wrap">
@@ -1249,7 +1250,7 @@ export default function AdminLocations() {
                     data-testid="checkbox-remember-default"
                   />
                   <span>
-                    Remember <strong>{welcomeChannel}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
+                    Remember <strong>{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
                   </span>
                 </label>
               </div>
@@ -1274,7 +1275,15 @@ export default function AdminLocations() {
               {/* Message body — editable for single sends, read-only preview for bulk */}
               {welcomeTarget?.kind === "single" && (
                 <div>
-                  <Label className="text-sm font-medium">Message</Label>
+                  <Label className="text-sm font-medium">
+                    {welcomeChannel === "both" ? "SMS Message" : "Message"}
+                  </Label>
+                  {welcomeChannel === "both" && (
+                    <p className="text-[10px] text-muted-foreground mt-0.5 mb-1 flex items-start gap-1">
+                      <MessageSquare className="h-3 w-3 mt-0.5 shrink-0" />
+                      This text is sent as SMS. The email is auto-formatted using the same content and delivered separately.
+                    </p>
+                  )}
                   {previewQuery.isLoading && (
                     <div className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
                       <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
@@ -1337,7 +1346,9 @@ export default function AdminLocations() {
                 <div className="space-y-3">
                   <div>
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium">Message template</Label>
+                      <Label className="text-sm font-medium">
+                        {welcomeChannel === "both" ? "SMS Message template" : "Message template"}
+                      </Label>
                       <div className="flex gap-1">
                         <button type="button" className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50" onClick={() => setMessageBody(BULK_TEMPLATE_EN)}>EN template</button>
                         <button type="button" className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50" onClick={() => setMessageBody(BULK_TEMPLATE_HE)}>עב template</button>
@@ -1355,13 +1366,19 @@ export default function AdminLocations() {
                       placeholder="Message template…"
                     />
                     <p className="text-[10px] text-muted-foreground mt-1">You can freely edit the template above before sending.</p>
+                    {welcomeChannel === "both" && (
+                      <p className="text-[10px] text-muted-foreground mt-1 flex items-start gap-1">
+                        <MessageSquare className="h-3 w-3 mt-0.5 shrink-0" />
+                        This template is sent as SMS. Each location will also receive a separately auto-formatted email.
+                      </p>
+                    )}
                   </div>
 
                   {/* Read-only per-location sample for reference */}
                   {(bulkPreviewSamples.en || bulkPreviewSamples.he) && (
                     <details className="text-xs">
                       <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                        Sample preview (how it looks for a specific location)
+                        Sample preview (how it looks for a specific location{welcomeChannel === "both" ? " — SMS format" : ""})
                       </summary>
                       {(() => {
                         const hasEn = !!bulkPreviewSamples.en;
