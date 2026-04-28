@@ -2,6 +2,10 @@
 // TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER are all set.
 
 import twilio, { type Twilio } from 'twilio';
+import { normalizePhoneForSms } from '../shared/phone.js';
+// Re-export so existing callers (routes, tests) keep importing from
+// twilio-client without churn.
+export { normalizePhoneForSms };
 
 export interface TwilioConfigStatus {
   configured: boolean;
@@ -41,27 +45,6 @@ function getClient(): Twilio {
   cachedClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   cachedConfigKey = key;
   return cachedClient;
-}
-
-// Normalize to E.164 ("+<country><subscriber>"). Returns null for
-// ambiguous local formats so callers fail with a clear error instead of
-// letting Twilio guess the country wrong.
-export function normalizePhoneForSms(raw: string | null | undefined): string | null {
-  if (!raw) return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  if (trimmed.startsWith('+')) {
-    const digits = trimmed.slice(1).replace(/\D/g, '');
-    if (digits.length < 8 || digits.length > 15) return null;
-    return '+' + digits;
-  }
-
-  const digits = trimmed.replace(/\D/g, '');
-  // NANP only: area code must start 2-9.
-  if (digits.length === 10 && /^[2-9]/.test(digits)) return '+1' + digits;
-  if (digits.length === 11 && /^1[2-9]/.test(digits)) return '+' + digits;
-  return null;
 }
 
 export interface ReturnReminderSmsContext {

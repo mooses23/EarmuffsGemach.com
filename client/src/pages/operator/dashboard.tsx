@@ -9,6 +9,7 @@ import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 import { Transaction, Location, HEADBAND_COLORS, InventoryByColor, ReturnReminderEventWithSender } from "@shared/schema";
+import { isPhoneSendableViaSms } from "@shared/phone";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -332,22 +333,7 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
   const isPlaceholderEmail = !email || email.toLowerCase().endsWith('@placeholder.local');
   const hasEmail = !isPlaceholderEmail;
   const phone = (tx.borrowerPhone || '').trim();
-  // Mirrors server normalizePhoneForSms: a number is "sendable" only when
-  // it can be normalized to E.164. Keep this predicate in sync with
-  // server/twilio-client.ts so the UI doesn't enable SMS for numbers
-  // the backend will reject.
-  const isPhoneSendable = (raw: string): boolean => {
-    if (!raw) return false;
-    if (raw.startsWith('+')) {
-      const d = raw.slice(1).replace(/\D/g, '');
-      return d.length >= 8 && d.length <= 15;
-    }
-    const d = raw.replace(/\D/g, '');
-    if (d.length === 10 && /^[2-9]/.test(d)) return true;
-    if (d.length === 11 && /^1[2-9]/.test(d)) return true;
-    return false;
-  };
-  const hasPhone = isPhoneSendable(phone);
+  const hasPhone = isPhoneSendableViaSms(phone);
   const lastSent = tx.lastReturnReminderAt ? new Date(tx.lastReturnReminderAt) : null;
   const sentRecently = !!(lastSent && (Date.now() - lastSent.getTime()) < 24 * 60 * 60 * 1000);
 
