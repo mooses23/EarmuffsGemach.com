@@ -837,7 +837,9 @@ function RecentActivity({ transactions, locationId, locationCode }: { transactio
                 const refundedCents = Math.round(((tx.refundAmount ?? 0) as number) * 100);
                 const depositCents = Math.round((tx.depositAmount || 0) * 100);
                 const feeCents = (tx.depositFeeCents ?? 0) as number;
-                const remaining = Math.max(0, (depositCents + feeCents) - refundedCents) / 100;
+                const plannedCents = (tx.amountPlannedCents ?? 0) as number;
+                const maxRefundCents = Math.max(depositCents + feeCents, plannedCents);
+                const remaining = Math.max(0, maxRefundCents - refundedCents) / 100;
                 return (
                   <div
                     key={tx.id}
