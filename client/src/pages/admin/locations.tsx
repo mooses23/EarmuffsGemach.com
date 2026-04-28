@@ -1,7 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLocations, getRegions, updateLocation, deleteLocation } from "@/lib/api";
-import { Region, Location } from "@shared/schema";
+import { Region, Location, OPERATOR_WELCOME_CHANNELS, type OperatorWelcomeChannel } from "@shared/schema";
+import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { LocationForm } from "@/components/admin/location-form";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
@@ -67,7 +70,11 @@ import {
   Loader2,
   KeyRound,
   ShieldCheck,
-  Send
+  Send,
+  MessageSquare,
+  MessageCircle,
+  AlertTriangle,
+  ExternalLink
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -89,6 +96,165 @@ export default function AdminLocations() {
   const [confirmPin, setConfirmPin] = useState("");
   const [isPinManagementOpen, setIsPinManagementOpen] = useState(false);
 
+  // ===== Onboarding (SMS / WhatsApp welcome) =====
+  const [onboardingFilter, setOnboardingFilter] = useState<"all" | "not-sent" | "sent" | "failed" | "onboarded">("all");
+  const [selectedOnboardingIds, setSelectedOnboardingIds] = useState<Set<number>>(new Set());
+  const [welcomeDialogOpen, setWelcomeDialogOpen] = useState(false);
+  const [welcomeTarget, setWelcomeTarget] = useState<{ kind: "single"; id: number; loc: Location } | { kind: "selected" } | { kind: "all-not-onboarded" } | null>(null);
+  const [defaultChannel, setDefaultChannelState] = useState<OperatorWelcomeChannel>(() => {
+    try {
+      const stored = localStorage.getItem("adminDefaultWelcomeChannel");
+      if (stored && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(stored)) return stored as OperatorWelcomeChannel;
+    } catch {}
+    return "both";
+  });
+  const [welcomeChannel, setWelcomeChannel] = useState<OperatorWelcomeChannel>(defaultChannel);
+
+  const setDefaultChannel = (c: OperatorWelcomeChannel) => {
+    setDefaultChannelState(c);
+    try { localStorage.setItem("adminDefaultWelcomeChannel", c); } catch {}
+  };
+
+  const twilioStatusQuery = useQuery<{
+    sms: { configured: boolean; reason?: string };
+    whatsapp: { configured: boolean; reason?: string; templates: { en?: string | null; he?: string | null } };
+  }>({
+    queryKey: ["/api/admin/twilio-status"],
+    refetchOnWindowFocus: false,
+  });
+
+  const previewQuery = useQuery<{
+    location: { id: number; name: string; locationCode: string };
+    language: "en" | "he";
+    message: { en: { subject: string; body: string }; he: { subject: string; body: string }; resolvedLanguage: "en" | "he" };
+    welcomeUrl: string;
+  }>({
+    queryKey: ["/api/admin/locations/preview", welcomeTarget && welcomeTarget.kind === "single" ? welcomeTarget.id : null],
+    queryFn: async () => {
+      if (!welcomeTarget || welcomeTarget.kind !== "single") throw new Error("no preview target");
+      const res = await apiRequest("GET", `/api/admin/locations/${welcomeTarget.id}/onboarding-preview`);
+      return res.json();
+    },
+    enabled: welcomeDialogOpen && welcomeTarget?.kind === "single",
+  });
+
+  const sendWelcomeOneMutation = useMutation({
+    mutationFn: async ({ id, channel }: { id: number; channel: OperatorWelcomeChannel }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/${id}/send-onboarding-welcome`, { channel });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      const sms = data.results?.sms;
+      const wa = data.results?.whatsapp;
+      const parts: string[] = [];
+      if (sms) parts.push(`SMS: ${sms.ok ? "✓" : "✗ " + (sms.error || "failed")}`);
+      if (wa) parts.push(`WhatsApp: ${wa.ok ? "✓" : "✗ " + (wa.error || "failed")}`);
+      toast({
+        title: data.results?.anySuccess ? "Welcome sent" : "Welcome failed",
+        description: parts.join(" · ") || "No channels selected",
+        variant: data.results?.anySuccess ? "default" : "destructive",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      if (data.results?.anySuccess) {
+        setWelcomeDialogOpen(false);
+        setWelcomeTarget(null);
+      }
+    },
+    onError: (err: any) => toast({ title: "Error", description: err?.message || "Failed to send", variant: "destructive" }),
+  });
+
+  const sendBulkOnboardingMutation = useMutation({
+    mutationFn: async ({ locationIds, channel }: { locationIds: number[]; channel: OperatorWelcomeChannel }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, { locationIds, channel });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "Bulk welcome complete",
+        description: `Sent: ${data.summary?.sent ?? 0} · Skipped: ${data.summary?.skipped ?? 0} · Failed: ${data.summary?.failed ?? 0}`,
+        variant: (data.summary?.failed ?? 0) > 0 ? "destructive" : "default",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      setWelcomeDialogOpen(false);
+      setWelcomeTarget(null);
+      setSelectedOnboardingIds(new Set());
+    },
+    onError: (err: any) => toast({ title: "Error", description: err?.message || "Failed", variant: "destructive" }),
+  });
+
+  const sendAllNotOnboardedMutation = useMutation({
+    mutationFn: async ({ channel }: { channel: OperatorWelcomeChannel }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, { channel });
+      return res.json();
+    },
+    onSuccess: (data: any) => {
+      toast({
+        title: "All-not-yet-onboarded complete",
+        description: `Eligible: ${data.eligible ?? 0} · Sent: ${data.summary?.sent ?? 0} · Failed: ${data.summary?.failed ?? 0}`,
+        variant: (data.summary?.failed ?? 0) > 0 ? "destructive" : "default",
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      setWelcomeDialogOpen(false);
+      setWelcomeTarget(null);
+    },
+    onError: (err: any) => toast({ title: "Error", description: err?.message || "Failed", variant: "destructive" }),
+  });
+
+  const getOnboardingStatus = (loc: Location): "onboarded" | "sent" | "failed" | "not-sent" => {
+    if ((loc as any).onboardedAt) return "onboarded";
+    const sms = (loc as any).welcomeSmsStatus as string | null | undefined;
+    const wa = (loc as any).welcomeWhatsappStatus as string | null | undefined;
+    if (sms === "sent" || wa === "sent") return "sent";
+    if (sms === "failed" || wa === "failed") return "failed";
+    return "not-sent";
+  };
+
+  const openSinglePicker = (loc: Location) => {
+    setWelcomeTarget({ kind: "single", id: loc.id, loc });
+    const locDefault = (loc as any).defaultWelcomeChannel as OperatorWelcomeChannel | null;
+    setWelcomeChannel(locDefault && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefault) ? locDefault : defaultChannel);
+    setWelcomeDialogOpen(true);
+  };
+
+  const openSelectedPicker = () => {
+    if (selectedOnboardingIds.size === 0) return;
+    setWelcomeTarget({ kind: "selected" });
+    setWelcomeChannel(defaultChannel);
+    setWelcomeDialogOpen(true);
+  };
+
+  const openAllNotOnboardedPicker = () => {
+    setWelcomeTarget({ kind: "all-not-onboarded" });
+    setWelcomeChannel(defaultChannel);
+    setWelcomeDialogOpen(true);
+  };
+
+  const sendFromDialog = () => {
+    if (!welcomeTarget) return;
+    if (welcomeTarget.kind === "single") {
+      sendWelcomeOneMutation.mutate({ id: welcomeTarget.id, channel: welcomeChannel });
+    } else if (welcomeTarget.kind === "selected") {
+      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedOnboardingIds), channel: welcomeChannel });
+    } else {
+      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel });
+    }
+  };
+
+  const dialogIsPending = sendWelcomeOneMutation.isPending || sendBulkOnboardingMutation.isPending || sendAllNotOnboardedMutation.isPending;
+
+  const toggleSelectAllOnboarding = (checked: boolean) => {
+    if (checked) setSelectedOnboardingIds(new Set(onboardingFiltered.map((l) => l.id)));
+    else setSelectedOnboardingIds(new Set());
+  };
+
+  const toggleOneOnboarding = (id: number, checked: boolean) => {
+    setSelectedOnboardingIds((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(id); else next.delete(id);
+      return next;
+    });
+  };
+
   const { data: regions = [] } = useQuery<Region[]>({
     queryKey: ["/api/regions"],
   });
@@ -96,6 +262,20 @@ export default function AdminLocations() {
   const { data: locations = [] } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
   });
+
+  const onboardingFiltered = useMemo(() => {
+    return locations.filter((loc) => {
+      if (onboardingFilter === "all") return true;
+      return getOnboardingStatus(loc) === onboardingFilter;
+    });
+  }, [locations, onboardingFilter]);
+
+  // SMS and WhatsApp both require a phone on file, so email-only rows are
+  // ineligible (they would just be skipped by the server with "no phone").
+  const eligibleNotOnboarded = useMemo(
+    () => locations.filter((l) => getOnboardingStatus(l) !== "onboarded" && !!l.phone),
+    [locations]
+  );
 
   const toggleStatusMutation = useMutation({
     mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => 
@@ -600,31 +780,52 @@ export default function AdminLocations() {
           </DialogContent>
         </Dialog>
 
-        {/* PIN Management Card */}
+        {/* PIN Management & Operator Onboarding */}
         <Card className="mt-6">
           <CardHeader className="pb-3">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
               <div className="flex items-center gap-2">
                 <ShieldCheck className="h-5 w-5 text-primary" />
                 <div>
-                  <CardTitle>PIN Management & Operator Onboarding</CardTitle>
-                  <CardDescription>Manage operator PINs and send setup instructions</CardDescription>
+                  <CardTitle>PIN & Onboarding</CardTitle>
+                  <CardDescription>Send the welcome (SMS / WhatsApp), manage PINs, track who's onboarded.</CardDescription>
                 </div>
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
+                <TwilioStatusBadge status={twilioStatusQuery.data} loading={twilioStatusQuery.isLoading} />
                 <Button
                   variant="default"
                   size="sm"
+                  onClick={openAllNotOnboardedPicker}
+                  disabled={dialogIsPending || eligibleNotOnboarded.length === 0}
+                  data-testid="button-onboarding-all-not-onboarded"
+                >
+                  <Send className="h-4 w-4 mr-1" />
+                  Send Welcome to all not-onboarded ({eligibleNotOnboarded.length})
+                </Button>
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={openSelectedPicker}
+                  disabled={dialogIsPending || selectedOnboardingIds.size === 0}
+                  data-testid="button-onboarding-bulk-selected"
+                >
+                  <Send className="h-4 w-4 mr-1" />
+                  Send Welcome to selected ({selectedOnboardingIds.size})
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
                   onClick={() => {
-                    if (window.confirm("Send the setup email to every active location with an email address on file?")) {
+                    if (window.confirm("Send the legacy setup email to every active location with an email address on file?")) {
                       sendWelcomeAllMutation.mutate();
                     }
                   }}
                   disabled={sendWelcomeAllMutation.isPending}
                   data-testid="button-send-welcome-all"
                 >
-                  <Send className="h-4 w-4 mr-1" />
-                  {sendWelcomeAllMutation.isPending ? "Sending…" : "Send setup email to all"}
+                  <Mail className="h-4 w-4 mr-1" />
+                  {sendWelcomeAllMutation.isPending ? "Sending…" : "Email all"}
                 </Button>
                 <Button
                   variant="outline"
@@ -635,6 +836,34 @@ export default function AdminLocations() {
                 </Button>
               </div>
             </div>
+            {isPinManagementOpen && (
+              <div className="mt-3 flex flex-wrap gap-2 items-center">
+                <Label className="text-sm">Status filter:</Label>
+                <Select value={onboardingFilter} onValueChange={(v) => { setOnboardingFilter(v as any); setSelectedOnboardingIds(new Set()); }}>
+                  <SelectTrigger className="w-[180px]" data-testid="select-onboarding-filter">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All ({locations.length})</SelectItem>
+                    <SelectItem value="not-sent">Not Sent</SelectItem>
+                    <SelectItem value="sent">Sent (awaiting onboarding)</SelectItem>
+                    <SelectItem value="failed">Failed delivery</SelectItem>
+                    <SelectItem value="onboarded">Onboarded</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Label className="text-sm ml-2">Default channel:</Label>
+                <Select value={defaultChannel} onValueChange={(v) => setDefaultChannel(v as OperatorWelcomeChannel)}>
+                  <SelectTrigger className="w-[160px]" data-testid="select-default-channel">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="sms">SMS only</SelectItem>
+                    <SelectItem value="whatsapp">WhatsApp only</SelectItem>
+                    <SelectItem value="both">Both</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
           </CardHeader>
           {isPinManagementOpen && (
             <CardContent>
@@ -642,68 +871,262 @@ export default function AdminLocations() {
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Location Name</TableHead>
+                      <TableHead className="w-8">
+                        <Checkbox
+                          checked={onboardingFiltered.length > 0 && selectedOnboardingIds.size === onboardingFiltered.length}
+                          onCheckedChange={(v) => toggleSelectAllOnboarding(!!v)}
+                          aria-label="Select all"
+                          data-testid="checkbox-onboarding-select-all"
+                        />
+                      </TableHead>
+                      <TableHead>Location</TableHead>
                       <TableHead>Code</TableHead>
-                      <TableHead className="hidden md:table-cell">Region</TableHead>
-                      <TableHead>PIN Status</TableHead>
+                      <TableHead className="hidden md:table-cell">Contact</TableHead>
+                      <TableHead>PIN</TableHead>
+                      <TableHead>Onboarding</TableHead>
                       <TableHead>Action</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {locations.map((loc) => (
-                      <TableRow key={loc.id}>
-                        <TableCell className="font-medium">{loc.name}</TableCell>
-                        <TableCell>
-                          <Badge variant="outline">{loc.locationCode}</Badge>
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell">
-                          {getRegionNameById(loc.regionId)}
-                        </TableCell>
-                        <TableCell>
-                          {loc.operatorPin ? (
-                            <Badge variant="secondary" className="flex items-center gap-1 w-fit">
-                              <KeyRound className="h-3 w-3" />
-                              PIN set
-                            </Badge>
-                          ) : (
-                            <Badge variant="destructive" className="flex items-center gap-1 w-fit">
-                              <KeyRound className="h-3 w-3" />
-                              No PIN
-                            </Badge>
-                          )}
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex flex-wrap gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => handleChangePinForLocation(loc)}
-                              data-testid={`button-change-pin-${loc.id}`}
-                            >
-                              <KeyRound className="h-4 w-4 mr-1" />
-                              Change PIN
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => sendWelcomeMutation.mutate(loc.id)}
-                              disabled={sendWelcomeMutation.isPending || !loc.email || !loc.locationCode}
-                              title={!loc.email ? "No email on file" : !loc.locationCode ? "No location code" : "Send setup email"}
-                              data-testid={`button-send-welcome-${loc.id}`}
-                            >
-                              <Send className="h-4 w-4 mr-1" />
-                              Send setup email
-                            </Button>
-                          </div>
+                    {onboardingFiltered.map((loc) => {
+                      const status = getOnboardingStatus(loc);
+                      const sms = (loc as any).welcomeSmsStatus as string | null;
+                      const smsErr = (loc as any).welcomeSmsError as string | null;
+                      const wa = (loc as any).welcomeWhatsappStatus as string | null;
+                      const waErr = (loc as any).welcomeWhatsappError as string | null;
+                      return (
+                        <TableRow key={loc.id} data-testid={`row-onboarding-${loc.id}`}>
+                          <TableCell>
+                            <Checkbox
+                              checked={selectedOnboardingIds.has(loc.id)}
+                              onCheckedChange={(v) => toggleOneOnboarding(loc.id, !!v)}
+                              aria-label={`Select ${loc.name}`}
+                              data-testid={`checkbox-onboarding-${loc.id}`}
+                            />
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <div>{loc.name}</div>
+                            {loc.nameHe && <div className="text-xs text-muted-foreground" dir="rtl">{loc.nameHe}</div>}
+                          </TableCell>
+                          <TableCell>
+                            <Badge variant="outline">{loc.locationCode}</Badge>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell text-xs">
+                            {loc.phone && <div className="flex items-center gap-1"><Phone className="h-3 w-3" />{loc.phone}</div>}
+                            {loc.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="h-3 w-3" />{loc.email}</div>}
+                          </TableCell>
+                          <TableCell>
+                            {loc.operatorPin ? (
+                              <Badge variant="secondary" className="text-xs">PIN set</Badge>
+                            ) : (
+                              <Badge variant="destructive" className="text-xs">No PIN</Badge>
+                            )}
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-col gap-0.5">
+                              <OnboardingStatusBadge status={status} />
+                              {(sms || wa) && (
+                                <div className="text-[10px] text-muted-foreground space-y-0.5">
+                                  {sms && (
+                                    <div className={sms === "failed" ? "text-destructive" : ""}>
+                                      SMS: {sms}{sms === "failed" && smsErr ? ` — ${smsErr}` : ""}
+                                    </div>
+                                  )}
+                                  {wa && (
+                                    <div className={wa === "failed" ? "text-destructive" : ""}>
+                                      WA: {wa}{wa === "failed" && waErr ? ` — ${waErr}` : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex flex-wrap gap-1">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => openSinglePicker(loc)}
+                                disabled={dialogIsPending || !loc.phone}
+                                title={!loc.phone ? "No phone on file — SMS/WhatsApp need a phone number" : "Send Welcome (SMS/WhatsApp)"}
+                                data-testid={`button-send-onboarding-${loc.id}`}
+                              >
+                                <MessageSquare className="h-4 w-4 mr-1" />
+                                Welcome
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => handleChangePinForLocation(loc)}
+                                data-testid={`button-change-pin-${loc.id}`}
+                                title="Change PIN"
+                              >
+                                <KeyRound className="h-4 w-4" />
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => sendWelcomeMutation.mutate(loc.id)}
+                                disabled={sendWelcomeMutation.isPending || !loc.email || !loc.locationCode}
+                                title={!loc.email ? "No email on file" : "Send legacy setup email"}
+                                data-testid={`button-send-welcome-${loc.id}`}
+                              >
+                                <Mail className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                    {onboardingFiltered.length === 0 && (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">
+                          No locations match this filter.
                         </TableCell>
                       </TableRow>
-                    ))}
+                    )}
                   </TableBody>
                 </Table>
               </div>
             </CardContent>
           )}
         </Card>
+
+        {/* Welcome Channel Picker Dialog */}
+        <Dialog open={welcomeDialogOpen} onOpenChange={(open) => {
+          setWelcomeDialogOpen(open);
+          if (!open) setWelcomeTarget(null);
+        }}>
+          <DialogContent className="sm:max-w-[640px] max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Send className="h-5 w-5 text-primary" />
+                Send Welcome Message
+              </DialogTitle>
+              <DialogDescription>
+                {welcomeTarget?.kind === "single" && welcomeTarget.loc && (
+                  <>To <strong>{welcomeTarget.loc.name}</strong> · {welcomeTarget.loc.locationCode} · {welcomeTarget.loc.phone || welcomeTarget.loc.email}</>
+                )}
+                {welcomeTarget?.kind === "selected" && (
+                  <>To <strong>{selectedOnboardingIds.size} selected location(s)</strong></>
+                )}
+                {welcomeTarget?.kind === "all-not-onboarded" && (
+                  <>To <strong>{eligibleNotOnboarded.length} location(s) not yet onboarded</strong></>
+                )}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 py-2">
+              <div>
+                <Label className="text-sm font-medium">Channel</Label>
+                <RadioGroup
+                  value={welcomeChannel}
+                  onValueChange={(v) => setWelcomeChannel(v as OperatorWelcomeChannel)}
+                  className="grid grid-cols-3 gap-2 mt-2"
+                >
+                  {[
+                    { v: "sms" as const, label: "SMS", icon: MessageSquare, disabled: !twilioStatusQuery.data?.sms.configured },
+                    { v: "whatsapp" as const, label: "WhatsApp", icon: MessageCircle, disabled: !twilioStatusQuery.data?.whatsapp.configured },
+                    { v: "both" as const, label: "Both", icon: Send, disabled: !twilioStatusQuery.data?.sms.configured && !twilioStatusQuery.data?.whatsapp.configured },
+                  ].map(({ v, label, icon: Icon, disabled }) => (
+                    <Label
+                      key={v}
+                      htmlFor={`channel-${v}`}
+                      className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm ${welcomeChannel === v ? "border-primary bg-primary/5" : "border-input"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                      data-testid={`channel-option-${v}`}
+                    >
+                      <RadioGroupItem id={`channel-${v}`} value={v} disabled={disabled} className="sr-only" />
+                      <Icon className="h-4 w-4" />
+                      {label}
+                    </Label>
+                  ))}
+                </RadioGroup>
+                {welcomeChannel !== defaultChannel && (
+                  <button
+                    type="button"
+                    onClick={() => setDefaultChannel(welcomeChannel)}
+                    className="text-xs text-muted-foreground hover:text-primary mt-1"
+                  >
+                    Save "{welcomeChannel}" as my default
+                  </button>
+                )}
+              </div>
+
+              {twilioStatusQuery.data && (
+                <>
+                  {welcomeChannel !== "whatsapp" && !twilioStatusQuery.data.sms.configured && (
+                    <p className="text-xs text-destructive flex items-start gap-1">
+                      <AlertTriangle className="h-3 w-3 mt-0.5" />
+                      SMS unavailable: {twilioStatusQuery.data.sms.reason}
+                    </p>
+                  )}
+                  {welcomeChannel !== "sms" && !twilioStatusQuery.data.whatsapp.configured && (
+                    <p className="text-xs text-destructive flex items-start gap-1">
+                      <AlertTriangle className="h-3 w-3 mt-0.5" />
+                      WhatsApp unavailable: {twilioStatusQuery.data.whatsapp.reason}
+                    </p>
+                  )}
+                </>
+              )}
+
+              {welcomeTarget?.kind === "single" && (
+                <div>
+                  <Label className="text-sm font-medium">Preview</Label>
+                  {previewQuery.isLoading && (
+                    <div className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
+                    </div>
+                  )}
+                  {previewQuery.data && (
+                    <Tabs defaultValue={previewQuery.data.message.resolvedLanguage} className="mt-2">
+                      <TabsList className="grid grid-cols-2 w-full">
+                        <TabsTrigger value="en" data-testid="preview-tab-en">English {previewQuery.data.message.resolvedLanguage === "en" && "(default)"}</TabsTrigger>
+                        <TabsTrigger value="he" data-testid="preview-tab-he">עברית {previewQuery.data.message.resolvedLanguage === "he" && "(default)"}</TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="en">
+                        <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono" data-testid="preview-body-en">
+                          {previewQuery.data.message.en.body}
+                        </pre>
+                      </TabsContent>
+                      <TabsContent value="he">
+                        <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono" data-testid="preview-body-he">
+                          {previewQuery.data.message.he.body}
+                        </pre>
+                      </TabsContent>
+                    </Tabs>
+                  )}
+                  {previewQuery.data?.welcomeUrl && (
+                    <a
+                      href={previewQuery.data.welcomeUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary inline-flex items-center gap-1 mt-2"
+                    >
+                      <ExternalLink className="h-3 w-3" /> Open welcome link in a new tab
+                    </a>
+                  )}
+                </div>
+              )}
+
+              {welcomeTarget && welcomeTarget.kind !== "single" && (
+                <p className="text-xs text-muted-foreground">
+                  Each location's message uses their own language (Hebrew if Hebrew name is on file, otherwise English) and a unique welcome link.
+                </p>
+              )}
+            </div>
+
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setWelcomeDialogOpen(false)} disabled={dialogIsPending}>Cancel</Button>
+              <Button
+                onClick={sendFromDialog}
+                disabled={dialogIsPending}
+                data-testid="button-send-welcome-confirm"
+              >
+                {dialogIsPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</> : <><Send className="h-4 w-4 mr-2" />Send Welcome</>}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
 
         {/* PIN Change Dialog */}
         <Dialog open={isPinDialogOpen} onOpenChange={(open) => {
@@ -778,6 +1201,47 @@ export default function AdminLocations() {
           </DialogContent>
         </Dialog>
       </div>
+    </div>
+  );
+}
+
+function OnboardingStatusBadge({ status }: { status: "onboarded" | "sent" | "failed" | "not-sent" }) {
+  if (status === "onboarded") return <Badge className="bg-green-600 hover:bg-green-600 text-white text-xs w-fit">Onboarded</Badge>;
+  if (status === "sent") return <Badge variant="secondary" className="text-xs w-fit">Sent</Badge>;
+  if (status === "failed") return <Badge variant="destructive" className="text-xs w-fit">Failed</Badge>;
+  return <Badge variant="outline" className="text-xs w-fit">Not sent</Badge>;
+}
+
+function TwilioStatusBadge({
+  status,
+  loading,
+}: {
+  status: { sms: { configured: boolean; reason?: string }; whatsapp: { configured: boolean; reason?: string } } | undefined;
+  loading: boolean;
+}) {
+  if (loading || !status) {
+    return <Badge variant="outline" className="text-xs"><Loader2 className="h-3 w-3 animate-spin mr-1" />Twilio</Badge>;
+  }
+  const smsOk = status.sms.configured;
+  const waOk = status.whatsapp.configured;
+  return (
+    <div className="flex gap-1">
+      <Badge
+        variant={smsOk ? "secondary" : "outline"}
+        className={`text-xs ${smsOk ? "" : "text-muted-foreground"}`}
+        title={smsOk ? "SMS ready" : status.sms.reason}
+        data-testid="badge-twilio-sms"
+      >
+        <MessageSquare className="h-3 w-3 mr-1" /> {smsOk ? "SMS ✓" : "SMS off"}
+      </Badge>
+      <Badge
+        variant={waOk ? "secondary" : "outline"}
+        className={`text-xs ${waOk ? "" : "text-muted-foreground"}`}
+        title={waOk ? "WhatsApp ready" : status.whatsapp.reason}
+        data-testid="badge-twilio-wa"
+      >
+        <MessageCircle className="h-3 w-3 mr-1" /> {waOk ? "WA ✓" : "WA off"}
+      </Badge>
     </div>
   );
 }

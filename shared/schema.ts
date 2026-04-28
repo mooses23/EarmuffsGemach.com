@@ -149,7 +149,27 @@ export const locations = pgTable("locations", {
   paymentMethods: text("payment_methods").array().default(["cash"]),
   processingFeePercent: integer("processing_fee_percent").default(300), // 3.00% stored as 300 basis points
   operatorPin: text("operator_pin"),
+  // Operator onboarding (Task #35): SMS+WhatsApp claim flow
+  claimToken: text("claim_token").unique(),
+  claimTokenCreatedAt: timestamp("claim_token_created_at"),
+  welcomeSentAt: timestamp("welcome_sent_at"),
+  welcomeSmsStatus: text("welcome_sms_status"), // 'sent' | 'failed' | null
+  welcomeSmsError: text("welcome_sms_error"),
+  welcomeSmsSentAt: timestamp("welcome_sms_sent_at"),
+  welcomeWhatsappStatus: text("welcome_whatsapp_status"),
+  welcomeWhatsappError: text("welcome_whatsapp_error"),
+  welcomeWhatsappSentAt: timestamp("welcome_whatsapp_sent_at"),
+  defaultWelcomeChannel: text("default_welcome_channel"), // 'sms' | 'whatsapp' | 'both' | null
+  contactPreference: text("contact_preference"), // 'phone' | 'whatsapp' | 'email' | null
+  contactPreferenceSetAt: timestamp("contact_preference_set_at"),
+  onboardedAt: timestamp("onboarded_at"),
 });
+
+export const OPERATOR_WELCOME_CHANNELS = ["sms", "whatsapp", "both"] as const;
+export type OperatorWelcomeChannel = (typeof OPERATOR_WELCOME_CHANNELS)[number];
+
+export const OPERATOR_CONTACT_PREFERENCES = ["phone", "whatsapp", "email"] as const;
+export type OperatorContactPreference = (typeof OPERATOR_CONTACT_PREFERENCES)[number];
 
 export const insertLocationSchema = createInsertSchema(locations).pick({
   name: true,

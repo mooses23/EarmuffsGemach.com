@@ -259,6 +259,145 @@ export class DatabaseStorage implements IStorage {
     }
   }
 
+  // ---- Operator onboarding (Task #35) ----
+
+  async getLocationByClaimToken(token: string): Promise<Location | undefined> {
+    if (!token || typeof token !== 'string') return undefined;
+    const result = await db.select().from(locations).where(eq(locations.claimToken, token)).limit(1);
+    return result[0];
+  }
+
+  /**
+   * Returns the existing claim token if present; otherwise atomically generates
+   * and stores a fresh one. The UPDATE is gated on `claim_token IS NULL` to
+   * make concurrent calls safe — only one writer wins; losers re-read the row
+   * and return the winner's token.
+   */
+  async ensureLocationClaimToken(
+    id: number,
+    generate: () => string,
+    options?: { regenerate?: boolean },
+  ): Promise<{ location: Location; token: string }> {
+    const existing = await this.getLocation(id);
+    if (!existing) throw new Error(`Location with id ${id} not found`);
+    const wantRegen = !!options?.regenerate;
+    if (existing.claimToken && !wantRegen) {
+      return { location: existing, token: existing.claimToken };
+    }
+    for (let i = 0; i < 5; i++) {
+      const token = generate();
+      try {
+        // When regenerating, we always overwrite (gated only by id). Otherwise
+        // we only write when no token exists, so concurrent callers race
+        // safely and the loser re-reads the winner's token below.
+        const whereClause = wantRegen
+          ? eq(locations.id, id)
+          : and(eq(locations.id, id), isNull(locations.claimToken));
+        const updated = await db
+          .update(locations)
+          .set({ claimToken: token, claimTokenCreatedAt: new Date() })
+          .where(whereClause)
+          .returning();
+        if (updated[0]) return { location: updated[0], token };
+        // Lost the race — someone else just allocated a token. Read and return it.
+        const reread = await this.getLocation(id);
+        if (reread?.claimToken) return { location: reread, token: reread.claimToken };
+      } catch (e: any) {
+        if (!/unique|duplicate/i.test(e?.message || '')) throw e;
+      }
+    }
+    throw new Error('Failed to allocate a unique claim token after several attempts');
+  }
+
+  /**
+   * Atomic onboarding completion. The UPDATE is gated on the token still
+   * matching AND the location not yet being onboarded, so concurrent /complete
+   * calls with the same token are safe — only one wins, and the loser sees
+   * `undefined` (which the route translates to 409 Already onboarded).
+   */
+  async completeOperatorOnboardingByToken(
+    token: string,
+    data: {
+      contactPerson: string;
+      email: string;
+      operatorPin: string;
+      contactPreference: 'phone' | 'whatsapp' | 'email';
+    },
+  ): Promise<Location | undefined> {
+    const now = new Date();
+    const result = await db
+      .update(locations)
+      .set({
+        contactPerson: data.contactPerson,
+        email: data.email,
+        operatorPin: data.operatorPin,
+        contactPreference: data.contactPreference,
+        contactPreferenceSetAt: now,
+        onboardedAt: now,
+        // Burn the claim token so the link is one-time use.
+        claimToken: null,
+      })
+      .where(and(
+        eq(locations.claimToken, token),
+        isNull(locations.onboardedAt),
+      ))
+      .returning();
+    return result[0];
+  }
+
+  async recordOperatorWelcomeAttempt(
+    id: number,
+    update: {
+      sms?: { ok: boolean; error?: string };
+      whatsapp?: { ok: boolean; error?: string };
+      defaultWelcomeChannel?: string | null;
+    },
+  ): Promise<Location> {
+    const now = new Date();
+    const patch: Record<string, any> = { welcomeSentAt: now };
+    if (update.sms) {
+      patch.welcomeSmsStatus = update.sms.ok ? 'sent' : 'failed';
+      patch.welcomeSmsError = update.sms.ok ? null : (update.sms.error || 'Unknown error');
+      patch.welcomeSmsSentAt = now;
+    }
+    if (update.whatsapp) {
+      patch.welcomeWhatsappStatus = update.whatsapp.ok ? 'sent' : 'failed';
+      patch.welcomeWhatsappError = update.whatsapp.ok ? null : (update.whatsapp.error || 'Unknown error');
+      patch.welcomeWhatsappSentAt = now;
+    }
+    if (update.defaultWelcomeChannel !== undefined) {
+      patch.defaultWelcomeChannel = update.defaultWelcomeChannel;
+    }
+    const result = await db.update(locations).set(patch).where(eq(locations.id, id)).returning();
+    if (!result[0]) throw new Error(`Location with id ${id} not found`);
+    return result[0];
+  }
+
+  async completeOperatorOnboarding(
+    id: number,
+    data: {
+      contactPerson: string;
+      email: string;
+      operatorPin: string;
+      contactPreference: 'phone' | 'whatsapp' | 'email';
+    },
+  ): Promise<Location> {
+    const now = new Date();
+    const result = await db.update(locations).set({
+      contactPerson: data.contactPerson,
+      email: data.email,
+      operatorPin: data.operatorPin,
+      contactPreference: data.contactPreference,
+      contactPreferenceSetAt: now,
+      onboardedAt: now,
+      // Burn the claim token so the link is one-time use. A fresh send from
+      // admin re-allocates a new token via ensureLocationClaimToken.
+      claimToken: null,
+    }).where(eq(locations.id, id)).returning();
+    if (!result[0]) throw new Error(`Location with id ${id} not found`);
+    return result[0];
+  }
+
   // Inventory operations
   async getInventoryByLocation(locationId: number): Promise<Inventory[]> {
     return db.select().from(inventory).where(eq(inventory.locationId, locationId));
@@ -963,6 +1102,21 @@ export async function ensureSchemaUpgrades(): Promise<void> {
       )
     `);
     await db.execute(sql`CREATE INDEX IF NOT EXISTS kb_embeddings_source_idx ON kb_embeddings (source_kind, source_id, chunk_idx)`);
+    // Task #35: operator onboarding (SMS+WhatsApp claim flow) on locations
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS claim_token TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS claim_token_created_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sent_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_status TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_error TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_sent_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_status TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_error TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_sent_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS default_welcome_channel TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS contact_preference TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS contact_preference_set_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS onboarded_at TIMESTAMP`);
+    await db.execute(sql`CREATE UNIQUE INDEX IF NOT EXISTS locations_claim_token_uq ON locations (claim_token) WHERE claim_token IS NOT NULL`);
   } catch (err: any) {
     schemaUpgradesRun = false;
     console.error('[ensureSchemaUpgrades] Failed to apply transactions reminder columns:', err?.message || err);

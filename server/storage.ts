@@ -2455,6 +2455,19 @@ export class MemStorage implements IStorage {
       nameHe: insertLocation.nameHe ?? null,
       contactPersonHe: insertLocation.contactPersonHe ?? null,
       addressHe: insertLocation.addressHe ?? null,
+      claimToken: null,
+      claimTokenCreatedAt: null,
+      welcomeSentAt: null,
+      welcomeSmsStatus: null,
+      welcomeSmsError: null,
+      welcomeSmsSentAt: null,
+      welcomeWhatsappStatus: null,
+      welcomeWhatsappError: null,
+      welcomeWhatsappSentAt: null,
+      defaultWelcomeChannel: null,
+      contactPreference: null,
+      contactPreferenceSetAt: null,
+      onboardedAt: null,
     };
     this.locations.set(id, location);
     return location;

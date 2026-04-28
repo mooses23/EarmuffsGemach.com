@@ -107,3 +107,203 @@ export async function sendReturnReminderSMS(ctx: ReturnReminderSmsContext): Prom
     throw new Error(`SMS send failed: ${reason}`);
   }
 }
+
+// ---------------------------------------------------------------------------
+// Operator onboarding — Task #35
+// ---------------------------------------------------------------------------
+
+export interface TwilioWhatsAppConfigStatus {
+  configured: boolean;
+  reason?: string;
+}
+
+// WhatsApp ride-along on the same Twilio account. We accept either a bare
+// phone number (e.g. "+15551234567") or a full "whatsapp:+..." URI in
+// TWILIO_WHATSAPP_FROM. If unset, we fall back to TWILIO_FROM_NUMBER —
+// only safe once the same business number is registered for WhatsApp
+// Business API in the Twilio console.
+export function getTwilioWhatsAppConfigStatus(): TwilioWhatsAppConfigStatus {
+  const base = getTwilioConfigStatus();
+  if (!base.configured) {
+    return { configured: false, reason: base.reason };
+  }
+  const waFrom = (process.env.TWILIO_WHATSAPP_FROM || process.env.TWILIO_FROM_NUMBER || '').trim();
+  if (!waFrom) {
+    return {
+      configured: false,
+      reason: 'Set TWILIO_WHATSAPP_FROM (or reuse TWILIO_FROM_NUMBER, once enabled for WhatsApp Business) to send WhatsApp.',
+    };
+  }
+  return { configured: true };
+}
+
+function whatsappFrom(): string {
+  const raw = (process.env.TWILIO_WHATSAPP_FROM || process.env.TWILIO_FROM_NUMBER || '').trim();
+  return raw.startsWith('whatsapp:') ? raw : `whatsapp:${raw}`;
+}
+
+export interface OperatorWelcomeMessageContext {
+  locationName: string;
+  locationCode: string;
+  claimUrl: string;
+  language: 'en' | 'he';
+  defaultPin?: string;
+  /** Optional named human signing the message. Defaults to "Earmuffs Gemach". */
+  signOff?: string;
+}
+
+// Heimish, plain-text welcome body. Same body for SMS and WhatsApp body-mode.
+// No emojis, no shouting, no marketing language, no "Reply STOP", no shortened URLs.
+// Goal: feel like a personal note from a real person at the gemach.
+export function buildOperatorWelcomeMessageBody(ctx: OperatorWelcomeMessageContext): string {
+  const signOff = (ctx.signOff || '').trim() || 'Baby Banz Earmuffs Gemach';
+  const pin = (ctx.defaultPin || '1234').trim();
+  if (ctx.language === 'he') {
+    return [
+      `שלום ${ctx.locationName},`,
+      ``,
+      `רצינו רק לעדכן שיש עכשיו דשבורד קטן וידידותי לניהול גמ"ח האוזניות שלך — אפשר לראות מלאי, להשאיל ולקבל תזכורות החזרה.`,
+      ``,
+      `הקישור האישי שלך לכניסה והגדרת הסיסמה החדשה:`,
+      `${ctx.claimUrl}`,
+      ``,
+      `קוד הגמ"ח: ${ctx.locationCode}. סיסמה זמנית: ${pin} (תחליף אותה בקישור).`,
+      ``,
+      `תודה רבה על מה שאתם עושים,`,
+      `— ${signOff}`,
+    ].join('\n');
+  }
+  return [
+    `Hi ${ctx.locationName},`,
+    ``,
+    `Just letting you know there's now a small, friendly dashboard for your earmuffs gemach — you can see your stock, run lend and return, and send return reminders.`,
+    ``,
+    `Your personal link to log in and set your own PIN:`,
+    `${ctx.claimUrl}`,
+    ``,
+    `Location code ${ctx.locationCode}, temporary PIN ${pin} (you'll change it in the link).`,
+    ``,
+    `Thank you for everything you do,`,
+    `— ${signOff}`,
+  ].join('\n');
+}
+
+export interface OperatorWelcomeSendContext extends OperatorWelcomeMessageContext {
+  toPhone: string;
+}
+
+export interface OperatorWelcomeChannelResult {
+  ok: boolean;
+  sid?: string;
+  error?: string;
+  /** Friendly hint shown to admins when WhatsApp template isn't approved yet. */
+  hint?: string;
+}
+
+export interface OperatorWelcomeSendResult {
+  sms?: OperatorWelcomeChannelResult;
+  whatsapp?: OperatorWelcomeChannelResult;
+}
+
+function describeTwilioError(e: any, channel: 'sms' | 'whatsapp'): { error: string; hint?: string } {
+  const code = typeof e?.code === 'number' ? e.code : undefined;
+  const msg = (e?.message || '').toString();
+  // 63016: free-form WhatsApp message outside 24h customer-care window — needs an approved template.
+  // 63015 / 63017: similar template/channel issues. Surface a friendly hint.
+  if (channel === 'whatsapp' && (code === 63016 || code === 63015 || code === 63017 || /template/i.test(msg))) {
+    return {
+      error: msg || 'WhatsApp message rejected.',
+      hint: 'WhatsApp needs a Meta-approved template for the first contact. The SMS may have gone through; once the template is approved, WhatsApp sends will succeed.',
+    };
+  }
+  // 21211: invalid To. 21408: permission denied for region. 21610: opted out.
+  if (code === 21610) {
+    return { error: 'This number has opted out of messages from this Twilio number.' };
+  }
+  return { error: msg || `Twilio rejected the ${channel === 'sms' ? 'SMS' : 'WhatsApp'} request.` };
+}
+
+export async function sendOperatorWelcomeSms(ctx: OperatorWelcomeSendContext): Promise<OperatorWelcomeChannelResult> {
+  const status = getTwilioConfigStatus();
+  if (!status.configured) {
+    return { ok: false, error: status.reason || 'SMS is not configured.' };
+  }
+  const to = normalizePhoneForSms(ctx.toPhone);
+  if (!to) {
+    return { ok: false, error: 'Phone number is missing or not a valid SMS-capable number.' };
+  }
+  const body = buildOperatorWelcomeMessageBody(ctx);
+  const client = getClient();
+  try {
+    const msg = await client.messages.create({
+      to,
+      from: process.env.TWILIO_FROM_NUMBER!,
+      body,
+    });
+    return { ok: true, sid: msg.sid };
+  } catch (e: any) {
+    return { ok: false, ...describeTwilioError(e, 'sms') };
+  }
+}
+
+export async function sendOperatorWelcomeWhatsApp(ctx: OperatorWelcomeSendContext): Promise<OperatorWelcomeChannelResult> {
+  const status = getTwilioWhatsAppConfigStatus();
+  if (!status.configured) {
+    return { ok: false, error: status.reason || 'WhatsApp is not configured.' };
+  }
+  const to = normalizePhoneForSms(ctx.toPhone);
+  if (!to) {
+    return { ok: false, error: 'Phone number is missing or not a valid WhatsApp-capable number.' };
+  }
+  const body = buildOperatorWelcomeMessageBody(ctx);
+  const client = getClient();
+  // If a content template SID is configured for the operator's language,
+  // use it (avoids the 24-hour customer-care window restriction). Variables
+  // are positional and match the EN/HE template body order: 1=name, 2=link,
+  // 3=code, 4=pin.
+  const contentSid = ctx.language === 'he'
+    ? (process.env.TWILIO_WHATSAPP_CONTENT_SID_HE || '').trim()
+    : (process.env.TWILIO_WHATSAPP_CONTENT_SID_EN || '').trim();
+  try {
+    const msg = await client.messages.create(
+      contentSid
+        ? {
+            to: `whatsapp:${to}`,
+            from: whatsappFrom(),
+            contentSid,
+            contentVariables: JSON.stringify({
+              '1': ctx.locationName,
+              '2': ctx.claimUrl,
+              '3': ctx.locationCode,
+              '4': (ctx.defaultPin || '1234').trim(),
+            }),
+          }
+        : {
+            to: `whatsapp:${to}`,
+            from: whatsappFrom(),
+            body,
+          },
+    );
+    return { ok: true, sid: msg.sid };
+  } catch (e: any) {
+    return { ok: false, ...describeTwilioError(e, 'whatsapp') };
+  }
+}
+
+// Fires SMS and/or WhatsApp in parallel, returning per-channel results.
+// Never throws — channel failures are surfaced via {ok:false, error}.
+export async function sendOperatorWelcome(
+  ctx: OperatorWelcomeSendContext,
+  channels: { sms?: boolean; whatsapp?: boolean },
+): Promise<OperatorWelcomeSendResult> {
+  const tasks: Promise<void>[] = [];
+  const out: OperatorWelcomeSendResult = {};
+  if (channels.sms) {
+    tasks.push(sendOperatorWelcomeSms(ctx).then((r) => { out.sms = r; }));
+  }
+  if (channels.whatsapp) {
+    tasks.push(sendOperatorWelcomeWhatsApp(ctx).then((r) => { out.whatsapp = r; }));
+  }
+  await Promise.all(tasks);
+  return out;
+}

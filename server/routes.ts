@@ -14,6 +14,15 @@ import { PayLaterService, prepareBorrowerStatusToken, commitBorrowerStatusToken 
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
 import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
 import { getTwilioConfigStatus, sendReturnReminderSMS, normalizePhoneForSms } from "./twilio-client.js";
+import {
+  buildWelcomePreview,
+  getOnboardingTwilioStatus,
+  sendWelcomeForLocation,
+  sendWelcomeForLocations,
+  summarizeResults,
+  claimTokenIsExpired,
+} from "./operatorOnboardingService.js";
+import { OPERATOR_WELCOME_CHANNELS, OPERATOR_CONTACT_PREFERENCES } from "@shared/schema";
 import { scoreContactSpam } from "./spam-heuristic.js";
 import { groupContactsByThread } from "./inbox-threading.js";
 import {
@@ -164,10 +173,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // LOCATIONS ROUTES
+  // Strip secrets from location rows for callers who aren't admins. Admin
+  // sessions get the full row (status fields, defaults, contact prefs, etc.)
+  // while everyone else (public site, operator dashboard) is shielded from
+  // claim tokens, raw PIN, and per-channel error strings.
+  function sanitizeLocationForViewer(loc: any, isAdmin: boolean) {
+    if (isAdmin) return loc;
+    const { claimToken, claimTokenCreatedAt, operatorPin, welcomeSmsError, welcomeWhatsappError, ...safe } = loc || {};
+    return safe;
+  }
+  function viewerIsAdmin(req: any): boolean {
+    return !!(req.isAuthenticated && req.isAuthenticated() && req.user?.isAdmin);
+  }
+
   app.get("/api/locations", async (req, res) => {
     try {
       const locations = await storage.getAllLocations();
-      res.json(locations);
+      const admin = viewerIsAdmin(req);
+      res.json(locations.map((l) => sanitizeLocationForViewer(l, admin)));
     } catch (error) {
       console.error("Error fetching locations:", error);
       res.status(500).json({ message: "Failed to fetch locations" });
@@ -184,7 +207,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       const locations = await storage.getLocationsByRegionId(region.id);
-      res.json(locations);
+      const admin = viewerIsAdmin(req);
+      res.json(locations.map((l) => sanitizeLocationForViewer(l, admin)));
     } catch (error) {
       console.error("Error fetching locations by region:", error);
       res.status(500).json({ message: "Failed to fetch locations" });
@@ -214,7 +238,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Location not found" });
       }
       
-      res.json(location);
+      res.json(sanitizeLocationForViewer(location, viewerIsAdmin(req)));
     } catch (error) {
       console.error("Error fetching location:", error);
       res.status(500).json({ message: "Failed to fetch location" });
@@ -697,6 +721,235 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error: any) {
       console.error("Error bulk-sending welcome emails:", error);
       res.status(500).json({ message: error.message || "Failed to bulk-send welcome emails" });
+    }
+  });
+
+  // ===== Operator onboarding (Task #35) =====
+  // SMS + WhatsApp welcome flow. Routes are admin-gated except the public
+  // /api/welcome/:token claim/complete endpoints.
+
+  function requireOnboardingAdmin(req: any, res: any): boolean {
+    if (!req.isAuthenticated || !req.isAuthenticated() || !req.user?.isAdmin) {
+      res.status(403).json({ message: "Admin access required" });
+      return false;
+    }
+    return true;
+  }
+
+  function getOnboardingBaseUrl(req: any): string {
+    return process.env.APP_URL || process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
+  }
+
+  const onboardingChannelSchema = z.enum(OPERATOR_WELCOME_CHANNELS);
+
+  // (TTL helper `claimTokenIsExpired` is imported from operatorOnboardingService
+  // so the storage layer can reuse the same definition for atomic regen.)
+
+  // Twilio config status (admin), so the UI can disable channels and explain why.
+  app.get('/api/admin/twilio-status', (req, res) => {
+    if (!requireOnboardingAdmin(req, res)) return;
+    res.json(getOnboardingTwilioStatus());
+  });
+
+  // Live message preview (EN + HE) before sending. GET is intentional —
+  // this is a read-only computation off of the location row.
+  app.get('/api/admin/locations/:id/onboarding-preview', async (req, res) => {
+    if (!requireOnboardingAdmin(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: 'Invalid location ID' });
+      const loc = await storage.getLocation(id);
+      if (!loc) return res.status(404).json({ message: 'Location not found' });
+      const baseUrl = getOnboardingBaseUrl(req);
+      res.json(buildWelcomePreview(loc, baseUrl));
+    } catch (e: any) {
+      res.status(500).json({ message: e?.message || 'Failed to build preview' });
+    }
+  });
+
+  // Single location onboarding send.
+  app.post('/api/admin/locations/:id/send-onboarding-welcome', async (req, res) => {
+    if (!requireOnboardingAdmin(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: 'Invalid location ID' });
+      const parsed = z.object({
+        channel: onboardingChannelSchema,
+        rememberAsDefault: z.boolean().optional(),
+      }).safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
+      }
+      const baseUrl = getOnboardingBaseUrl(req);
+      const result = await sendWelcomeForLocation(id, {
+        channel: parsed.data.channel,
+        baseUrl,
+        rememberAsDefault: parsed.data.rememberAsDefault,
+      });
+      // Response shape kept stable for the FE: results.{sms,whatsapp,anySuccess}.
+      res.json({
+        success: result.ok,
+        results: {
+          sms: result.sms,
+          whatsapp: result.whatsapp,
+          anySuccess: !!(result.sms?.ok || result.whatsapp?.ok),
+        },
+        location: { id: result.locationId, name: result.locationName },
+      });
+    } catch (e: any) {
+      console.error('[onboarding] single send failed:', e);
+      res.status(500).json({ message: e?.message || 'Send failed' });
+    }
+  });
+
+  // Bulk send to a hand-picked list of location ids. Accepts either
+  // `locationIds` (preferred, matches the admin UI) or legacy `ids`.
+  app.post('/api/admin/locations/onboarding/send-bulk', async (req, res) => {
+    if (!requireOnboardingAdmin(req, res)) return;
+    try {
+      const parsed = z.object({
+        locationIds: z.array(z.number().int().positive()).min(1).max(200).optional(),
+        ids: z.array(z.number().int().positive()).min(1).max(200).optional(),
+        channel: onboardingChannelSchema,
+        rememberAsDefault: z.boolean().optional(),
+      }).safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
+      }
+      const ids = parsed.data.locationIds ?? parsed.data.ids;
+      if (!ids || ids.length === 0) {
+        return res.status(400).json({ message: 'locationIds is required' });
+      }
+      const baseUrl = getOnboardingBaseUrl(req);
+      const results = await sendWelcomeForLocations(ids, {
+        channel: parsed.data.channel,
+        baseUrl,
+        rememberAsDefault: parsed.data.rememberAsDefault,
+      });
+      res.json({ success: true, summary: summarizeResults(results), results });
+    } catch (e: any) {
+      console.error('[onboarding] bulk send failed:', e);
+      res.status(500).json({ message: e?.message || 'Bulk send failed' });
+    }
+  });
+
+  // Send to every active, not-yet-onboarded location.
+  app.post('/api/admin/locations/onboarding/send-all', async (req, res) => {
+    if (!requireOnboardingAdmin(req, res)) return;
+    try {
+      const parsed = z.object({
+        channel: onboardingChannelSchema,
+        rememberAsDefault: z.boolean().optional(),
+      }).safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
+      }
+      const all = await storage.getAllLocations();
+      // Phone is required for SMS and WhatsApp, so phone-less rows can never
+      // succeed via this flow. We exclude them up front (instead of letting
+      // the service skip them) so the `eligible` count and the per-row
+      // attempts in the response only reflect rows that could actually send.
+      const candidateIds = all
+        .filter((loc) => loc.isActive !== false && !loc.onboardedAt && !!loc.phone)
+        .map((loc) => loc.id);
+      if (candidateIds.length === 0) {
+        return res.json({ success: true, eligible: 0, summary: { sent: 0, failed: 0, skipped: 0, total: 0 }, results: [] });
+      }
+      const baseUrl = getOnboardingBaseUrl(req);
+      const results = await sendWelcomeForLocations(candidateIds, {
+        channel: parsed.data.channel,
+        baseUrl,
+        rememberAsDefault: parsed.data.rememberAsDefault,
+      });
+      res.json({ success: true, eligible: candidateIds.length, summary: summarizeResults(results), results });
+    } catch (e: any) {
+      console.error('[onboarding] send-all failed:', e);
+      res.status(500).json({ message: e?.message || 'Send-all failed' });
+    }
+  });
+
+  // Public: resolve a claim token to a (sanitized) location and onboarding state.
+  app.get('/api/welcome/:token', async (req, res) => {
+    try {
+      const token = (req.params.token || '').trim();
+      if (!token) return res.status(400).json({ message: 'Missing token' });
+      const loc = await storage.getLocationByClaimToken(token);
+      if (!loc) return res.status(404).json({ message: 'This link is no longer valid.' });
+      if (claimTokenIsExpired(loc)) {
+        return res.status(410).json({ message: 'This welcome link has expired. Please ask the gemach to send a fresh one.' });
+      }
+      const { operatorPin, claimToken, claimTokenCreatedAt, welcomeSmsError, welcomeWhatsappError, ...safe } = loc as any;
+      res.json({
+        location: {
+          ...safe,
+          pinIsDefault: (operatorPin || '') === '1234' || !operatorPin,
+        },
+        alreadyOnboarded: !!loc.onboardedAt,
+      });
+    } catch (e: any) {
+      console.error('[onboarding] welcome resolve failed:', e);
+      res.status(500).json({ message: 'Could not load this welcome link.' });
+    }
+  });
+
+  // Public: complete the welcome flow (name, email, contact pref, new PIN)
+  // and auto-login the operator into the dashboard.
+  app.post('/api/welcome/:token/complete', async (req, res) => {
+    try {
+      const token = (req.params.token || '').trim();
+      if (!token) return res.status(400).json({ message: 'Missing token' });
+      const parsed = z.object({
+        contactPerson: z.string().trim().min(2).max(120),
+        email: z.string().trim().email().max(200),
+        contactPreference: z.enum(OPERATOR_CONTACT_PREFERENCES),
+        newPin: z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits'),
+        confirmPin: z.string().regex(/^\d{4,6}$/, 'Confirm PIN must be 4-6 digits'),
+      }).safeParse(req.body || {});
+      if (!parsed.success) {
+        return res.status(400).json({ message: 'Please review the form.', errors: parsed.error.errors });
+      }
+      if (parsed.data.newPin !== parsed.data.confirmPin) {
+        return res.status(400).json({ message: 'PIN and confirmation do not match.' });
+      }
+      if (parsed.data.newPin === '1234') {
+        return res.status(400).json({ message: 'Please choose a PIN other than 1234.' });
+      }
+      // Pre-check (for clean error messages) — but the actual write below is
+      // a single atomic UPDATE conditioned on (claimToken matches AND not yet
+      // onboarded), so concurrent /complete calls with the same token cannot
+      // both succeed.
+      const loc = await storage.getLocationByClaimToken(token);
+      if (!loc) return res.status(404).json({ message: 'This link is no longer valid.' });
+      if (claimTokenIsExpired(loc)) {
+        return res.status(410).json({ message: 'This welcome link has expired. Please ask the gemach to send a fresh one.' });
+      }
+      if (loc.onboardedAt) {
+        return res.status(409).json({ message: 'This location has already been onboarded. Please log in with your code and PIN.' });
+      }
+
+      const updated = await storage.completeOperatorOnboardingByToken(token, {
+        contactPerson: parsed.data.contactPerson,
+        email: parsed.data.email,
+        operatorPin: parsed.data.newPin,
+        contactPreference: parsed.data.contactPreference,
+      });
+      if (!updated) {
+        return res.status(409).json({ message: 'This location has just been onboarded from another device. Please log in with your code and PIN.' });
+      }
+
+      // Auto-login: same session shape as /api/operator/login.
+      (req.session as any).operatorLocationId = updated.id;
+      req.session.save((err) => {
+        if (err) {
+          console.error('[onboarding] session save failed:', err);
+          return res.status(500).json({ message: 'Saved your details, but login failed. Please log in manually.' });
+        }
+        const { operatorPin, claimToken, ...safe } = updated as any;
+        res.json({ success: true, location: { ...safe, pinIsDefault: false } });
+      });
+    } catch (e: any) {
+      console.error('[onboarding] complete failed:', e);
+      res.status(500).json({ message: e?.message || 'Could not save your details.' });
     }
   });
 
@@ -2400,7 +2653,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   type ThreadOp = (threadId: string) => Promise<void>;
   const makeThreadRoute = (path: string, op: ThreadOp, errLabel: string) => {
     app.post(path, async (req, res) => {
-      if (!requireAdmin(req, res)) return;
+      if (!requireOnboardingAdmin(req, res)) return;
       try {
         await op(req.params.threadId);
         res.json({ success: true });

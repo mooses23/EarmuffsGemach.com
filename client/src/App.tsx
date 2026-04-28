@@ -26,6 +26,7 @@ import OperatorIndex from "@/pages/operator/index";
 import OperatorLogin from "@/pages/operator/login";
 import OperatorDashboard from "@/pages/operator/dashboard";
 import OperatorDepositDashboard from "@/pages/operator/deposit-dashboard";
+import WelcomePage from "@/pages/welcome";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { Layout } from "@/components/layout/layout";
 import { AuthProvider } from "@/hooks/use-auth";
@@ -33,6 +34,17 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { OperatorAuthProvider } from "@/hooks/use-operator-auth";
 
 function Router() {
+  return (
+    <Switch>
+      <Route path="/welcome/:token" component={WelcomePage} />
+      <Route>
+        <LayoutRouter />
+      </Route>
+    </Switch>
+  );
+}
+
+function LayoutRouter() {
   return (
     <Layout>
       <Switch>
