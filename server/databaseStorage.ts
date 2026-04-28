@@ -1352,6 +1352,10 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     // Add it idempotently so getGlobalSetting/setGlobalSetting (which
     // reference the column via Drizzle) don't throw on existing DBs.
     await db.execute(sql`ALTER TABLE global_settings ADD COLUMN IF NOT EXISTS is_enabled BOOLEAN NOT NULL DEFAULT true`);
+    // Task #60: email onboarding status tracking on locations
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_email_status TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_email_error TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMP`);
   } catch (err: any) {
     schemaUpgradesRun = false;
     console.error('[ensureSchemaUpgrades] Failed to apply transactions reminder columns:', err?.message || err);

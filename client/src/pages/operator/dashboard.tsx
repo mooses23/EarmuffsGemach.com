@@ -1509,7 +1509,13 @@ function ReturnWizard({
   useEffect(() => {
     if (selectedTransaction) {
       if (!isPartialRefund) {
-        setRefundAmount(selectedTransaction.depositAmount.toString());
+        // Pre-fill with the remaining refundable amount (mirrors server math and RefundChargedDialog)
+        const feeCents = (selectedTransaction.depositFeeCents ?? 0) as number;
+        const depositCents = Math.round((selectedTransaction.depositAmount || 0) * 100);
+        const maxRefundCents = Math.max(depositCents + feeCents, (selectedTransaction.amountPlannedCents ?? 0) as number);
+        const alreadyRefundedCents = Math.round(((selectedTransaction.refundAmount ?? 0) as number) * 100);
+        const remainingCents = Math.max(0, maxRefundCents - alreadyRefundedCents);
+        setRefundAmount((remainingCents / 100).toFixed(2));
       } else {
         // Clear the amount when switching to partial refund so user can enter fresh value
         setRefundAmount("");
@@ -1577,7 +1583,9 @@ function ReturnWizard({
         if (selectedTransaction?.payLaterStatus && selectedTransaction.payLaterStatus !== "CHARGED" && selectedTransaction.payLaterStatus !== "PARTIALLY_REFUNDED") {
           return cardAction !== null;
         }
-        return parseFloat(refundAmount) >= 0;
+        // Full refund is always valid (amount is pre-filled); partial refund requires a positive number
+        if (!isPartialRefund) return true;
+        return Number.isFinite(parseFloat(refundAmount)) && parseFloat(refundAmount) > 0;
       case 3: return true;
       default: return false;
     }

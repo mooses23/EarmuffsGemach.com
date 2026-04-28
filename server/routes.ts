@@ -3980,18 +3980,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     return withRefundLock(transactionId, async () => {
     try {
 
-      const operatorLocationId = (req.session as any).operatorLocationId;
-      if (!req.isAuthenticated() && !operatorLocationId) {
+      const locationId = getOperatorLocationId(req);
+      if (locationId === null) {
         return res.status(401).json({ message: "Authentication required" });
       }
 
       const operatorUserId = req.isAuthenticated() ? (req.user as any).id : undefined;
-      const locationId = operatorLocationId || (req.user as any)?.locationId;
 
       const transaction = await storage.getTransaction(transactionId);
       if (!transaction) return res.status(404).json({ message: "Transaction not found" });
 
-      if (transaction.locationId !== locationId) {
+      // locationId === -1 means admin — admins may refund any transaction
+      if (locationId !== -1 && transaction.locationId !== locationId) {
         return res.status(403).json({ message: "Not authorized for this location" });
       }
 
