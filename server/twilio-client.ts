@@ -158,12 +158,13 @@ export interface OperatorWelcomeMessageContext {
 // target. No emojis, no shouting, no "Reply STOP" footer, plain URL.
 export function buildOperatorWelcomeMessageBody(ctx: OperatorWelcomeMessageContext): string {
   const signOff = (ctx.signOff || '').trim() || 'Earmuffs Gemach';
+  const pin = (ctx.defaultPin || '1234').trim();
   if (ctx.language === 'he') {
-    // ~150 chars
-    return `שלום ${ctx.locationName}, יש דשבורד חדש לגמ"ח (${ctx.locationCode}). הקישור שלך לכניסה ולעדכון סיסמה:\n${ctx.claimUrl}\nתודה — ${signOff}`;
+    // ~190 chars (UCS-2). Includes location code + temp PIN per spec.
+    return `שלום ${ctx.locationName}, יש דשבורד חדש לגמ"ח (${ctx.locationCode}). קוד זמני: ${pin}. הקישור לכניסה ולעדכון הסיסמה:\n${ctx.claimUrl}\nתודה — ${signOff}`;
   }
-  // ~170 chars
-  return `Hi ${ctx.locationName}, there's now a dashboard for the gemach (${ctx.locationCode}). Your link to log in and set your PIN:\n${ctx.claimUrl}\nThank you — ${signOff}`;
+  // ~210 chars GSM-7. Includes location code + temp PIN per spec.
+  return `Hi ${ctx.locationName}, there's now a dashboard for the gemach (${ctx.locationCode}). Temp PIN: ${pin}. Your link to log in and set a new PIN:\n${ctx.claimUrl}\nThank you — ${signOff}`;
 }
 
 export interface OperatorWelcomeSendContext extends OperatorWelcomeMessageContext {

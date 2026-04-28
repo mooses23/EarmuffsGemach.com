@@ -914,6 +914,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Public: re-entry auto-login for an already-onboarded location.
+  // Tokens are durable+reusable per spec, so opening the welcome link from
+  // any device for an onboarded location should drop the operator straight
+  // into their dashboard. Establishes the same server session that
+  // /api/operator/login and /api/welcome/:token/complete do.
+  app.post('/api/welcome/:token/session', async (req, res) => {
+    try {
+      const token = (req.params.token || '').trim();
+      if (!token) return res.status(400).json({ message: 'Missing token' });
+      const loc = await storage.getLocationByClaimToken(token);
+      if (!loc) return res.status(404).json({ message: 'This link is no longer valid.' });
+      if (!loc.onboardedAt) {
+        // Not onboarded yet — caller must run the full /complete flow first.
+        return res.status(409).json({ message: 'This location has not completed onboarding yet.' });
+      }
+      (req.session as any).operatorLocationId = loc.id;
+      req.session.save((err) => {
+        if (err) {
+          console.error('[onboarding] re-entry session save failed:', err);
+          return res.status(500).json({ message: 'Could not establish your session.' });
+        }
+        const { operatorPin, claimToken, claimTokenCreatedAt, welcomeSmsError, welcomeWhatsappError, ...safe } = loc as LocationRow;
+        res.json({ success: true, location: { ...safe, pinIsDefault: (operatorPin || '') === '1234' || !operatorPin } });
+      });
+    } catch (e: any) {
+      console.error('[onboarding] welcome re-entry session failed:', e);
+      res.status(500).json({ message: 'Could not establish your session.' });
+    }
+  });
+
   // Public: complete the welcome flow (name, email, contact pref, new PIN)
   // and auto-login the operator into the dashboard.
   app.post('/api/welcome/:token/complete', async (req, res) => {

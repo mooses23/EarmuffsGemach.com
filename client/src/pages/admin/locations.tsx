@@ -202,9 +202,9 @@ export default function AdminLocations() {
   });
 
   const getOnboardingStatus = (loc: Location): "onboarded" | "sent" | "failed" | "not-sent" => {
-    if ((loc as any).onboardedAt) return "onboarded";
-    const sms = ((loc as any).welcomeSmsStatus as string | null | undefined)?.toLowerCase();
-    const wa = ((loc as any).welcomeWhatsappStatus as string | null | undefined)?.toLowerCase();
+    if (loc.onboardedAt) return "onboarded";
+    const sms = loc.welcomeSmsStatus?.toLowerCase();
+    const wa = loc.welcomeWhatsappStatus?.toLowerCase();
     // Twilio terminal statuses: queued/sending/sent/delivered = success; failed/undelivered = failure.
     const sentLike = (s?: string) => s === "sent" || s === "delivered" || s === "queued" || s === "sending" || s === "accepted";
     const failedLike = (s?: string) => s === "failed" || s === "undelivered";
@@ -215,7 +215,7 @@ export default function AdminLocations() {
 
   const openSinglePicker = (loc: Location) => {
     setWelcomeTarget({ kind: "single", id: loc.id, loc });
-    const locDefault = (loc as any).defaultWelcomeChannel as OperatorWelcomeChannel | null;
+    const locDefault = loc.defaultWelcomeChannel as OperatorWelcomeChannel | null;
     setWelcomeChannel(locDefault && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefault) ? locDefault : defaultChannel);
     setRememberAsDefault(false);
     setWelcomeDialogOpen(true);
@@ -408,7 +408,7 @@ export default function AdminLocations() {
     return language === "he" && region.nameHe ? region.nameHe : region.name;
   };
 
-  const localized = (loc: any, base: "name" | "address" | "contactPerson") => {
+  const localized = (loc: Location, base: "name" | "address" | "contactPerson") => {
     const heKey = `${base}He` as const;
     return language === "he" && loc[heKey] ? loc[heKey] : loc[base];
   };
@@ -897,11 +897,11 @@ export default function AdminLocations() {
                   <TableBody>
                     {onboardingFiltered.map((loc) => {
                       const status = getOnboardingStatus(loc);
-                      const sms = (loc as any).welcomeSmsStatus as string | null;
-                      const smsErr = (loc as any).welcomeSmsError as string | null;
-                      const wa = (loc as any).welcomeWhatsappStatus as string | null;
-                      const waErr = (loc as any).welcomeWhatsappError as string | null;
-                      const lastSentAt = (loc as any).welcomeSentAt as string | Date | null;
+                      const sms = loc.welcomeSmsStatus;
+                      const smsErr = loc.welcomeSmsError;
+                      const wa = loc.welcomeWhatsappStatus;
+                      const waErr = loc.welcomeWhatsappError;
+                      const lastSentAt = loc.welcomeSentAt as string | Date | null;
                       const sentDaysAgo = lastSentAt ? Math.max(0, Math.floor((Date.now() - new Date(lastSentAt).getTime()) / 86400000)) : null;
                       return (
                         <TableRow key={loc.id} data-testid={`row-onboarding-${loc.id}`}>

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { useRoute, useLocation } from "wouter";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { apiRequest, queryClient } from "@/lib/queryClient";
@@ -9,11 +9,19 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Loader2, Check, MapPin, ArrowRight, Phone, MessageCircle, Mail, Package, Repeat2, BellRing, ShieldCheck } from "lucide-react";
+import { Loader2, Check, MapPin, ArrowRight, Phone, MessageCircle, Mail, Package, Repeat2, BellRing, ShieldCheck, type LucideIcon } from "lucide-react";
 import { Location, OPERATOR_CONTACT_PREFERENCES, type OperatorContactPreference } from "@shared/schema";
 
 interface WelcomeResolveResponse {
-  location: Location & { pinIsDefault?: boolean };
+  // The server strips claimToken/operatorPin/error fields before returning,
+  // so the public shape is a Location subset plus the derived `pinIsDefault`.
+  location: Partial<Location> & {
+    id: number;
+    name: string;
+    locationCode: string;
+    address: string;
+    pinIsDefault?: boolean;
+  };
   alreadyOnboarded: boolean;
 }
 
@@ -37,8 +45,8 @@ export default function WelcomePage() {
   });
 
   const loc = data?.location;
-  const isHebrew = !!(loc as any)?.nameHe;
-  const localizedName = isHebrew ? ((loc as any)?.nameHe || loc?.name) : loc?.name;
+  const isHebrew = !!loc?.nameHe;
+  const localizedName = isHebrew ? (loc?.nameHe || loc?.name) : loc?.name;
 
   const [step, setStep] = useState<Step>("confirm");
   const [contactPerson, setContactPerson] = useState("");
@@ -57,10 +65,39 @@ export default function WelcomePage() {
     if (loc.email && !loc.email.toLowerCase().includes("earmuffsgemach@gmail.com")) {
       setEmail(loc.email);
     }
-    if ((loc as any).contactPreference && (OPERATOR_CONTACT_PREFERENCES as readonly string[]).includes((loc as any).contactPreference)) {
-      setContactPreference((loc as any).contactPreference);
+    if (loc.contactPreference && (OPERATOR_CONTACT_PREFERENCES as readonly string[]).includes(loc.contactPreference)) {
+      setContactPreference(loc.contactPreference as OperatorContactPreference);
     }
   }, [loc]);
+
+  // Already-onboarded re-entry: establish the server session via the public
+  // /session endpoint (so session-protected operator APIs accept this device),
+  // mirror it into localStorage for useOperatorAuth, then redirect.
+  // Spec: tokens are durable, re-opening the link should not bounce them
+  // back to a manual login screen.
+  const [reentryError, setReentryError] = useState<string | null>(null);
+  const reentryFiredRef = useRef(false);
+  useEffect(() => {
+    if (!data?.alreadyOnboarded || !loc || reentryFiredRef.current) return;
+    reentryFiredRef.current = true;
+    (async () => {
+      try {
+        const res = await apiRequest("POST", `/api/welcome/${encodeURIComponent(token)}/session`, {});
+        const json = await res.json().catch(() => ({}));
+        const sessionLoc = json?.location || loc;
+        try {
+          localStorage.setItem("operatorLocation", JSON.stringify(sessionLoc));
+        } catch {
+          // ignore localStorage errors
+        }
+        refreshLocation();
+        setLocation("/operator/dashboard");
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Could not open your dashboard.";
+        setReentryError(msg);
+      }
+    })();
+  }, [data?.alreadyOnboarded, loc, refreshLocation, setLocation, token]);
 
   const completeMutation = useMutation({
     mutationFn: async (payload: { contactPerson: string; email: string; contactPreference: OperatorContactPreference; newPin: string; confirmPin: string }) => {
@@ -121,20 +158,29 @@ export default function WelcomePage() {
     );
   }
 
-  if (data?.alreadyOnboarded && step === "confirm") {
+  if (data?.alreadyOnboarded) {
+    // The useEffect above establishes the server session and redirects; this
+    // is just a brief in-flight state shown between resolution and the wouter
+    // setLocation kicking in. Surface a recoverable error if /session failed.
     return (
       <FullScreenShell>
-        <Card className="max-w-md w-full" data-testid="welcome-already-onboarded">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Check className="h-5 w-5 text-green-600" /> You're all set</CardTitle>
-            <CardDescription>{localizedName} is already onboarded. Use your location code <strong>{loc.locationCode}</strong> and your PIN to log in.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-2">
-            <Button onClick={() => setLocation("/operator/login")} data-testid="welcome-go-login">
-              Go to login <ArrowRight className="h-4 w-4 ml-1" />
-            </Button>
-          </CardContent>
-        </Card>
+        {reentryError ? (
+          <Card className="max-w-md w-full" data-testid="welcome-reentry-error">
+            <CardHeader>
+              <CardTitle>Couldn't open your dashboard</CardTitle>
+              <CardDescription>{reentryError}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button onClick={() => setLocation("/operator/login")} data-testid="welcome-go-login">
+                Go to login <ArrowRight className="h-4 w-4 ml-1" />
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="flex items-center gap-2 text-muted-foreground" data-testid="welcome-already-onboarded">
+            <Loader2 className="h-4 w-4 animate-spin" /> Opening your dashboard…
+          </div>
+        )}
       </FullScreenShell>
     );
   }
@@ -226,21 +272,22 @@ export default function WelcomePage() {
               body={tourSlides[tourIdx].body}
               isLast={tourIdx === tourSlides.length - 1}
               onNext={() => {
-                if (tourIdx < tourSlides.length - 1) setTourIdx(tourIdx + 1);
-                else setStep("done");
+                if (tourIdx < tourSlides.length - 1) {
+                  setTourIdx(tourIdx + 1);
+                } else {
+                  // Spec: end of tour lands the operator straight in their
+                  // dashboard. No intermediate "you're in" tap-through.
+                  setStep("done");
+                  setLocation("/operator/dashboard");
+                }
               }}
               onBack={tourIdx > 0 ? () => setTourIdx(tourIdx - 1) : undefined}
             />
           )}
 
           {step === "done" && (
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                You're already logged in. Tap below to open your dashboard.
-              </p>
-              <Button className="w-full" onClick={() => setLocation("/operator/dashboard")} data-testid="welcome-open-dashboard">
-                Open my dashboard <ArrowRight className="h-4 w-4 ml-1" />
-              </Button>
+            <div className="flex items-center gap-2 text-muted-foreground" data-testid="welcome-redirecting">
+              <Loader2 className="h-4 w-4 animate-spin" /> Opening your dashboard…
             </div>
           )}
         </CardContent>
@@ -392,7 +439,7 @@ function PinForm({
 function TourSlide({
   icon: Icon, title, body, isLast, onNext, onBack,
 }: {
-  icon: any; title: string; body: string; isLast: boolean;
+  icon: LucideIcon; title: string; body: string; isLast: boolean;
   onNext: () => void; onBack?: () => void;
 }) {
   return (
