@@ -635,7 +635,7 @@ function LocationCard({ location, region }: LocationCardProps) {
         <div className="space-y-3">
           <div className="flex items-start">
             <MapPin className="h-4 w-4 text-slate-400 mt-1 mr-2 flex-shrink-0" />
-            <p className="text-sm text-slate-300">{locAddress}</p>
+            <p className="text-sm text-slate-300 break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</p>
           </div>
           
           {location.phone && (
@@ -652,7 +652,7 @@ function LocationCard({ location, region }: LocationCardProps) {
           {location.email && (
             <div className="flex items-start">
               <Mail className={`h-4 w-4 mr-2 mt-1 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-400" : "text-slate-400"}`} />
-              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+              <div className="flex flex-wrap items-start gap-x-2 gap-y-1 min-w-0">
                 <a
                   href={`mailto:${location.email}`}
                   className="text-sm text-slate-300 hover:text-white transition-colors break-all"
@@ -661,7 +661,7 @@ function LocationCard({ location, region }: LocationCardProps) {
                   {location.email}
                 </a>
                 {location.contactPreference === "email" && (
-                  <span className="text-xs text-blue-400 font-medium flex items-center gap-0.5 flex-shrink-0">
+                  <span className="text-xs text-blue-400 font-medium flex items-center gap-0.5 flex-shrink-0 self-start mt-0.5">
                     <Star className="w-3 h-3 fill-current" /> {t("preferred")}
                   </span>
                 )}
