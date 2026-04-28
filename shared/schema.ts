@@ -305,6 +305,15 @@ export const transactions = pgTable("transactions", {
   refundAttemptedAt: timestamp("refund_attempted_at"),
 });
 
+// Twilio delivery statuses that can appear in the status-callback webhook.
+// "opted_out" is a synthetic status we assign locally when Twilio reports
+// error code 21610 (the recipient replied STOP).
+export const TWILIO_DELIVERY_STATUSES = [
+  "queued", "sending", "sent", "delivered",
+  "undelivered", "failed", "opted_out",
+] as const;
+export type TwilioDeliveryStatus = typeof TWILIO_DELIVERY_STATUSES[number];
+
 // Per-send history of return reminders for each transaction.
 export const returnReminderEvents = pgTable("return_reminder_events", {
   id: serial("id").primaryKey(),
@@ -313,6 +322,11 @@ export const returnReminderEvents = pgTable("return_reminder_events", {
   sentByUserId: integer("sent_by_user_id"),
   channel: text("channel").notNull().default("email"),
   language: text("language").notNull().default("en"),
+  // SMS delivery tracking (null for email reminders)
+  twilioSid: text("twilio_sid"),
+  deliveryStatus: text("delivery_status"), // One of TWILIO_DELIVERY_STATUSES or null
+  deliveryStatusUpdatedAt: timestamp("delivery_status_updated_at"),
+  deliveryErrorCode: text("delivery_error_code"), // Twilio ErrorCode, e.g. "21610" for STOP
 });
 
 export const insertReturnReminderEventSchema = createInsertSchema(returnReminderEvents).omit({

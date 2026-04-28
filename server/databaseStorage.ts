@@ -627,7 +627,7 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  async recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null }): Promise<Transaction> {
+  async recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null; twilioSid?: string | null; deliveryStatus?: string | null; deliveryErrorCode?: string | null }): Promise<Transaction> {
     return await db.transaction(async (tx) => {
       const existing = await tx.select().from(transactions).where(eq(transactions.id, id));
       const transaction = existing[0];
@@ -642,13 +642,32 @@ export class DatabaseStorage implements IStorage {
         })
         .where(eq(transactions.id, id))
         .returning();
+      const initialStatus = opts?.deliveryStatus ?? null;
       await tx.insert(returnReminderEvents).values({
         transactionId: id,
         sentByUserId: opts?.sentByUserId ?? null,
         channel: opts?.channel ?? 'email',
         language: opts?.language ?? 'en',
+        twilioSid: opts?.twilioSid ?? null,
+        deliveryStatus: initialStatus,
+        deliveryStatusUpdatedAt: initialStatus ? now : null,
+        deliveryErrorCode: opts?.deliveryErrorCode ?? null,
       });
       return result[0];
+    });
+  }
+
+  async logReminderDeliveryEvent(transactionId: number, opts: { channel: string; language: string; sentByUserId?: number | null; twilioSid?: string | null; deliveryStatus: string; deliveryErrorCode?: string | null }): Promise<void> {
+    const now = new Date();
+    await db.insert(returnReminderEvents).values({
+      transactionId,
+      sentByUserId: opts.sentByUserId ?? null,
+      channel: opts.channel,
+      language: opts.language,
+      twilioSid: opts.twilioSid ?? null,
+      deliveryStatus: opts.deliveryStatus,
+      deliveryStatusUpdatedAt: now,
+      deliveryErrorCode: opts.deliveryErrorCode ?? null,
     });
   }
 
@@ -660,6 +679,10 @@ export class DatabaseStorage implements IStorage {
       sentByUserId: returnReminderEvents.sentByUserId,
       channel: returnReminderEvents.channel,
       language: returnReminderEvents.language,
+      twilioSid: returnReminderEvents.twilioSid,
+      deliveryStatus: returnReminderEvents.deliveryStatus,
+      deliveryStatusUpdatedAt: returnReminderEvents.deliveryStatusUpdatedAt,
+      deliveryErrorCode: returnReminderEvents.deliveryErrorCode,
       firstName: users.firstName,
       lastName: users.lastName,
     })
@@ -678,9 +701,69 @@ export class DatabaseStorage implements IStorage {
         sentByUserId: r.sentByUserId,
         channel: r.channel,
         language: r.language,
+        twilioSid: r.twilioSid,
+        deliveryStatus: r.deliveryStatus,
+        deliveryStatusUpdatedAt: r.deliveryStatusUpdatedAt,
+        deliveryErrorCode: r.deliveryErrorCode,
         senderName,
       };
     });
+  }
+
+  async getReturnReminderEventBySid(sid: string): Promise<ReturnReminderEvent | undefined> {
+    const rows = await db.select().from(returnReminderEvents)
+      .where(eq(returnReminderEvents.twilioSid, sid))
+      .limit(1);
+    return rows[0];
+  }
+
+  async updateReturnReminderDeliveryStatus(sid: string, status: string, errorCode?: string | null): Promise<void> {
+    // Treat Twilio error code 21610 (opted-out / STOP) as a synthetic status.
+    const resolvedStatus = errorCode === '21610' ? 'opted_out' : status;
+    await db.update(returnReminderEvents)
+      .set({
+        deliveryStatus: resolvedStatus,
+        deliveryStatusUpdatedAt: new Date(),
+        deliveryErrorCode: errorCode ?? null,
+      })
+      .where(eq(returnReminderEvents.twilioSid, sid));
+  }
+
+  async markPhoneOptedOut(borrowerPhone: string): Promise<void> {
+    // Phone values in the DB may be formatted differently from the inbound Twilio
+    // From (which is E.164). Use the same digit-strip + subset-match approach as
+    // getTransactionByPhone so "(555) 123-4567" matches "+15551234567".
+    const normalizedInput = borrowerPhone.replace(/\D/g, '');
+    if (!normalizedInput) return;
+
+    // Fetch candidate transactions with a phone number set.
+    const allTx = await db.select({ id: transactions.id, borrowerPhone: transactions.borrowerPhone })
+      .from(transactions)
+      .where(sql`borrower_phone IS NOT NULL`);
+
+    const txIds = allTx
+      .filter(r => {
+        if (!r.borrowerPhone) return false;
+        const storedDigits = r.borrowerPhone.replace(/\D/g, '');
+        return storedDigits && (
+          storedDigits.includes(normalizedInput) || normalizedInput.includes(storedDigits)
+        );
+      })
+      .map(r => r.id);
+
+    if (txIds.length === 0) return;
+    await db.update(returnReminderEvents)
+      .set({
+        deliveryStatus: 'opted_out',
+        deliveryStatusUpdatedAt: new Date(),
+        deliveryErrorCode: '21610',
+      })
+      .where(
+        and(
+          inArray(returnReminderEvents.transactionId, txIds),
+          eq(returnReminderEvents.channel, 'sms'),
+        ),
+      );
   }
 
   // Contact operations
@@ -1378,6 +1461,11 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_email_status TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_email_error TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_email_sent_at TIMESTAMP`);
+    // Task #42: SMS delivery status tracking on return_reminder_events
+    await db.execute(sql`ALTER TABLE return_reminder_events ADD COLUMN IF NOT EXISTS twilio_sid TEXT`);
+    await db.execute(sql`ALTER TABLE return_reminder_events ADD COLUMN IF NOT EXISTS delivery_status TEXT`);
+    await db.execute(sql`ALTER TABLE return_reminder_events ADD COLUMN IF NOT EXISTS delivery_status_updated_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE return_reminder_events ADD COLUMN IF NOT EXISTS delivery_error_code TEXT`);
     // Task #70: data-fix — clear refund_amount that was incorrectly written
     // when a pay-later lend was closed before the fix to markTransactionReturned.
     // refundAmount on CHARGED/PARTIALLY_REFUNDED rows must only be set by the

@@ -2963,21 +2963,54 @@ export async function registerRoutes(app: Express): Promise<Server> {
         // commit. A failed Twilio send leaves any prior link untouched.
         const prepared = prepareBorrowerStatusToken();
         const statusUrl = `${baseUrl}/status/${transactionId}?token=${prepared.raw}`;
+        // Twilio will POST delivery events here so we can track sent → delivered / failed.
+        const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/status`;
 
+        let smsSid: string | null = null;
         try {
-          await sendReturnReminderSMS({
+          const result = await sendReturnReminderSMS({
             borrowerName: transaction.borrowerName,
             borrowerPhone: phone!,
             locationName,
             language,
             dueDate: transaction.expectedReturnDate ?? null,
             statusUrl,
+            statusCallbackUrl,
           });
+          smsSid = result.sid;
         } catch (sendErr: any) {
+          // Twilio error 21610 = recipient replied STOP (opted out).
+          // Log an event for timeline visibility WITHOUT bumping lastReturnReminderAt
+          // or returnReminderCount, so the operator can immediately retry via email
+          // without hitting the 24h rate limit.
+          if ((sendErr as any).twilioCode === 21610) {
+            const sentByUserId2 = req.isAuthenticated() ? ((req.user as any)?.id ?? null) : null;
+            await storage.logReminderDeliveryEvent(transactionId, {
+              channel: 'sms',
+              language,
+              sentByUserId: sentByUserId2,
+              twilioSid: null,
+              deliveryStatus: 'opted_out',
+              deliveryErrorCode: '21610',
+            });
+            return res.status(422).json({
+              message: 'This number has opted out of SMS messages (STOP). Please use email instead.',
+              optedOut: true,
+              transaction,
+            });
+          }
           console.error("Failed to send return reminder SMS:", sendErr);
           return res.status(502).json({ message: sendErr?.message || "Failed to send reminder SMS" });
         }
         await commitBorrowerStatusToken(transactionId, prepared);
+        const sentByUserId = req.isAuthenticated() ? ((req.user as any)?.id ?? null) : null;
+        const updated = await storage.recordReturnReminderSent(transactionId, {
+          channel,
+          language,
+          sentByUserId,
+          twilioSid: smsSid,
+        });
+        return res.json({ success: true, transaction: updated, channel });
       }
 
       const sentByUserId = req.isAuthenticated() ? ((req.user as any)?.id ?? null) : null;
@@ -3045,6 +3078,117 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(500).json({ message: error?.message || "Failed to fetch reminder history" });
     }
   });
+
+  // ============================================
+  // TWILIO STATUS CALLBACK WEBHOOK
+  // ============================================
+  // Twilio POSTs delivery status updates (queued → sent → delivered / undelivered / failed)
+  // here as URL-encoded bodies. We verify the Twilio signature then update the matching
+  // return-reminder event so operators can see real delivery status in the timeline.
+  // The route is intentionally unauthenticated (Twilio can't hold a session cookie) but
+  // is protected by HMAC-SHA1 signature verification in production.
+  // Twilio sends application/x-www-form-urlencoded; the global urlencoded
+  // middleware in server/index.ts already parses it into req.body.
+  app.post(
+    "/api/webhooks/twilio/status",
+    async (req, res) => {
+      try {
+        // Build the canonical public URL for signature verification so it
+        // matches exactly what we registered with Twilio as the statusCallback.
+        const envBase = (process.env.APP_URL || process.env.SITE_URL || '').trim();
+        const publicUrl = envBase
+          ? `${envBase.replace(/\/$/, '')}/api/webhooks/twilio/status`
+          : undefined;
+
+        const sigStatus = validateTwilioSignature(req, publicUrl);
+        if (sigStatus === 'invalid') {
+          console.warn('[twilio-status-webhook] rejected: invalid signature');
+          return res.status(403).send('Forbidden');
+        }
+        // In development (unconfigured / missing), we log a warning but continue.
+        if (sigStatus === 'missing' || sigStatus === 'unconfigured') {
+          if (process.env.NODE_ENV === 'production') {
+            console.warn(`[twilio-status-webhook] rejected in production: signature ${sigStatus}`);
+            return res.status(403).send('Forbidden');
+          }
+          console.warn(`[twilio-status-webhook] signature ${sigStatus} — allowing in dev mode`);
+        }
+
+        const { MessageSid, MessageStatus, ErrorCode } = req.body as Record<string, string | undefined>;
+        if (!MessageSid || !MessageStatus) {
+          return res.status(400).send('Missing MessageSid or MessageStatus');
+        }
+
+        console.log(`[twilio-status-webhook] SID=${MessageSid} status=${MessageStatus}${ErrorCode ? ` errorCode=${ErrorCode}` : ''}`);
+        await storage.updateReturnReminderDeliveryStatus(MessageSid, MessageStatus, ErrorCode ?? null);
+        res.sendStatus(204);
+      } catch (err: any) {
+        console.error('[twilio-status-webhook] error:', err);
+        res.status(500).send('Internal error');
+      }
+    },
+  );
+
+  // ============================================
+  // TWILIO INBOUND SMS WEBHOOK (STOP / opt-out)
+  // ============================================
+  // When a borrower replies STOP (or STOPALL, UNSUBSCRIBE, CANCEL, END, QUIT),
+  // Twilio forwards the inbound message here. We parse the From number, mark all
+  // SMS reminder events for that phone as opted_out so operators see the warning
+  // in the timeline immediately — even for past sends where the status callback
+  // already fired.
+  //
+  // Configure this URL in the Twilio console: Messaging → Phone Numbers → your number →
+  // "A message comes in" → Webhook → <base_url>/api/webhooks/twilio/inbound
+  app.post(
+    "/api/webhooks/twilio/inbound",
+    async (req, res) => {
+      try {
+        const envBase = (process.env.APP_URL || process.env.SITE_URL || '').trim();
+        const publicUrl = envBase
+          ? `${envBase.replace(/\/$/, '')}/api/webhooks/twilio/inbound`
+          : undefined;
+
+        const sigStatus = validateTwilioSignature(req, publicUrl);
+        if (sigStatus === 'invalid') {
+          console.warn('[twilio-inbound-webhook] rejected: invalid signature');
+          return res.status(403).send('Forbidden');
+        }
+        if (sigStatus === 'missing' || sigStatus === 'unconfigured') {
+          if (process.env.NODE_ENV === 'production') {
+            console.warn(`[twilio-inbound-webhook] rejected in production: signature ${sigStatus}`);
+            return res.status(403).send('Forbidden');
+          }
+          console.warn(`[twilio-inbound-webhook] signature ${sigStatus} — allowing in dev mode`);
+        }
+
+        const { From, Body, OptOutType } = req.body as Record<string, string | undefined>;
+        if (!From) {
+          return res.status(400).send('Missing From');
+        }
+
+        const bodyUpper = (Body || '').trim().toUpperCase();
+        const isStopKeyword = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'].includes(bodyUpper);
+        // Twilio also sets OptOutType='STOP' in the payload when an opt-out keyword is detected.
+        const isOptOut = isStopKeyword || OptOutType === 'STOP';
+
+        if (isOptOut) {
+          const normalizedFrom = normalizePhoneForSms(From) || From;
+          console.log(`[twilio-inbound-webhook] STOP from ${normalizedFrom}`);
+          await storage.markPhoneOptedOut(normalizedFrom);
+        } else {
+          console.log(`[twilio-inbound-webhook] inbound from ${From} (not a STOP keyword, ignored)`);
+        }
+
+        // Twilio expects a 200 TwiML response (or 204) to confirm receipt.
+        res.setHeader('Content-Type', 'text/xml');
+        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response></Response>');
+      } catch (err: any) {
+        console.error('[twilio-inbound-webhook] error:', err);
+        res.status(500).send('Internal error');
+      }
+    },
+  );
 
   // ============================================
   // ADMIN PLAYBOOK FACTS (AI knowledge base)

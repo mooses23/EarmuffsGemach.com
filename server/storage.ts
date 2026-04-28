@@ -127,8 +127,13 @@ export interface IStorage {
   // (without touching refundAmount) and optionally restocks. Idempotent:
   // returns null if already isReturned=true.
   markPhysicallyReturnedForRefund(id: number, restock: boolean): Promise<Transaction | null>;
-  recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null }): Promise<Transaction>;
+  recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null; twilioSid?: string | null; deliveryStatus?: string | null; deliveryErrorCode?: string | null }): Promise<Transaction>;
+  /** Log a delivery-only event (e.g. opted-out attempt) WITHOUT bumping lastReturnReminderAt or returnReminderCount. */
+  logReminderDeliveryEvent(transactionId: number, opts: { channel: string; language: string; sentByUserId?: number | null; twilioSid?: string | null; deliveryStatus: string; deliveryErrorCode?: string | null }): Promise<void>;
   getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEventWithSender[]>;
+  getReturnReminderEventBySid(sid: string): Promise<ReturnReminderEvent | undefined>;
+  updateReturnReminderDeliveryStatus(sid: string, status: string, errorCode?: string | null): Promise<void>;
+  markPhoneOptedOut(borrowerPhone: string): Promise<void>;
 
   // Contact operations
   getAllContacts(): Promise<Contact[]>;
@@ -2768,7 +2773,7 @@ export class MemStorage implements IStorage {
     return updatedTransaction;
   }
 
-  async recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null }): Promise<Transaction> {
+  async recordReturnReminderSent(id: number, opts?: { channel?: string; language?: string; sentByUserId?: number | null; twilioSid?: string | null; deliveryStatus?: string | null; deliveryErrorCode?: string | null }): Promise<Transaction> {
     const transaction = this.transactions.get(id);
     if (!transaction) {
       throw new Error(`Transaction with id ${id} not found`);
@@ -2781,6 +2786,7 @@ export class MemStorage implements IStorage {
     };
     this.transactions.set(id, updated);
     const eventId = this.returnReminderEventCounter++;
+    const initialStatus = opts?.deliveryStatus ?? null;
     const event: ReturnReminderEvent = {
       id: eventId,
       transactionId: id,
@@ -2788,9 +2794,33 @@ export class MemStorage implements IStorage {
       sentByUserId: opts?.sentByUserId ?? null,
       channel: opts?.channel ?? 'email',
       language: opts?.language ?? 'en',
+      twilioSid: opts?.twilioSid ?? null,
+      deliveryStatus: initialStatus,
+      deliveryStatusUpdatedAt: initialStatus ? now : null,
+      deliveryErrorCode: opts?.deliveryErrorCode ?? null,
     };
     this.returnReminderEventsMap.set(eventId, event);
     return updated;
+  }
+
+  async logReminderDeliveryEvent(transactionId: number, opts: { channel: string; language: string; sentByUserId?: number | null; twilioSid?: string | null; deliveryStatus: string; deliveryErrorCode?: string | null }): Promise<void> {
+    // Inserts an event row for visibility in the timeline but does NOT touch
+    // lastReturnReminderAt or returnReminderCount (so rate-limiting is unaffected).
+    const now = new Date();
+    const eventId = this.returnReminderEventCounter++;
+    const event: ReturnReminderEvent = {
+      id: eventId,
+      transactionId,
+      sentAt: now,
+      sentByUserId: opts.sentByUserId ?? null,
+      channel: opts.channel,
+      language: opts.language,
+      twilioSid: opts.twilioSid ?? null,
+      deliveryStatus: opts.deliveryStatus,
+      deliveryStatusUpdatedAt: now,
+      deliveryErrorCode: opts.deliveryErrorCode ?? null,
+    };
+    this.returnReminderEventsMap.set(eventId, event);
   }
 
   async getReturnReminderEvents(transactionId: number): Promise<ReturnReminderEventWithSender[]> {
@@ -2804,6 +2834,52 @@ export class MemStorage implements IStorage {
           : null;
         return { ...e, senderName };
       });
+  }
+
+  async getReturnReminderEventBySid(sid: string): Promise<ReturnReminderEvent | undefined> {
+    return Array.from(this.returnReminderEventsMap.values()).find(e => e.twilioSid === sid);
+  }
+
+  async updateReturnReminderDeliveryStatus(sid: string, status: string, errorCode?: string | null): Promise<void> {
+    const entry = Array.from(this.returnReminderEventsMap.entries()).find(([, e]) => e.twilioSid === sid);
+    if (!entry) return;
+    const [key, event] = entry;
+    // Treat error code 21610 (opted-out / STOP) as a distinct synthetic status.
+    const resolvedStatus = errorCode === '21610' ? 'opted_out' : status;
+    this.returnReminderEventsMap.set(key, {
+      ...event,
+      deliveryStatus: resolvedStatus,
+      deliveryStatusUpdatedAt: new Date(),
+      deliveryErrorCode: errorCode ?? null,
+    });
+  }
+
+  async markPhoneOptedOut(borrowerPhone: string): Promise<void> {
+    // Find all SMS reminder events sent to this phone number and mark them opted_out.
+    // Phone values in the DB may be in any format (raw user input), while the inbound
+    // Twilio From is E.164. Use the same digit-strip + subset-match approach that
+    // getTransactionByPhone uses so "(555) 123-4567" matches "+15551234567".
+    const now = new Date();
+    const normalizedInput = borrowerPhone.replace(/\D/g, '');
+    const txIds = new Set<number>();
+    for (const tx of this.transactions.values()) {
+      if (!tx.borrowerPhone) continue;
+      const storedDigits = tx.borrowerPhone.replace(/\D/g, '');
+      if (storedDigits && (storedDigits.includes(normalizedInput) || normalizedInput.includes(storedDigits))) {
+        txIds.add(tx.id);
+      }
+    }
+    if (txIds.size === 0) return;
+    for (const [key, event] of this.returnReminderEventsMap.entries()) {
+      if (event.channel === 'sms' && txIds.has(event.transactionId)) {
+        this.returnReminderEventsMap.set(key, {
+          ...event,
+          deliveryStatus: 'opted_out',
+          deliveryStatusUpdatedAt: now,
+          deliveryErrorCode: '21610',
+        });
+      }
+    }
   }
 
   // Contact methods

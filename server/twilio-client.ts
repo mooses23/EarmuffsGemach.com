@@ -90,6 +90,8 @@ export interface ReturnReminderSmsContext {
   language: 'en' | 'he';
   dueDate?: Date | null;
   statusUrl?: string;
+  /** Optional URL Twilio will POST delivery-status callbacks to. */
+  statusCallbackUrl?: string;
 }
 
 function formatDueDate(d: Date, language: 'en' | 'he'): string {
@@ -135,12 +137,17 @@ export async function sendReturnReminderSMS(ctx: ReturnReminderSmsContext): Prom
       to,
       from: process.env.TWILIO_FROM_NUMBER!,
       body,
+      ...(ctx.statusCallbackUrl ? { statusCallback: ctx.statusCallbackUrl } : {}),
     });
     return { sid: msg.sid };
   } catch (e: any) {
     // Twilio errors include `code` and `moreInfo`; surface a short reason.
     const reason = e?.message || 'Twilio rejected the SMS request.';
-    throw new Error(`SMS send failed: ${reason}`);
+    const err = new Error(`SMS send failed: ${reason}`);
+    // Propagate the Twilio numeric error code so callers can distinguish
+    // recoverable failures (e.g. 21610 opted-out) from generic ones.
+    (err as any).twilioCode = typeof e?.code === 'number' ? e.code : undefined;
+    throw err;
   }
 }
 

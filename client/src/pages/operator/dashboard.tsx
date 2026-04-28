@@ -183,12 +183,62 @@ function RestockingInstructions() {
   );
 }
 
+// Maps Twilio error codes to short human-readable reasons (shown after the badge).
+const TWILIO_ERROR_REASONS: Record<string, string> = {
+  '21211': 'invalid number',
+  '21408': 'region blocked',
+  '21610': 'replied STOP',
+  '21614': 'landline',
+  '30001': 'queue overflow',
+  '30002': 'account suspended',
+  '30003': 'unreachable handset',
+  '30004': 'message blocked',
+  '30005': 'unknown handset',
+  '30006': 'landline / no SMS',
+  '30007': 'carrier violation',
+  '30008': 'unknown carrier error',
+};
+
+// Maps a Twilio delivery status to a colour token and label key.
+function DeliveryStatusBadge({ status, errorCode, t }: { status: string | null | undefined; errorCode?: string | null; t: (k: string) => string }) {
+  if (!status) return null;
+
+  type Cfg = { label: string; className: string };
+  const cfgMap: Record<string, Cfg> = {
+    delivered:   { label: t('reminderDeliveryDelivered'),   className: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30' },
+    sent:        { label: t('reminderDeliverySent'),        className: 'bg-sky-500/20 text-sky-300 border-sky-500/30' },
+    queued:      { label: t('reminderDeliveryQueued'),      className: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
+    sending:     { label: t('reminderDeliverySending'),     className: 'bg-slate-500/20 text-slate-400 border-slate-500/30' },
+    undelivered: { label: t('reminderDeliveryUndelivered'), className: 'bg-red-500/20 text-red-300 border-red-500/30' },
+    failed:      { label: t('reminderDeliveryFailed'),      className: 'bg-red-500/20 text-red-300 border-red-500/30' },
+    opted_out:   { label: t('reminderDeliveryOptedOut'),    className: 'bg-orange-500/20 text-orange-300 border-orange-500/30' },
+  };
+  const cfg = cfgMap[status] ?? { label: status, className: 'bg-slate-500/20 text-slate-400 border-slate-500/30' };
+  const reason = errorCode ? TWILIO_ERROR_REASONS[errorCode] : undefined;
+  // Show an error reason for undelivered/failed states (when a known code is present).
+  const showReason = reason && (status === 'undelivered' || status === 'failed' || status === 'opted_out');
+  return (
+    <span className="inline-flex items-center gap-1">
+      <span
+        className={`inline-flex items-center px-1.5 py-0.5 rounded border text-[10px] uppercase tracking-wide font-medium ${cfg.className}`}
+        data-testid={`reminder-delivery-status-${status}`}
+      >
+        {cfg.label}
+      </span>
+      {showReason && (
+        <span className="text-[10px] text-slate-500">({reason})</span>
+      )}
+    </span>
+  );
+}
+
 function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; locationId: number }) {
   const { t, language } = useLanguage();
   const reminderCount = tx.returnReminderCount ?? 0;
-  const enabled = reminderCount > 0;
   const [senderFilter, setSenderFilter] = useState<string>('__all__');
 
+  // Always fetch so that delivery-only events (e.g. opted_out logged without
+  // incrementing returnReminderCount on a first-attempt STOP) are visible.
   const { data, isLoading } = useQuery<{ events: ReturnReminderEventWithSender[] }>({
     queryKey: ['/api/locations', locationId, 'transactions', tx.id, 'return-reminders'],
     queryFn: async () => {
@@ -198,11 +248,15 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
       );
       return res.json();
     },
-    enabled,
   });
 
   const events = data?.events ?? [];
   const unknownLabel = t('reminderHistorySenderUnknown');
+  // Surface a warning banner if any SMS for this borrower was opted-out (STOP).
+  const hasOptedOut = events.some(ev => ev.channel === 'sms' && ev.deliveryStatus === 'opted_out');
+  // The section is "active" if the count says reminders were sent OR if the
+  // server returned events (covers delivery-only rows that don't bump the count).
+  const hasAnyActivity = reminderCount > 0 || events.length > 0;
   const senderOptions = Array.from(
     new Map(
       events.map((ev) => {
@@ -224,14 +278,23 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
       <div className="flex items-center gap-2 mb-2">
         <BellRing className="h-4 w-4 text-amber-300" />
         <span className="text-sm font-medium text-white">{t('reminderHistoryTitle')}</span>
-        {enabled && (
+        {reminderCount > 0 && (
           <span className="text-xs text-slate-400">({reminderCount})</span>
         )}
       </div>
-      {!enabled ? (
-        <p className="text-xs text-slate-400">{t('reminderHistoryEmpty')}</p>
-      ) : isLoading ? (
+      {hasOptedOut && (
+        <div
+          className="mb-2 flex items-start gap-2 rounded border border-orange-500/40 bg-orange-500/10 px-2 py-1.5 text-xs text-orange-300"
+          data-testid={`reminder-opted-out-warning-${tx.id}`}
+        >
+          <AlertTriangle className="h-3.5 w-3.5 flex-shrink-0 mt-0.5" />
+          <span>{t('reminderDeliveryOptedOutWarning')}</span>
+        </div>
+      )}
+      {isLoading ? (
         <p className="text-xs text-slate-400">{t('reminderHistoryLoading')}</p>
+      ) : !hasAnyActivity ? (
+        <p className="text-xs text-slate-400">{t('reminderHistoryEmpty')}</p>
       ) : events.length === 0 ? (
         <p className="text-xs text-slate-400">{t('reminderHistoryEmpty')}</p>
       ) : (
@@ -292,6 +355,12 @@ function ReminderHistoryTimeline({ tx, locationId }: { tx: Transaction; location
                       : <Mail className="h-3 w-3" />}
                     {ev.channel === 'sms' ? t('reminderChannelSms') : t('reminderChannelEmail')}
                   </span>
+                  {ev.channel === 'sms' && ev.deliveryStatus && (
+                    <>
+                      <span className="text-slate-500">·</span>
+                      <DeliveryStatusBadge status={ev.deliveryStatus} errorCode={ev.deliveryErrorCode} t={t} />
+                    </>
+                  )}
                   <span className="text-slate-500">·</span>
                   <span className="uppercase tracking-wide text-[10px] text-slate-400">{ev.language}</span>
                   <span className="text-slate-500">·</span>
