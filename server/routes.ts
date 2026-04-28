@@ -4000,7 +4000,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const depositCents = Math.round((transaction.depositAmount || 0) * 100);
       const feeCents = transaction.depositFeeCents ?? 0;
-      const maxRefundCents = depositCents + feeCents;
+      // Legacy fallback: rows charged before depositFeeCents was tracked may
+      // have amountPlannedCents capturing the true charged total. Use whichever
+      // is larger so legacy rows can be fully refunded.
+      const maxRefundCents = Math.max(depositCents + feeCents, transaction.amountPlannedCents ?? 0);
       const alreadyRefundedCents = Math.round(((transaction.refundAmount ?? 0) as number) * 100);
       const remainingCents = maxRefundCents - alreadyRefundedCents;
       if (remainingCents <= 0) {
