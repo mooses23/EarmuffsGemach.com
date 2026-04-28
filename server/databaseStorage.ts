@@ -1373,13 +1373,17 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     // must be cleared so the refund dialog calculates a non-zero remaining balance.
     // This UPDATE is idempotent: rows already corrected (refund_amount IS NULL) or
     // genuinely refunded (stripe_refund_id IS NOT NULL) are unaffected.
-    await db.execute(sql`
+    const fixResult = await db.execute(sql`
       UPDATE transactions
       SET refund_amount = NULL
       WHERE pay_later_status IN ('CHARGED', 'PARTIALLY_REFUNDED')
         AND stripe_refund_id IS NULL
         AND refund_amount IS NOT NULL
     `);
+    const fixedCount = (fixResult as any).rowCount ?? (fixResult as any).count ?? 0;
+    if (fixedCount > 0) {
+      console.log(`[ensureSchemaUpgrades] Task #70 data-fix: cleared stale refund_amount on ${fixedCount} pay-later transaction(s).`);
+    }
   } catch (err: any) {
     schemaUpgradesRun = false;
     console.error('[ensureSchemaUpgrades] Failed to apply transactions reminder columns:', err?.message || err);
