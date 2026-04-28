@@ -167,13 +167,16 @@ export const locations = pgTable("locations", {
   welcomeWhatsappSentAt: timestamp("welcome_whatsapp_sent_at"),
   welcomeWhatsappSid: text("welcome_whatsapp_sid"),
   welcomeWhatsappDeliveredAt: timestamp("welcome_whatsapp_delivered_at"),
-  defaultWelcomeChannel: text("default_welcome_channel"), // 'sms' | 'whatsapp' | 'both' | null
+  welcomeEmailStatus: text("welcome_email_status"), // 'sent' | 'failed' | null
+  welcomeEmailError: text("welcome_email_error"),
+  welcomeEmailSentAt: timestamp("welcome_email_sent_at"),
+  defaultWelcomeChannel: text("default_welcome_channel"), // 'sms' | 'email' | 'both' | null
   contactPreference: text("contact_preference"), // 'phone' | 'whatsapp' | 'email' | null
   contactPreferenceSetAt: timestamp("contact_preference_set_at"),
   onboardedAt: timestamp("onboarded_at"),
 });
 
-export const OPERATOR_WELCOME_CHANNELS = ["sms", "whatsapp", "both"] as const;
+export const OPERATOR_WELCOME_CHANNELS = ["sms", "email", "both"] as const;
 export type OperatorWelcomeChannel = (typeof OPERATOR_WELCOME_CHANNELS)[number];
 
 export const OPERATOR_CONTACT_PREFERENCES = ["phone", "whatsapp", "email"] as const;

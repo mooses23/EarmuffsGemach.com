@@ -188,25 +188,24 @@ export interface OperatorWelcomeMessageContext {
   signOff?: string;
 }
 
-// Heimish, plain-text welcome body kept short enough to fit a single SMS
-// segment when possible (GSM-7 ~160 chars / UCS-2 ~70 chars). Hebrew is
-// inherently UCS-2 so we keep it tight; both stay well under the 320-char
-// target. No emojis, no shouting, no "Reply STOP" footer, plain URL.
+// Clear, friendly welcome body — one SMS segment where possible.
+// EN uses GSM-7; HE is UCS-2. Both stay well under 320 chars.
+// No emojis, no shouting, no "Reply STOP" footer.
 export function buildOperatorWelcomeMessageBody(ctx: OperatorWelcomeMessageContext): string {
   const signOff = (ctx.signOff || '').trim() || 'Earmuffs Gemach';
   const pin = (ctx.defaultPin || '1234').trim();
   if (ctx.language === 'he') {
-    // ~190 chars (UCS-2). Includes location code + temp PIN per spec.
-    return `שלום ${ctx.locationName}, יש דשבורד חדש לגמ"ח (${ctx.locationCode}). קוד זמני: ${pin}. הקישור לכניסה ולעדכון הסיסמה:\n${ctx.claimUrl}\nתודה — ${signOff}`;
+    return `שלום ${ctx.locationName}, הוזמנת לנהל את דשבורד הגמ"ח שלך (${ctx.locationCode}). קוד הכניסה החד-פעמי שלך: ${pin}. לחץ כאן להתחלה:\n${ctx.claimUrl}\n— ${signOff}`;
   }
-  // ~210 chars GSM-7. Includes location code + temp PIN per spec.
-  return `Hi ${ctx.locationName}, there's now a dashboard for the gemach (${ctx.locationCode}). Temp PIN: ${pin}. Your link to log in and set a new PIN:\n${ctx.claimUrl}\nThank you — ${signOff}`;
+  return `Hi ${ctx.locationName}, you've been invited to manage your ${ctx.locationCode} gemach dashboard. Your one-time login PIN is ${pin}. Tap here to get started:\n${ctx.claimUrl}\n— ${signOff}`;
 }
 
 export interface OperatorWelcomeSendContext extends OperatorWelcomeMessageContext {
   toPhone: string;
   /** Optional public URL Twilio will POST delivery updates to. */
   statusCallbackUrl?: string;
+  /** Optional fully-custom body (admin-edited). Overrides the template when set. */
+  customBody?: string;
 }
 
 export interface OperatorWelcomeChannelResult {
@@ -249,7 +248,7 @@ export async function sendOperatorWelcomeSms(ctx: OperatorWelcomeSendContext): P
   if (!to) {
     return { ok: false, error: 'Phone number is missing or not a valid SMS-capable number.' };
   }
-  const body = buildOperatorWelcomeMessageBody(ctx);
+  const body = ctx.customBody || buildOperatorWelcomeMessageBody(ctx);
   const client = getClient();
   try {
     const msg = await client.messages.create({

@@ -838,6 +838,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parsed = z.object({
         channel: onboardingChannelSchema,
         rememberAsDefault: z.boolean().optional(),
+        messageBody: z.string().optional(),
       }).safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
@@ -849,14 +850,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rememberAsDefault: parsed.data.rememberAsDefault,
         statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
         signOff: getOperatorWelcomeSigner(),
+        messageBody: parsed.data.messageBody,
       });
-      // Response shape kept stable for the FE: results.{sms,whatsapp,anySuccess}.
       res.json({
         success: result.ok,
         results: {
           sms: result.sms,
-          whatsapp: result.whatsapp,
-          anySuccess: !!(result.sms?.ok || result.whatsapp?.ok),
+          email: result.email,
+          anySuccess: !!(result.sms?.ok || result.email?.ok),
         },
         location: { id: result.locationId, name: result.locationName },
       });
@@ -876,6 +877,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ids: z.array(z.number().int().positive()).min(1).max(200).optional(),
         channel: onboardingChannelSchema,
         rememberAsDefault: z.boolean().optional(),
+        messageBody: z.string().optional(),
       }).safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
@@ -891,6 +893,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rememberAsDefault: parsed.data.rememberAsDefault,
         statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
         signOff: getOperatorWelcomeSigner(),
+        messageBody: parsed.data.messageBody,
       });
       res.json({ success: true, summary: summarizeResults(results), results });
     } catch (e: any) {
@@ -906,17 +909,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const parsed = z.object({
         channel: onboardingChannelSchema,
         rememberAsDefault: z.boolean().optional(),
+        messageBody: z.string().optional(),
       }).safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
       }
       const all = await storage.getAllLocations();
-      // Phone is required for SMS and WhatsApp, so phone-less rows can never
-      // succeed via this flow. We exclude them up front (instead of letting
-      // the service skip them) so the `eligible` count and the per-row
-      // attempts in the response only reflect rows that could actually send.
+      // Filter eligible locations based on channel requirements.
+      // SMS needs a phone; Email needs an email address.
+      const ch = parsed.data.channel;
       const candidateIds = all
-        .filter((loc) => loc.isActive !== false && !loc.onboardedAt && !!loc.phone)
+        .filter((loc) => {
+          if (loc.isActive === false || loc.onboardedAt) return false;
+          if (ch === 'sms') return !!loc.phone;
+          if (ch === 'email') return !!loc.email;
+          // 'both': at least one channel must be available
+          return !!loc.phone || !!loc.email;
+        })
         .map((loc) => loc.id);
       if (candidateIds.length === 0) {
         return res.json({ success: true, eligible: 0, summary: { sent: 0, failed: 0, skipped: 0, total: 0 }, results: [] });
@@ -928,6 +937,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         rememberAsDefault: parsed.data.rememberAsDefault,
         statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
         signOff: getOperatorWelcomeSigner(),
+        messageBody: parsed.data.messageBody,
       });
       res.json({ success: true, eligible: candidateIds.length, summary: summarizeResults(results), results });
     } catch (e: any) {

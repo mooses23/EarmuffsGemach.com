@@ -1,5 +1,5 @@
 // Task #35 — Operator onboarding service.
-// Wraps Twilio SMS+WhatsApp sends and the storage updates that record results.
+// Wraps Twilio SMS + Email sends and the storage updates that record results.
 // Routes call into this so the HTTP layer stays thin.
 
 import crypto from 'node:crypto';
@@ -7,19 +7,22 @@ import { storage } from './storage.js';
 import {
   buildOperatorWelcomeMessageBody,
   getTwilioConfigStatus,
-  getTwilioWhatsAppConfigStatus,
   sendOperatorWelcome,
   type OperatorWelcomeChannelResult,
 } from './twilio-client.js';
+import { sendOperatorWelcomeEmail, buildWelcomeEmailBody } from './email-notifications.js';
+import { getGmailConfigStatus } from './gmail-client.js';
 import type { Location, OperatorWelcomeChannel } from '../shared/schema.js';
 
 export interface SendWelcomeOptions {
-  channel: OperatorWelcomeChannel; // 'sms' | 'whatsapp' | 'both'
+  channel: OperatorWelcomeChannel; // 'sms' | 'email' | 'both'
   baseUrl: string; // e.g. https://app.example.com (no trailing slash required)
   signOff?: string;
   rememberAsDefault?: boolean;
   /** If set, Twilio will POST per-message delivery updates to this URL. */
   statusCallbackUrl?: string;
+  /** Optional admin-edited message body. If provided, overrides the template for single sends. */
+  messageBody?: string;
 }
 
 export interface SendWelcomeResult {
@@ -27,7 +30,7 @@ export interface SendWelcomeResult {
   locationName: string;
   channel: OperatorWelcomeChannel;
   sms?: OperatorWelcomeChannelResult;
-  whatsapp?: OperatorWelcomeChannelResult;
+  email?: OperatorWelcomeChannelResult;
   /** True iff every requested channel succeeded. */
   ok: boolean;
   /** Reason this location was skipped without an attempt (e.g. inactive). */
@@ -35,10 +38,25 @@ export interface SendWelcomeResult {
   claimUrl?: string;
 }
 
+/**
+ * Applies per-location token substitution to a message template string.
+ * Supports: {{name}}, {{code}}, {{pin}}, {{url}}
+ * If the template contains none of these tokens, it is returned verbatim
+ * (single-send case where the admin typed fully custom text).
+ */
+function applyMessageTemplate(
+  template: string,
+  values: { name: string; code: string; pin: string; url: string },
+): string {
+  return template
+    .replace(/\{\{name\}\}/gi, values.name)
+    .replace(/\{\{code\}\}/gi, values.code)
+    .replace(/\{\{pin\}\}/gi, values.pin)
+    .replace(/\{\{url\}\}/gi, values.url);
+}
+
 /** Detects the operator's preferred message language from their location row. */
 function detectLanguage(loc: Location): 'en' | 'he' {
-  // We treat "has Hebrew name fields" as the strongest hint, since the seed
-  // data fills nameHe for Israel locations only.
   if (loc.nameHe || loc.addressHe || loc.contactPersonHe) {
     return 'he';
   }
@@ -61,19 +79,14 @@ export interface WelcomePreview {
   location: { id: number; name: string; locationCode: string };
   language: 'en' | 'he';
   message: {
-    en: { subject: string; body: string };
-    he: { subject: string; body: string };
+    en: { subject: string; body: string; emailBody: string };
+    he: { subject: string; body: string; emailBody: string };
     resolvedLanguage: 'en' | 'he';
   };
   welcomeUrl: string;
 }
 
 export async function buildWelcomePreview(loc: Location, baseUrl: string, signOff?: string): Promise<WelcomePreview> {
-  // Show the REAL outgoing claim URL in the preview so admins see exactly
-  // what each operator will see. Tokens are durable + reusable per spec, so
-  // allocating early (before the admin actually clicks Send) is safe — the
-  // same token will be reused by sendWelcomeForLocation if/when the admin
-  // does send.
   const ensured = loc.claimToken
     ? { token: loc.claimToken }
     : await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
@@ -95,12 +108,36 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     defaultPin: loc.operatorPin || '1234',
     signOff,
   });
+  const enEmailBody = buildWelcomeEmailBody({
+    locationName: loc.name,
+    locationCode: loc.locationCode,
+    operatorName: loc.contactPerson || '',
+    operatorEmail: loc.email || '',
+    dashboardUrl: claimUrlPreview,
+    defaultPin: loc.operatorPin || '1234',
+  });
+  const heEmailBody = buildWelcomeEmailBody({
+    locationName: loc.nameHe || loc.name,
+    locationCode: loc.locationCode,
+    operatorName: loc.contactPersonHe || loc.contactPerson || '',
+    operatorEmail: loc.email || '',
+    dashboardUrl: claimUrlPreview,
+    defaultPin: loc.operatorPin || '1234',
+  });
   return {
     location: { id: loc.id, name: loc.name, locationCode: loc.locationCode },
     language,
     message: {
-      en: { subject: `Welcome to Baby Banz Earmuffs Gemach (${loc.locationCode})`, body: enBody },
-      he: { subject: `ברוכים הבאים לגמ״ח אטמי בייבי בנז (${loc.locationCode})`, body: heBody },
+      en: {
+        subject: `Welcome to Baby Banz Earmuffs Gemach (${loc.locationCode})`,
+        body: enBody,
+        emailBody: enEmailBody,
+      },
+      he: {
+        subject: `ברוכים הבאים לגמ״ח אטמי בייבי בנז (${loc.locationCode})`,
+        body: heBody,
+        emailBody: heEmailBody,
+      },
       resolvedLanguage: language,
     },
     welcomeUrl: claimUrlPreview,
@@ -119,53 +156,105 @@ export async function sendWelcomeForLocation(
   if (loc.isActive === false) {
     return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'inactive' };
   }
-  if (!loc.phone) {
-    return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no phone on file' };
-  }
   if (!loc.locationCode) {
     return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no location code' };
   }
 
+  const wantsSms = options.channel === 'sms' || options.channel === 'both';
+  const wantsEmail = options.channel === 'email' || options.channel === 'both';
+
+  // For 'both', skip if neither channel has the required contact info.
+  if (options.channel === 'both' && !loc.phone && !loc.email) {
+    return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no phone or email on file' };
+  }
+  if (options.channel === 'sms' && !loc.phone) {
+    return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no phone on file' };
+  }
+  if (options.channel === 'email' && !loc.email) {
+    return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no email on file' };
+  }
+
   const language = detectLanguage(loc);
-  // Tokens are durable forever — only regenerate if the row literally has no
-  // token yet. This is the spec: re-sends use the same link, and the public
-  // endpoints short-circuit "already onboarded" rather than expiring links.
   const ensured = await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
   const claimUrl = buildClaimUrl(options.baseUrl, ensured.token);
   const localizedName = language === 'he' ? (loc.nameHe || loc.name) : loc.name;
 
-  const requested = {
-    sms: options.channel === 'sms' || options.channel === 'both',
-    whatsapp: options.channel === 'whatsapp' || options.channel === 'both',
+  let smsResult: OperatorWelcomeChannelResult | undefined;
+  let emailResult: OperatorWelcomeChannelResult | undefined;
+
+  // Per-location substitution values — used when admin provides a {{placeholder}} template
+  const templateValues = {
+    name: localizedName,
+    code: loc.locationCode,
+    pin: loc.operatorPin || '1234',
+    url: claimUrl,
   };
 
-  const results = await sendOperatorWelcome(
-    {
-      toPhone: loc.phone,
-      locationName: localizedName,
-      locationCode: loc.locationCode,
-      claimUrl,
-      language,
-      defaultPin: loc.operatorPin || '1234',
-      signOff: options.signOff,
-      statusCallbackUrl: options.statusCallbackUrl,
-    },
-    requested,
-  );
+  if (wantsSms && loc.phone) {
+    const smsResults = await sendOperatorWelcome(
+      {
+        toPhone: loc.phone,
+        locationName: localizedName,
+        locationCode: loc.locationCode,
+        claimUrl,
+        language,
+        defaultPin: loc.operatorPin || '1234',
+        signOff: options.signOff,
+        statusCallbackUrl: options.statusCallbackUrl,
+        customBody: options.messageBody
+          ? applyMessageTemplate(options.messageBody, templateValues)
+          : undefined,
+      },
+      { sms: true },
+    );
+    smsResult = smsResults.sms;
+  }
 
+  if (wantsEmail && loc.email) {
+    try {
+      const emailBody = options.messageBody
+        ? applyMessageTemplate(options.messageBody, templateValues)
+        : buildWelcomeEmailBody({
+            locationName: localizedName,
+            locationCode: loc.locationCode,
+            operatorName: language === 'he' ? (loc.contactPersonHe || loc.contactPerson || '') : (loc.contactPerson || ''),
+            operatorEmail: loc.email,
+            dashboardUrl: claimUrl,
+            defaultPin: loc.operatorPin || '1234',
+          });
+      await sendOperatorWelcomeEmail({
+        locationName: localizedName,
+        locationCode: loc.locationCode,
+        operatorName: language === 'he' ? (loc.contactPersonHe || loc.contactPerson || '') : (loc.contactPerson || ''),
+        operatorEmail: loc.email,
+        dashboardUrl: claimUrl,
+        defaultPin: loc.operatorPin || '1234',
+        customBody: emailBody,
+      });
+      emailResult = { ok: true };
+    } catch (e: any) {
+      emailResult = { ok: false, error: e?.message || 'Email send failed' };
+    }
+  }
+
+  // Record the attempt in storage (email status + SMS if applicable)
   await storage.recordOperatorWelcomeAttempt(loc.id, {
-    sms: requested.sms ? { ok: !!results.sms?.ok, error: results.sms?.error, sid: results.sms?.sid } : undefined,
-    whatsapp: requested.whatsapp ? { ok: !!results.whatsapp?.ok, error: results.whatsapp?.error, sid: results.whatsapp?.sid } : undefined,
+    sms: wantsSms && !!smsResult ? { ok: !!smsResult.ok, error: smsResult.error, sid: smsResult.sid } : undefined,
+    whatsapp: undefined,
+    email: wantsEmail && !!emailResult ? { ok: !!emailResult.ok, error: emailResult.error } : undefined,
     defaultWelcomeChannel: options.rememberAsDefault ? options.channel : undefined,
   });
 
-  const ok = (!requested.sms || !!results.sms?.ok) && (!requested.whatsapp || !!results.whatsapp?.ok);
+  const ok =
+    (!wantsSms || !loc.phone || !!smsResult?.ok) &&
+    (!wantsEmail || !loc.email || !!emailResult?.ok);
+
   return {
     locationId: loc.id,
     locationName: loc.name,
     channel: options.channel,
-    sms: results.sms,
-    whatsapp: results.whatsapp,
+    sms: smsResult,
+    email: emailResult,
     ok,
     claimUrl,
   };
@@ -174,6 +263,7 @@ export async function sendWelcomeForLocation(
 /**
  * Server-side serial bulk send with light rate-limiting (default ~5 sends/sec).
  * Twilio enforces account-wide MPS limits; we stay well under the trial cap.
+ * messageBody (from options) is applied to every location in the batch.
  */
 export async function sendWelcomeForLocations(
   ids: number[],
@@ -197,9 +287,11 @@ export function summarizeResults(results: SendWelcomeResult[]) {
 }
 
 export function getOnboardingTwilioStatus() {
+  const gmailStatus = getGmailConfigStatus();
   return {
     sms: getTwilioConfigStatus(),
-    whatsapp: getTwilioWhatsAppConfigStatus(),
+    email: { configured: gmailStatus.configured, reason: gmailStatus.configured ? undefined : gmailStatus.message },
+    whatsapp: { configured: false, reason: 'WhatsApp Business setup required — coming soon.' },
   };
 }
 
@@ -217,10 +309,7 @@ export async function ingestTwilioStatusCallback(body: Record<string, any>): Pro
   const rawStatus = String(body?.MessageStatus || body?.SmsStatus || '').toLowerCase().trim();
   if (!sid || !rawStatus) return { matched: false };
   const errorMessage = body?.ErrorMessage ? String(body.ErrorMessage) : (body?.ErrorCode ? `Twilio error ${body.ErrorCode}` : undefined);
-  // Twilio sends `whatsapp:+...` in the From field for WhatsApp messages.
   const channel: 'sms' | 'whatsapp' = String(body?.From || '').startsWith('whatsapp:') ? 'whatsapp' : 'sms';
-  // Try the inferred channel first; if no row matches, try the other channel
-  // (we only know it for sure once a row matches the sid).
   let updated = await storage.updateWelcomeDeliveryStatus(sid, channel, rawStatus, errorMessage);
   if (!updated) {
     const other: 'sms' | 'whatsapp' = channel === 'sms' ? 'whatsapp' : 'sms';

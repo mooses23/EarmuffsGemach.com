@@ -353,6 +353,7 @@ export class DatabaseStorage implements IStorage {
     update: {
       sms?: { ok: boolean; error?: string; sid?: string };
       whatsapp?: { ok: boolean; error?: string; sid?: string };
+      email?: { ok: boolean; error?: string };
       defaultWelcomeChannel?: string | null;
     },
   ): Promise<Location> {
@@ -371,6 +372,11 @@ export class DatabaseStorage implements IStorage {
       patch.welcomeWhatsappSentAt = now;
       patch.welcomeWhatsappSid = update.whatsapp.sid || null;
       patch.welcomeWhatsappDeliveredAt = null;
+    }
+    if (update.email) {
+      patch.welcomeEmailStatus = update.email.ok ? 'sent' : 'failed';
+      patch.welcomeEmailError = update.email.ok ? null : (update.email.error || 'Unknown error');
+      patch.welcomeEmailSentAt = now;
     }
     if (update.defaultWelcomeChannel !== undefined) {
       patch.defaultWelcomeChannel = update.defaultWelcomeChannel;

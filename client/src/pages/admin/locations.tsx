@@ -5,6 +5,13 @@ import { Region, Location, OPERATOR_WELCOME_CHANNELS, type OperatorWelcomeChanne
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { LocationForm } from "@/components/admin/location-form";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
@@ -30,7 +37,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
@@ -52,10 +58,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
-import { 
-  Plus, 
-  Search, 
-  Edit, 
+import {
+  Plus,
+  Search,
+  Edit,
   MoreVertical,
   MapPin,
   Phone,
@@ -76,9 +82,88 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronRight,
-  ChevronsUpDown
+  ChevronsUpDown,
+  Wifi,
+  WifiOff,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+
+// ---- Helper sub-components ----
+
+function OnboardingStatusBadge({ status }: { status: "onboarded" | "sent" | "failed" | "not-sent" }) {
+  if (status === "onboarded") return <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700">Onboarded</Badge>;
+  if (status === "sent") return <Badge variant="secondary" className="text-xs">Sent</Badge>;
+  if (status === "failed") return <Badge variant="destructive" className="text-xs">Failed</Badge>;
+  return <Badge variant="outline" className="text-xs text-muted-foreground">Not sent</Badge>;
+}
+
+function ServiceStatusBar({
+  status,
+  loading,
+}: {
+  status: { sms: { configured: boolean; reason?: string }; email?: { configured: boolean; reason?: string }; whatsapp: { configured: boolean; reason?: string } } | undefined;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-xs text-muted-foreground px-1 py-2">
+        <Loader2 className="h-3 w-3 animate-spin" /> Checking service status…
+      </div>
+    );
+  }
+  const items = [
+    {
+      label: "Twilio SMS",
+      configured: status?.sms?.configured ?? false,
+      reason: status?.sms?.reason,
+      comingSoon: false,
+    },
+    {
+      label: "Email",
+      configured: status?.email?.configured ?? false,
+      reason: status?.email?.reason,
+      comingSoon: false,
+    },
+    {
+      label: "WhatsApp",
+      configured: false,
+      reason: "Coming soon — WhatsApp Business setup required.",
+      comingSoon: true,
+    },
+  ];
+  return (
+    <div className="flex flex-wrap items-center gap-3 px-1 py-2">
+      {items.map((item) => (
+        <div key={item.label} className="flex items-center gap-1.5 text-xs">
+          {item.comingSoon ? (
+            <Badge variant="secondary" className="text-xs font-normal text-muted-foreground">
+              {item.label}: Not configured
+            </Badge>
+          ) : item.configured ? (
+            <Badge variant="outline" className="text-xs font-normal border-green-500 text-green-700 bg-green-50">
+              <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
+              {item.label}: Ready
+            </Badge>
+          ) : (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Badge variant="outline" className="text-xs font-normal border-red-400 text-red-700 bg-red-50 cursor-help">
+                    <WifiOff className="h-3 w-3 mr-1" />
+                    {item.label}: Not configured
+                  </Badge>
+                </TooltipTrigger>
+                {item.reason && (
+                  <TooltipContent className="max-w-xs text-xs">{item.reason}</TooltipContent>
+                )}
+              </Tooltip>
+            </TooltipProvider>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export default function AdminLocations() {
   const { toast } = useToast();
@@ -97,32 +182,42 @@ export default function AdminLocations() {
   const [pinLocation, setPinLocation] = useState<Location | null>(null);
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
-  const [isPinManagementOpen, setIsPinManagementOpen] = useState(false);
 
-  // ===== Onboarding (SMS / WhatsApp welcome) =====
-  type OnboardingFilter = "all" | "not-sent" | "sent" | "failed" | "onboarded";
-  const [onboardingFilter, setOnboardingFilter] = useState<OnboardingFilter>("all");
-  const [selectedOnboardingIds, setSelectedOnboardingIds] = useState<Set<number>>(new Set());
+  // ===== Bulk selection (for the main table) =====
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  // ===== Onboarding (SMS / Email welcome) =====
   const [welcomeDialogOpen, setWelcomeDialogOpen] = useState(false);
   const [welcomeTarget, setWelcomeTarget] = useState<{ kind: "single"; id: number; loc: Location } | { kind: "selected" } | { kind: "all-not-onboarded" } | null>(null);
   const [defaultChannel, setDefaultChannelState] = useState<OperatorWelcomeChannel>(() => {
     try {
       const stored = localStorage.getItem("adminDefaultWelcomeChannel");
+      // Migrate old 'whatsapp' value to 'sms' since WhatsApp is now disabled
+      if (stored === "whatsapp") return "sms";
       if (stored && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(stored)) return stored as OperatorWelcomeChannel;
     } catch {}
-    return "both";
+    return "sms";
   });
   const [welcomeChannel, setWelcomeChannel] = useState<OperatorWelcomeChannel>(defaultChannel);
   const [rememberAsDefault, setRememberAsDefault] = useState(false);
+  const [messageBody, setMessageBody] = useState("");
+  const [messageBodyInitialized, setMessageBodyInitialized] = useState(false);
+
+  // Template strings used for bulk sends (placeholder tokens are substituted per-location on the server)
+  const BULK_TEMPLATE_EN =
+    "Hi {{name}}, you've been invited to manage your {{code}} gemach dashboard. Your one-time login PIN is {{pin}}. Tap here to get started:\n{{url}}\n— Earmuffs Gemach";
+  const BULK_TEMPLATE_HE =
+    'שלום {{name}}, הוזמנת לנהל את דשבורד הגמ"ח שלך ({{code}}). קוד הכניסה החד-פעמי שלך: {{pin}}. לחץ כאן להתחלה:\n{{url}}\n— גמ"ח אטמי';
 
   const setDefaultChannel = (c: OperatorWelcomeChannel) => {
     setDefaultChannelState(c);
     try { localStorage.setItem("adminDefaultWelcomeChannel", c); } catch {}
   };
 
-  const twilioStatusQuery = useQuery<{
+  const serviceStatusQuery = useQuery<{
     sms: { configured: boolean; reason?: string };
-    whatsapp: { configured: boolean; reason?: string; templates: { en?: string | null; he?: string | null } };
+    email: { configured: boolean; reason?: string };
+    whatsapp: { configured: boolean; reason?: string };
   }>({
     queryKey: ["/api/admin/twilio-status"],
     refetchOnWindowFocus: false,
@@ -131,7 +226,11 @@ export default function AdminLocations() {
   type WelcomePreviewData = {
     location: { id: number; name: string; locationCode: string };
     language: "en" | "he";
-    message: { en: { subject: string; body: string }; he: { subject: string; body: string }; resolvedLanguage: "en" | "he" };
+    message: {
+      en: { subject: string; body: string; emailBody: string };
+      he: { subject: string; body: string; emailBody: string };
+      resolvedLanguage: "en" | "he";
+    };
     welcomeUrl: string;
   };
 
@@ -145,12 +244,33 @@ export default function AdminLocations() {
     enabled: welcomeDialogOpen && welcomeTarget?.kind === "single",
   });
 
+  // Initialize message body from preview when it loads
+  useEffect(() => {
+    if (previewQuery.data && !messageBodyInitialized) {
+      const lang = previewQuery.data.message.resolvedLanguage;
+      const msg = previewQuery.data.message[lang];
+      const body = (welcomeChannel === "email") ? msg.emailBody : msg.body;
+      setMessageBody(body);
+      setMessageBodyInitialized(true);
+    }
+  }, [previewQuery.data, messageBodyInitialized, welcomeChannel]);
+
+  // When channel changes, update message body from preview
+  useEffect(() => {
+    if (previewQuery.data && messageBodyInitialized) {
+      const lang = previewQuery.data.message.resolvedLanguage;
+      const msg = previewQuery.data.message[lang];
+      const body = (welcomeChannel === "email") ? msg.emailBody : msg.body;
+      setMessageBody(body);
+    }
+  }, [welcomeChannel]);
+
   type ChannelResult = { ok: boolean; sid?: string; error?: string; hint?: string };
   type SendOneResponse = {
     success: boolean;
     results: {
       sms?: ChannelResult;
-      whatsapp?: ChannelResult;
+      email?: ChannelResult;
       anySuccess: boolean;
     };
   };
@@ -162,17 +282,21 @@ export default function AdminLocations() {
   const errorMessage = (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback;
 
-  const sendWelcomeOneMutation = useMutation<SendOneResponse, Error, { id: number; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean }>({
-    mutationFn: async ({ id, channel, rememberAsDefault }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/${id}/send-onboarding-welcome`, { channel, rememberAsDefault });
+  const sendWelcomeOneMutation = useMutation<SendOneResponse, Error, { id: number; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string }>({
+    mutationFn: async ({ id, channel, rememberAsDefault, messageBody }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/${id}/send-onboarding-welcome`, {
+        channel,
+        rememberAsDefault,
+        ...(messageBody ? { messageBody } : {}),
+      });
       return res.json() as Promise<SendOneResponse>;
     },
     onSuccess: (data) => {
       const sms = data.results?.sms;
-      const wa = data.results?.whatsapp;
+      const email = data.results?.email;
       const parts: string[] = [];
       if (sms) parts.push(`SMS: ${sms.ok ? "✓" : "✗ " + (sms.error || "failed")}`);
-      if (wa) parts.push(`WhatsApp: ${wa.ok ? "✓" : "✗ " + (wa.error || "failed")}`);
+      if (email) parts.push(`Email: ${email.ok ? "✓" : "✗ " + (email.error || "failed")}`);
       toast({
         title: data.results?.anySuccess ? "Welcome sent" : "Welcome failed",
         description: parts.join(" · ") || "No channels selected",
@@ -187,9 +311,9 @@ export default function AdminLocations() {
     onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed to send"), variant: "destructive" }),
   });
 
-  const sendBulkOnboardingMutation = useMutation<SendBulkResponse, Error, { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean }>({
-    mutationFn: async ({ locationIds, channel, rememberAsDefault }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, { locationIds, channel, rememberAsDefault });
+  const sendBulkOnboardingMutation = useMutation<SendBulkResponse, Error, { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string }>({
+    mutationFn: async ({ locationIds, channel, rememberAsDefault, messageBody }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, { locationIds, channel, rememberAsDefault, messageBody });
       return res.json() as Promise<SendBulkResponse>;
     },
     onSuccess: (data) => {
@@ -201,14 +325,14 @@ export default function AdminLocations() {
       queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
       setWelcomeDialogOpen(false);
       setWelcomeTarget(null);
-      setSelectedOnboardingIds(new Set());
+      setSelectedIds(new Set());
     },
     onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed"), variant: "destructive" }),
   });
 
-  const sendAllNotOnboardedMutation = useMutation<SendAllResponse, Error, { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean }>({
-    mutationFn: async ({ channel, rememberAsDefault }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, { channel, rememberAsDefault });
+  const sendAllNotOnboardedMutation = useMutation<SendAllResponse, Error, { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string }>({
+    mutationFn: async ({ channel, rememberAsDefault, messageBody }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, { channel, rememberAsDefault, messageBody });
       return res.json() as Promise<SendAllResponse>;
     },
     onSuccess: (data) => {
@@ -228,27 +352,34 @@ export default function AdminLocations() {
     if (loc.onboardedAt) return "onboarded";
     const sms = loc.welcomeSmsStatus?.toLowerCase();
     const wa = loc.welcomeWhatsappStatus?.toLowerCase();
-    // Twilio terminal statuses: queued/sending/sent/delivered = success; failed/undelivered = failure.
+    const em = loc.welcomeEmailStatus?.toLowerCase();
     const sentLike = (s?: string) => s === "sent" || s === "delivered" || s === "queued" || s === "sending" || s === "accepted";
     const failedLike = (s?: string) => s === "failed" || s === "undelivered";
-    if (sentLike(sms) || sentLike(wa)) return "sent";
-    if (failedLike(sms) || failedLike(wa)) return "failed";
+    if (sentLike(sms) || sentLike(wa) || sentLike(em)) return "sent";
+    if (failedLike(sms) || failedLike(wa) || failedLike(em)) return "failed";
     return "not-sent";
   };
 
   const openSinglePicker = (loc: Location) => {
     setWelcomeTarget({ kind: "single", id: loc.id, loc });
-    const locDefault = loc.defaultWelcomeChannel as OperatorWelcomeChannel | null;
-    setWelcomeChannel(locDefault && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefault) ? locDefault : defaultChannel);
+    const locDefaultRaw = loc.defaultWelcomeChannel as string | null;
+    const ch = locDefaultRaw && locDefaultRaw !== "whatsapp" && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefaultRaw)
+      ? locDefaultRaw as OperatorWelcomeChannel
+      : defaultChannel;
+    setWelcomeChannel(ch);
     setRememberAsDefault(false);
+    setMessageBody("");
+    setMessageBodyInitialized(false);
     setWelcomeDialogOpen(true);
   };
 
   const openSelectedPicker = () => {
-    if (selectedOnboardingIds.size === 0) return;
+    if (selectedIds.size === 0) return;
     setWelcomeTarget({ kind: "selected" });
     setWelcomeChannel(defaultChannel);
     setRememberAsDefault(false);
+    setMessageBody(BULK_TEMPLATE_EN);
+    setMessageBodyInitialized(true);
     setWelcomeDialogOpen(true);
   };
 
@@ -256,29 +387,36 @@ export default function AdminLocations() {
     setWelcomeTarget({ kind: "all-not-onboarded" });
     setWelcomeChannel(defaultChannel);
     setRememberAsDefault(false);
+    setMessageBody(BULK_TEMPLATE_EN);
+    setMessageBodyInitialized(true);
     setWelcomeDialogOpen(true);
   };
 
   const sendFromDialog = () => {
     if (!welcomeTarget) return;
     if (welcomeTarget.kind === "single") {
-      sendWelcomeOneMutation.mutate({ id: welcomeTarget.id, channel: welcomeChannel, rememberAsDefault });
+      sendWelcomeOneMutation.mutate({
+        id: welcomeTarget.id,
+        channel: welcomeChannel,
+        rememberAsDefault,
+        messageBody: messageBody.trim() || undefined,
+      });
     } else if (welcomeTarget.kind === "selected") {
-      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedOnboardingIds), channel: welcomeChannel, rememberAsDefault });
+      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedIds), channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined });
     } else {
-      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel, rememberAsDefault });
+      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined });
     }
   };
 
   const dialogIsPending = sendWelcomeOneMutation.isPending || sendBulkOnboardingMutation.isPending || sendAllNotOnboardedMutation.isPending;
 
-  const toggleSelectAllOnboarding = (checked: boolean) => {
-    if (checked) setSelectedOnboardingIds(new Set(onboardingFiltered.map((l) => l.id)));
-    else setSelectedOnboardingIds(new Set());
+  const toggleSelectAll = (checked: boolean, visibleIds: number[]) => {
+    if (checked) setSelectedIds(new Set(visibleIds));
+    else setSelectedIds(new Set());
   };
 
-  const toggleOneOnboarding = (id: number, checked: boolean) => {
-    setSelectedOnboardingIds((prev) => {
+  const toggleOne = (id: number, checked: boolean) => {
+    setSelectedIds((prev) => {
       const next = new Set(prev);
       if (checked) next.add(id); else next.delete(id);
       return next;
@@ -293,20 +431,19 @@ export default function AdminLocations() {
     queryKey: ["/api/locations"],
   });
 
-  // For bulk and send-all dialogs, pick up to 2 sample sendable recipients
-  // (one EN-resolved + one HE-resolved when both languages are present) and
-  // fetch real previews for them via the same /onboarding-preview endpoint
-  // the single dialog uses. The server determines language by the presence
-  // of nameHe, so we mirror that hint client-side when picking samples.
+  // Bulk preview samples for non-single sends
   const bulkPreviewSamples = useMemo(() => {
     if (!welcomeTarget || welcomeTarget.kind === "single") return { en: null as Location | null, he: null as Location | null };
+    const ch = welcomeChannel;
+    const needsPhone = ch === "sms" || ch === "both";
+    const needsEmail = ch === "email" || ch === "both";
     const candidates = welcomeTarget.kind === "selected"
-      ? locations.filter((l) => selectedOnboardingIds.has(l.id) && !!l.phone)
-      : locations.filter((l) => l.isActive !== false && !l.onboardedAt && !!l.phone);
+      ? locations.filter((l) => selectedIds.has(l.id) && (needsPhone ? !!l.phone : true) && (needsEmail ? !!l.email : true))
+      : locations.filter((l) => l.isActive !== false && !l.onboardedAt && (needsPhone ? !!l.phone : true) && (needsEmail ? !!l.email : true));
     const en = candidates.find((l) => !l.nameHe) || null;
     const he = candidates.find((l) => !!l.nameHe) || null;
     return { en, he };
-  }, [welcomeTarget, locations, selectedOnboardingIds]);
+  }, [welcomeTarget, locations, selectedIds, welcomeChannel]);
 
   const bulkPreviewEnQuery = useQuery<WelcomePreviewData>({
     queryKey: ["/api/admin/locations/preview-bulk-en", bulkPreviewSamples.en?.id ?? null],
@@ -327,88 +464,35 @@ export default function AdminLocations() {
     enabled: welcomeDialogOpen && welcomeTarget != null && welcomeTarget.kind !== "single" && !!bulkPreviewSamples.he,
   });
 
-  const onboardingFiltered = useMemo(() => {
-    return locations.filter((loc) => {
-      if (onboardingFilter === "all") return true;
-      return getOnboardingStatus(loc) === onboardingFilter;
-    });
-  }, [locations, onboardingFilter]);
 
-  // SMS and WhatsApp both require a phone on file, so email-only rows are
-  // ineligible (they would just be skipped by the server with "no phone").
+  // Eligible for bulk "not onboarded" send (SMS or email available)
   const eligibleNotOnboarded = useMemo(
-    () => locations.filter((l) => getOnboardingStatus(l) !== "onboarded" && !!l.phone),
+    () => locations.filter((l) => getOnboardingStatus(l) !== "onboarded" && (!!l.phone || !!l.email)),
     [locations]
   );
 
   const toggleStatusMutation = useMutation({
-    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => 
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) =>
       updateLocation(id, { isActive }),
     onSuccess: () => {
-      toast({
-        title: t('statusUpdated'),
-        description: t('statusUpdateSuccess'),
-      });
+      toast({ title: t('statusUpdated'), description: t('statusUpdateSuccess') });
       queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
     },
     onError: (error: Error) => {
-      toast({
-        title: t('error'),
-        description: `${t('failedToUpdateStatus')} ${error.message}`,
-        variant: "destructive",
-      });
+      toast({ title: t('error'), description: `${t('failedToUpdateStatus')} ${error.message}`, variant: "destructive" });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id: number) => deleteLocation(id),
     onSuccess: () => {
-      toast({
-        title: t('locationDeleted'),
-        description: t('locationDeletedSuccess'),
-      });
+      toast({ title: t('locationDeleted'), description: t('locationDeletedSuccess') });
       queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
       setIsDeleteDialogOpen(false);
       setDeletingLocation(null);
     },
     onError: (error: Error) => {
-      toast({
-        title: t('error'),
-        description: error.message || t('failedToDelete'),
-        variant: "destructive",
-      });
-    },
-  });
-
-  type WelcomeEmailResponse = { success: boolean; sentTo: string };
-  type WelcomeEmailAllResponse = { success: boolean; sent: number; skipped: number; failed: number };
-
-  const sendWelcomeMutation = useMutation<WelcomeEmailResponse, Error, number>({
-    mutationFn: async (id) => {
-      const res = await apiRequest("POST", `/api/admin/locations/${id}/send-welcome`);
-      return res.json() as Promise<WelcomeEmailResponse>;
-    },
-    onSuccess: (data) => {
-      toast({ title: "Welcome email sent", description: `Sent to ${data.sentTo}` });
-    },
-    onError: (err) => {
-      toast({ title: "Error", description: errorMessage(err, "Failed to send"), variant: "destructive" });
-    },
-  });
-
-  const sendWelcomeAllMutation = useMutation<WelcomeEmailAllResponse, Error, void>({
-    mutationFn: async () => {
-      const res = await apiRequest("POST", `/api/admin/locations/send-welcome-all`);
-      return res.json() as Promise<WelcomeEmailAllResponse>;
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Bulk welcome emails complete",
-        description: `Sent: ${data.sent} • Skipped: ${data.skipped} • Failed: ${data.failed}`,
-      });
-    },
-    onError: (err) => {
-      toast({ title: "Error", description: errorMessage(err, "Failed to bulk-send"), variant: "destructive" });
+      toast({ title: t('error'), description: error.message || t('failedToDelete'), variant: "destructive" });
     },
   });
 
@@ -452,9 +536,7 @@ export default function AdminLocations() {
   };
 
   const confirmDelete = () => {
-    if (deletingLocation) {
-      deleteMutation.mutate(deletingLocation.id);
-    }
+    if (deletingLocation) deleteMutation.mutate(deletingLocation.id);
   };
 
   const closeEditDialog = () => {
@@ -474,10 +556,9 @@ export default function AdminLocations() {
   };
 
   const filteredLocations = useMemo(() => locations.filter(location => {
-    // Search filter
     if (searchTerm) {
       const searchLower = searchTerm.toLowerCase();
-      const matchesSearch = 
+      const matchesSearch =
         location.name.toLowerCase().includes(searchLower) ||
         (location.nameHe && location.nameHe.toLowerCase().includes(searchLower)) ||
         location.contactPerson.toLowerCase().includes(searchLower) ||
@@ -486,15 +567,11 @@ export default function AdminLocations() {
         getRegionNameById(location.regionId).toLowerCase().includes(searchLower);
       if (!matchesSearch) return false;
     }
-    
-    // Status filter
     if (statusFilter === "active" && !location.isActive) return false;
     if (statusFilter === "inactive" && location.isActive) return false;
-    
     return true;
   }), [locations, searchTerm, statusFilter, regions, language]);
 
-  // Group filtered locations by region, ordered by region displayOrder
   const groupedLocations = useMemo(() => {
     const sortedRegions = [...regions].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
     return sortedRegions
@@ -505,7 +582,9 @@ export default function AdminLocations() {
       .filter(g => g.locations.length > 0);
   }, [regions, filteredLocations]);
 
-  // Initialize all regions expanded once when region data first loads
+  // All visible location IDs (for select-all in current view)
+  const allVisibleIds = useMemo(() => filteredLocations.map(l => l.id), [filteredLocations]);
+
   const hasInitializedExpandedRef = useRef(false);
   useEffect(() => {
     if (!hasInitializedExpandedRef.current && regions.length > 0) {
@@ -514,9 +593,6 @@ export default function AdminLocations() {
     }
   }, [regions]);
 
-  // When a filter/search is active, isExpanded is derived directly as:
-  // isFilterActive || expandedRegions.has(id)
-  // so all sections with visible results stay open automatically — no extra effect needed.
   const isFilterActive = searchTerm !== "" || statusFilter !== "all";
 
   const toggleRegion = useCallback((regionId: number) => {
@@ -538,35 +614,28 @@ export default function AdminLocations() {
     const el = regionRefs.current[regionId];
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
-      // ensure the section is expanded
       setExpandedRegions(prev => { const next = new Set(prev); next.add(regionId); return next; });
     }
   };
 
-  // Stats
   const totalLocations = locations.length;
   const activeLocations = locations.filter(l => l.isActive).length;
   const inactiveLocations = totalLocations - activeLocations;
 
+  // Determine bulk send label based on channel for "send to selected" button
+  const selectedCount = selectedIds.size;
+
   return (
+    <TooltipProvider>
     <div className="py-6 md:py-10">
       <div className="container mx-auto px-4">
-        {/* Navigation Breadcrumbs */}
+        {/* Breadcrumbs */}
         <div className="flex items-center gap-2 mb-6">
-          <Button 
-            variant="ghost" 
-            onClick={() => window.location.href = '/admin'}
-            className="flex items-center gap-2"
-          >
+          <Button variant="ghost" onClick={() => window.location.href = '/admin'} className="flex items-center gap-2">
             <ArrowLeft className="h-4 w-4" />
             {t('backToDashboard')}
           </Button>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => window.location.href = '/'}
-            className="flex items-center gap-2"
-          >
+          <Button variant="outline" size="sm" onClick={() => window.location.href = '/'} className="flex items-center gap-2">
             <Home className="h-4 w-4" />
             {t('home')}
           </Button>
@@ -577,26 +646,18 @@ export default function AdminLocations() {
             <h1 className="text-2xl md:text-3xl font-bold">{t('locationManagementTitle')}</h1>
             <p className="text-muted-foreground text-sm md:text-base">{t('manageAllGemachLocations')}</p>
           </div>
-          
           <div className="mt-4 md:mt-0">
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-              <DialogTrigger asChild>
-                <Button>
-                  <Plus className="mr-2 h-4 w-4" />
-                  {t('addNewLocation')}
-                </Button>
-              </DialogTrigger>
+              <Button onClick={() => setIsCreateDialogOpen(true)}>
+                <Plus className="mr-2 h-4 w-4" />
+                {t('addNewLocation')}
+              </Button>
               <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
                 <DialogHeader>
                   <DialogTitle>{t('createNewLocation')}</DialogTitle>
-                  <DialogDescription>
-                    {t('addNewLocationDescription')}
-                  </DialogDescription>
+                  <DialogDescription>{t('addNewLocationDescription')}</DialogDescription>
                 </DialogHeader>
-                <LocationForm 
-                  regions={regions} 
-                  onSuccess={() => setIsCreateDialogOpen(false)} 
-                />
+                <LocationForm regions={regions} onSuccess={() => setIsCreateDialogOpen(false)} />
               </DialogContent>
             </Dialog>
           </div>
@@ -641,66 +702,96 @@ export default function AdminLocations() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle>{t('locations')}</CardTitle>
-            <CardDescription>
-              {t('manageAllGemachLocations')}
-            </CardDescription>
-            
-            {/* Filters */}
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="relative">
-                <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder={t('search')}
-                  className="pl-10"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                <div>
+                  <CardTitle>{t('locations')}</CardTitle>
+                  <CardDescription>{t('manageAllGemachLocations')}</CardDescription>
+                </div>
+                {/* Bulk welcome action buttons */}
+                <div className="flex flex-wrap gap-2 shrink-0">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={openAllNotOnboardedPicker}
+                    disabled={dialogIsPending || eligibleNotOnboarded.length === 0}
+                    data-testid="button-onboarding-all-not-onboarded"
+                  >
+                    <Send className="h-4 w-4 mr-1" />
+                    Send Welcome ({eligibleNotOnboarded.length})
+                  </Button>
+                  {selectedCount > 0 && (
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={openSelectedPicker}
+                      disabled={dialogIsPending}
+                      data-testid="button-onboarding-bulk-selected"
+                    >
+                      <Send className="h-4 w-4 mr-1" />
+                      Send to Selected ({selectedCount})
+                    </Button>
+                  )}
+                </div>
               </div>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger>
-                  <SelectValue placeholder={t('filterByStatus')} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">{t('allStatuses')}</SelectItem>
-                  <SelectItem value="active">{t('activeOnly')}</SelectItem>
-                  <SelectItem value="inactive">{t('inactiveOnly')}</SelectItem>
-                </SelectContent>
-              </Select>
+
+              {/* Service Status Bar */}
+              <ServiceStatusBar status={serviceStatusQuery.data} loading={serviceStatusQuery.isLoading} />
+
+              {/* Filters */}
+              <div className="mt-2 grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="relative">
+                  <Search className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder={t('search')}
+                    className="pl-10"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={t('filterByStatus')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">{t('allStatuses')}</SelectItem>
+                    <SelectItem value="active">{t('activeOnly')}</SelectItem>
+                    <SelectItem value="inactive">{t('inactiveOnly')}</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {(statusFilter !== "all" || searchTerm) && (
+                <div className="mt-1 flex flex-wrap gap-2 items-center">
+                  <span className="text-sm text-muted-foreground">{t('activeFilters')}:</span>
+                  {searchTerm && (
+                    <Badge variant="secondary" className="flex items-center gap-1">
+                      {t('search')}: {searchTerm}
+                      <button onClick={() => setSearchTerm("")} className="ml-1 hover:text-destructive">×</button>
+                    </Badge>
+                  )}
+                  {statusFilter !== "all" && (
+                    <Badge variant="secondary" className="flex items-center gap-1">
+                      {t('status')}: {statusFilter}
+                      <button onClick={() => setStatusFilter("all")} className="ml-1 hover:text-destructive">×</button>
+                    </Badge>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => { setSearchTerm(""); setStatusFilter("all"); }} className="text-xs">
+                    {t('clearAll')}
+                  </Button>
+                </div>
+              )}
             </div>
-            
-            {/* Active filters display */}
-            {(statusFilter !== "all" || searchTerm) && (
-              <div className="mt-3 flex flex-wrap gap-2 items-center">
-                <span className="text-sm text-muted-foreground">{t('activeFilters')}:</span>
-                {searchTerm && (
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    {t('search')}: {searchTerm}
-                    <button onClick={() => setSearchTerm("")} className="ml-1 hover:text-destructive">×</button>
-                  </Badge>
-                )}
-                {statusFilter !== "all" && (
-                  <Badge variant="secondary" className="flex items-center gap-1">
-                    {t('status')}: {statusFilter}
-                    <button onClick={() => setStatusFilter("all")} className="ml-1 hover:text-destructive">×</button>
-                  </Badge>
-                )}
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}
-                  className="text-xs"
-                >
-                  {t('clearAll')}
-                </Button>
-              </div>
-            )}
           </CardHeader>
+
           <CardContent className="px-0 pb-0">
             {/* Summary + expand/collapse all */}
             <div className="flex items-center justify-between px-6 pb-3">
               <div className="text-sm text-muted-foreground">
                 {t('showing')} {filteredLocations.length} / {totalLocations} {t('locations')}
+                {selectedCount > 0 && (
+                  <span className="ml-2 text-primary font-medium">· {selectedCount} selected</span>
+                )}
               </div>
               {groupedLocations.length > 1 && (
                 <button
@@ -713,7 +804,7 @@ export default function AdminLocations() {
               )}
             </div>
 
-            {/* Region quick-jump pill bar — sticky */}
+            {/* Region quick-jump pill bar */}
             {groupedLocations.length > 1 && (
               <div className="sticky top-0 z-10 bg-background/95 backdrop-blur border-b px-6 py-2 flex flex-wrap gap-2">
                 {groupedLocations.map(({ region }) => {
@@ -738,20 +829,14 @@ export default function AdminLocations() {
                   <div className="space-y-2">
                     <p className="text-muted-foreground">{t('noLocationsMatch')}</p>
                     <p className="text-sm text-gray-500">{t('tryAdjustingSearch')}</p>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}
-                    >
+                    <Button variant="outline" size="sm" onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}>
                       {t('clearAll')}
                     </Button>
                   </div>
                 ) : (
                   <div className="space-y-2">
                     <p className="text-muted-foreground">{t('noLocationsFound')}</p>
-                    <Button onClick={() => setIsCreateDialogOpen(true)} size="sm">
-                      {t('addNewLocation')}
-                    </Button>
+                    <Button onClick={() => setIsCreateDialogOpen(true)} size="sm">{t('addNewLocation')}</Button>
                   </div>
                 )}
               </div>
@@ -759,13 +844,11 @@ export default function AdminLocations() {
               <div className="divide-y">
                 {groupedLocations.map(({ region, locations: regionLocs }) => {
                   const regionName = language === "he" && region.nameHe ? region.nameHe : region.name;
-                  // While a filter is active, always keep sections visible so results are never hidden
                   const isExpanded = isFilterActive || expandedRegions.has(region.id);
+                  const regionIds = regionLocs.map(l => l.id);
+                  const allRegionSelected = regionIds.every(id => selectedIds.has(id));
                   return (
-                    <div
-                      key={region.id}
-                      ref={(el) => { regionRefs.current[region.id] = el; }}
-                    >
+                    <div key={region.id} ref={(el) => { regionRefs.current[region.id] = el; }}>
                       {/* Section header */}
                       <button
                         className={`w-full flex items-center justify-between px-6 py-3 transition-colors text-left ${isFilterActive ? "cursor-default" : "hover:bg-muted/40"}`}
@@ -781,11 +864,6 @@ export default function AdminLocations() {
                           <Badge variant="secondary" className="text-xs">
                             {regionLocs.length} {regionLocs.length === 1 ? t('locationSingular') : t('locations')}
                           </Badge>
-                          {isFilterActive && (
-                            <span className="text-xs text-muted-foreground">
-                              — {regionLocs.length} {regionLocs.length === 1 ? t('resultSingular') : t('results')}
-                            </span>
-                          )}
                         </div>
                       </button>
 
@@ -795,79 +873,139 @@ export default function AdminLocations() {
                           <Table>
                             <TableHeader>
                               <TableRow>
+                                <TableHead className="w-8">
+                                  <Checkbox
+                                    checked={regionIds.length > 0 && allRegionSelected}
+                                    onCheckedChange={(v) => {
+                                      setSelectedIds(prev => {
+                                        const next = new Set(prev);
+                                        if (v) regionIds.forEach(id => next.add(id));
+                                        else regionIds.forEach(id => next.delete(id));
+                                        return next;
+                                      });
+                                    }}
+                                    aria-label={`Select all in ${regionName}`}
+                                  />
+                                </TableHead>
                                 <TableHead className="min-w-[200px]">{t('name')}</TableHead>
                                 <TableHead className="min-w-[180px] hidden md:table-cell">{t('coordinatorName')}</TableHead>
-                                <TableHead className="min-w-[120px] hidden lg:table-cell">{t('region')}</TableHead>
+                                <TableHead className="min-w-[80px] hidden lg:table-cell">PIN</TableHead>
+                                <TableHead className="min-w-[100px]">Onboarding</TableHead>
                                 <TableHead className="min-w-[80px]">{t('status')}</TableHead>
                                 <TableHead className="min-w-[80px]">{t('actions')}</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
-                              {regionLocs.map((location) => (
-                                <TableRow key={location.id}>
-                                  <TableCell className="font-medium">
-                                    <div className="flex items-center gap-2">
-                                      <span>{localized(location, "name")}</span>
-                                      {location.locationCode && (
-                                        <Badge variant="outline" className="text-xs">{location.locationCode}</Badge>
+                              {regionLocs.map((location) => {
+                                const onboardingStatus = getOnboardingStatus(location);
+                                const sms = location.welcomeSmsStatus;
+                                const smsErr = location.welcomeSmsError;
+                                const em = location.welcomeEmailStatus;
+                                const emErr = location.welcomeEmailError;
+                                const lastSentAt = location.welcomeSentAt as string | Date | null;
+                                const sentDaysAgo = lastSentAt ? Math.max(0, Math.floor((Date.now() - new Date(lastSentAt).getTime()) / 86400000)) : null;
+                                return (
+                                  <TableRow key={location.id} data-testid={`row-location-${location.id}`}>
+                                    <TableCell>
+                                      <Checkbox
+                                        checked={selectedIds.has(location.id)}
+                                        onCheckedChange={(v) => toggleOne(location.id, !!v)}
+                                        aria-label={`Select ${location.name}`}
+                                        data-testid={`checkbox-location-${location.id}`}
+                                      />
+                                    </TableCell>
+                                    <TableCell className="font-medium">
+                                      <div className="flex items-center gap-2">
+                                        <span>{localized(location, "name")}</span>
+                                        {location.locationCode && (
+                                          <Badge variant="outline" className="text-xs">{location.locationCode}</Badge>
+                                        )}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground flex items-center mt-1">
+                                        <MapPin className="h-3 w-3 mr-1" />
+                                        {localized(location, "address")}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="hidden md:table-cell">
+                                      <div>{localized(location, "contactPerson")}</div>
+                                      <div className="text-xs text-muted-foreground flex items-center">
+                                        <Phone className="h-3 w-3 mr-1" />
+                                        {location.phone || <span className="italic">No phone</span>}
+                                      </div>
+                                      <div className="text-xs text-muted-foreground flex items-center">
+                                        <Mail className="h-3 w-3 mr-1" />
+                                        {location.email || <span className="italic">No email</span>}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="hidden lg:table-cell">
+                                      {location.operatorPin ? (
+                                        <Badge variant="secondary" className="text-xs">PIN set</Badge>
+                                      ) : (
+                                        <Badge variant="destructive" className="text-xs">No PIN</Badge>
                                       )}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground flex items-center mt-1">
-                                      <MapPin className="h-3 w-3 mr-1" />
-                                      {localized(location, "address")}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="hidden md:table-cell">
-                                    <div>{localized(location, "contactPerson")}</div>
-                                    <div className="text-xs text-muted-foreground flex items-center">
-                                      <Phone className="h-3 w-3 mr-1" />
-                                      {location.phone}
-                                    </div>
-                                    <div className="text-xs text-muted-foreground flex items-center">
-                                      <Mail className="h-3 w-3 mr-1" />
-                                      {location.email}
-                                    </div>
-                                  </TableCell>
-                                  <TableCell className="hidden lg:table-cell">
-                                    <Badge variant="outline">{getRegionNameById(location.regionId)}</Badge>
-                                  </TableCell>
-                                  <TableCell>
-                                    <Switch
-                                      checked={Boolean(location.isActive)}
-                                      onCheckedChange={() => toggleLocationStatus(location.id, Boolean(location.isActive))}
-                                    />
-                                  </TableCell>
-                                  <TableCell>
-                                    <DropdownMenu>
-                                      <DropdownMenuTrigger asChild>
-                                        <Button variant="ghost" className="h-8 w-8 p-0">
-                                          <span className="sr-only">Open menu</span>
-                                          <MoreVertical className="h-4 w-4" />
-                                        </Button>
-                                      </DropdownMenuTrigger>
-                                      <DropdownMenuContent align="end">
-                                        <DropdownMenuLabel>{t('actions')}</DropdownMenuLabel>
-                                        <DropdownMenuSeparator />
-                                        <DropdownMenuItem onClick={() => handleEditLocation(location)}>
-                                          <Edit className="mr-2 h-4 w-4" />
-                                          {t('editLocation')}
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem onClick={() => handleChangePinForLocation(location)}>
-                                          <KeyRound className="mr-2 h-4 w-4" />
-                                          Change PIN
-                                        </DropdownMenuItem>
-                                        <DropdownMenuItem 
-                                          onClick={() => handleDeleteLocation(location)}
-                                          className="text-red-600 focus:text-red-600"
-                                        >
-                                          <Trash2 className="mr-2 h-4 w-4" />
-                                          {t('deleteLocationConfirm')}
-                                        </DropdownMenuItem>
-                                      </DropdownMenuContent>
-                                    </DropdownMenu>
-                                  </TableCell>
-                                </TableRow>
-                              ))}
+                                    </TableCell>
+                                    <TableCell>
+                                      <div className="flex flex-col gap-0.5">
+                                        <OnboardingStatusBadge status={onboardingStatus} />
+                                        {onboardingStatus !== "onboarded" && sentDaysAgo !== null && (
+                                          <div className="text-[10px] text-muted-foreground" data-testid={`sent-ago-${location.id}`}>
+                                            Sent {sentDaysAgo === 0 ? "today" : sentDaysAgo === 1 ? "1 day ago" : `${sentDaysAgo} days ago`}
+                                          </div>
+                                        )}
+                                        {sms && (
+                                          <div className={`text-[10px] ${sms === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
+                                            SMS: {sms}{sms === "failed" && smsErr ? ` — ${smsErr}` : ""}
+                                          </div>
+                                        )}
+                                        {em && (
+                                          <div className={`text-[10px] ${em === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
+                                            Email: {em}{em === "failed" && emErr ? ` — ${emErr}` : ""}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </TableCell>
+                                    <TableCell>
+                                      <Switch
+                                        checked={Boolean(location.isActive)}
+                                        onCheckedChange={() => toggleLocationStatus(location.id, Boolean(location.isActive))}
+                                      />
+                                    </TableCell>
+                                    <TableCell>
+                                      <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                          <Button variant="ghost" className="h-8 w-8 p-0">
+                                            <span className="sr-only">Open menu</span>
+                                            <MoreVertical className="h-4 w-4" />
+                                          </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end">
+                                          <DropdownMenuLabel>{t('actions')}</DropdownMenuLabel>
+                                          <DropdownMenuSeparator />
+                                          <DropdownMenuItem onClick={() => openSinglePicker(location)}>
+                                            <Send className="mr-2 h-4 w-4" />
+                                            Send Welcome
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleEditLocation(location)}>
+                                            <Edit className="mr-2 h-4 w-4" />
+                                            {t('editLocation')}
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleChangePinForLocation(location)}>
+                                            <KeyRound className="mr-2 h-4 w-4" />
+                                            Change PIN
+                                          </DropdownMenuItem>
+                                          <DropdownMenuItem
+                                            onClick={() => handleDeleteLocation(location)}
+                                            className="text-red-600 focus:text-red-600"
+                                          >
+                                            <Trash2 className="mr-2 h-4 w-4" />
+                                            {t('deleteLocationConfirm')}
+                                          </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                      </DropdownMenu>
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
                             </TableBody>
                           </Table>
                         </div>
@@ -885,16 +1023,10 @@ export default function AdminLocations() {
           <DialogContent className="sm:max-w-[600px] max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>{t('editLocation')}</DialogTitle>
-              <DialogDescription>
-                {t('editLocationDescription')}
-              </DialogDescription>
+              <DialogDescription>{t('editLocationDescription')}</DialogDescription>
             </DialogHeader>
             {editingLocation && (
-              <LocationForm
-                location={editingLocation}
-                regions={regions}
-                onSuccess={closeEditDialog}
-              />
+              <LocationForm location={editingLocation} regions={regions} onSuccess={closeEditDialog} />
             )}
           </DialogContent>
         </Dialog>
@@ -914,251 +1046,17 @@ export default function AdminLocations() {
               </p>
             </div>
             <DialogFooter className="gap-2 sm:gap-0">
-              <Button 
-                variant="outline" 
-                onClick={() => setIsDeleteDialogOpen(false)}
-              >
-                {t('cancel')}
-              </Button>
-              <Button 
-                variant="destructive" 
-                onClick={confirmDelete}
-                disabled={deleteMutation.isPending}
-              >
+              <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>{t('cancel')}</Button>
+              <Button variant="destructive" onClick={confirmDelete} disabled={deleteMutation.isPending}>
                 {deleteMutation.isPending ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {t('deleting')}
-                  </>
+                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" />{t('deleting')}</>
                 ) : (
-                  <>
-                    <Trash2 className="mr-2 h-4 w-4" />
-                    {t('deleteLocationConfirm')}
-                  </>
+                  <><Trash2 className="mr-2 h-4 w-4" />{t('deleteLocationConfirm')}</>
                 )}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
-
-        {/* PIN Management & Operator Onboarding */}
-        <Card className="mt-6">
-          <CardHeader className="pb-3">
-            <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-5 w-5 text-primary" />
-                <div>
-                  <CardTitle>PIN & Onboarding</CardTitle>
-                  <CardDescription>Send the welcome (SMS / WhatsApp), manage PINs, track who's onboarded.</CardDescription>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <TwilioStatusBadge status={twilioStatusQuery.data} loading={twilioStatusQuery.isLoading} />
-                <Button
-                  variant="default"
-                  size="sm"
-                  onClick={openAllNotOnboardedPicker}
-                  disabled={dialogIsPending || eligibleNotOnboarded.length === 0}
-                  data-testid="button-onboarding-all-not-onboarded"
-                >
-                  <Send className="h-4 w-4 mr-1" />
-                  Send Welcome to all not-onboarded ({eligibleNotOnboarded.length})
-                </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={openSelectedPicker}
-                  disabled={dialogIsPending || selectedOnboardingIds.size === 0}
-                  data-testid="button-onboarding-bulk-selected"
-                >
-                  <Send className="h-4 w-4 mr-1" />
-                  Send Welcome to selected ({selectedOnboardingIds.size})
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    if (window.confirm("Send the legacy setup email to every active location with an email address on file?")) {
-                      sendWelcomeAllMutation.mutate();
-                    }
-                  }}
-                  disabled={sendWelcomeAllMutation.isPending}
-                  data-testid="button-send-welcome-all"
-                >
-                  <Mail className="h-4 w-4 mr-1" />
-                  {sendWelcomeAllMutation.isPending ? "Sending…" : "Email all"}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setIsPinManagementOpen(!isPinManagementOpen)}
-                >
-                  {isPinManagementOpen ? "Collapse" : "Expand"}
-                </Button>
-              </div>
-            </div>
-            {isPinManagementOpen && (
-              <div className="mt-3 flex flex-wrap gap-2 items-center">
-                <Label className="text-sm">Status filter:</Label>
-                <Select value={onboardingFilter} onValueChange={(v) => { setOnboardingFilter(v as OnboardingFilter); setSelectedOnboardingIds(new Set()); }}>
-                  <SelectTrigger className="w-[180px]" data-testid="select-onboarding-filter">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All ({locations.length})</SelectItem>
-                    <SelectItem value="not-sent">Not Sent</SelectItem>
-                    <SelectItem value="sent">Sent (awaiting onboarding)</SelectItem>
-                    <SelectItem value="failed">Failed delivery</SelectItem>
-                    <SelectItem value="onboarded">Onboarded</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Label className="text-sm ml-2">Default channel:</Label>
-                <Select value={defaultChannel} onValueChange={(v) => setDefaultChannel(v as OperatorWelcomeChannel)}>
-                  <SelectTrigger className="w-[160px]" data-testid="select-default-channel">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="sms">SMS only</SelectItem>
-                    <SelectItem value="whatsapp">WhatsApp only</SelectItem>
-                    <SelectItem value="both">Both</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-          </CardHeader>
-          {isPinManagementOpen && (
-            <CardContent>
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-8">
-                        <Checkbox
-                          checked={onboardingFiltered.length > 0 && selectedOnboardingIds.size === onboardingFiltered.length}
-                          onCheckedChange={(v) => toggleSelectAllOnboarding(!!v)}
-                          aria-label="Select all"
-                          data-testid="checkbox-onboarding-select-all"
-                        />
-                      </TableHead>
-                      <TableHead>Location</TableHead>
-                      <TableHead>Code</TableHead>
-                      <TableHead className="hidden md:table-cell">Contact</TableHead>
-                      <TableHead>PIN</TableHead>
-                      <TableHead>Onboarding</TableHead>
-                      <TableHead>Action</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {onboardingFiltered.map((loc) => {
-                      const status = getOnboardingStatus(loc);
-                      const sms = loc.welcomeSmsStatus;
-                      const smsErr = loc.welcomeSmsError;
-                      const wa = loc.welcomeWhatsappStatus;
-                      const waErr = loc.welcomeWhatsappError;
-                      const lastSentAt = loc.welcomeSentAt as string | Date | null;
-                      const sentDaysAgo = lastSentAt ? Math.max(0, Math.floor((Date.now() - new Date(lastSentAt).getTime()) / 86400000)) : null;
-                      return (
-                        <TableRow key={loc.id} data-testid={`row-onboarding-${loc.id}`}>
-                          <TableCell>
-                            <Checkbox
-                              checked={selectedOnboardingIds.has(loc.id)}
-                              onCheckedChange={(v) => toggleOneOnboarding(loc.id, !!v)}
-                              aria-label={`Select ${loc.name}`}
-                              data-testid={`checkbox-onboarding-${loc.id}`}
-                            />
-                          </TableCell>
-                          <TableCell className="font-medium">
-                            <div>{loc.name}</div>
-                            {loc.nameHe && <div className="text-xs text-muted-foreground" dir="rtl">{loc.nameHe}</div>}
-                          </TableCell>
-                          <TableCell>
-                            <Badge variant="outline">{loc.locationCode}</Badge>
-                          </TableCell>
-                          <TableCell className="hidden md:table-cell text-xs">
-                            {loc.phone && <div className="flex items-center gap-1"><Phone className="h-3 w-3" />{loc.phone}</div>}
-                            {loc.email && <div className="flex items-center gap-1 text-muted-foreground"><Mail className="h-3 w-3" />{loc.email}</div>}
-                          </TableCell>
-                          <TableCell>
-                            {loc.operatorPin ? (
-                              <Badge variant="secondary" className="text-xs">PIN set</Badge>
-                            ) : (
-                              <Badge variant="destructive" className="text-xs">No PIN</Badge>
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-col gap-0.5">
-                              <OnboardingStatusBadge status={status} />
-                              {status !== "onboarded" && sentDaysAgo !== null && (
-                                <div className="text-[10px] text-muted-foreground" data-testid={`sent-ago-${loc.id}`}>
-                                  Sent {sentDaysAgo === 0 ? "today" : sentDaysAgo === 1 ? "1 day ago" : `${sentDaysAgo} days ago`}
-                                </div>
-                              )}
-                              {(sms || wa) && (
-                                <div className="text-[10px] text-muted-foreground space-y-0.5">
-                                  {sms && (
-                                    <div className={sms === "failed" ? "text-destructive" : ""}>
-                                      SMS: {sms}{sms === "failed" && smsErr ? ` — ${smsErr}` : ""}
-                                    </div>
-                                  )}
-                                  {wa && (
-                                    <div className={wa === "failed" ? "text-destructive" : ""}>
-                                      WA: {wa}{wa === "failed" && waErr ? ` — ${waErr}` : ""}
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openSinglePicker(loc)}
-                                disabled={dialogIsPending || !loc.phone}
-                                title={!loc.phone ? "No phone on file — SMS/WhatsApp need a phone number" : "Send Welcome (SMS/WhatsApp)"}
-                                data-testid={`button-send-onboarding-${loc.id}`}
-                              >
-                                <MessageSquare className="h-4 w-4 mr-1" />
-                                Welcome
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => handleChangePinForLocation(loc)}
-                                data-testid={`button-change-pin-${loc.id}`}
-                                title="Change PIN"
-                              >
-                                <KeyRound className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={() => sendWelcomeMutation.mutate(loc.id)}
-                                disabled={sendWelcomeMutation.isPending || !loc.email || !loc.locationCode}
-                                title={!loc.email ? "No email on file" : "Send legacy setup email"}
-                                data-testid={`button-send-welcome-${loc.id}`}
-                              >
-                                <Mail className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                    {onboardingFiltered.length === 0 && (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center text-sm text-muted-foreground py-6">
-                          No locations match this filter.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </CardContent>
-          )}
-        </Card>
 
         {/* Welcome Channel Picker Dialog */}
         <Dialog open={welcomeDialogOpen} onOpenChange={(open) => {
@@ -1176,7 +1074,7 @@ export default function AdminLocations() {
                   <>To <strong>{welcomeTarget.loc.name}</strong> · {welcomeTarget.loc.locationCode} · {welcomeTarget.loc.phone || welcomeTarget.loc.email}</>
                 )}
                 {welcomeTarget?.kind === "selected" && (
-                  <>To <strong>{selectedOnboardingIds.size} selected location(s)</strong></>
+                  <>To <strong>{selectedIds.size} selected location(s)</strong></>
                 )}
                 {welcomeTarget?.kind === "all-not-onboarded" && (
                   <>To <strong>{eligibleNotOnboarded.length} location(s) not yet onboarded</strong></>
@@ -1184,42 +1082,44 @@ export default function AdminLocations() {
               </DialogDescription>
             </DialogHeader>
 
-            {/* Recipient list — shown for bulk and send-all so admins can see
-                EXACTLY who will receive a message before they hit Send. We
-                show every send-eligible row (no truncation in this dialog
-                context) and call out skipped rows separately so the admin
-                isn't surprised by "Skipped" counts in the response. */}
+            {/* Recipient list for bulk / send-all */}
             {welcomeTarget && welcomeTarget.kind !== "single" && (() => {
+              const ch = welcomeChannel;
+              const needsPhone = ch === "sms" || ch === "both";
+              const needsEmail = ch === "email" || ch === "both";
               const candidates = welcomeTarget.kind === "selected"
-                ? locations.filter((l) => selectedOnboardingIds.has(l.id))
+                ? locations.filter((l) => selectedIds.has(l.id))
                 : locations.filter((l) => l.isActive !== false && !l.onboardedAt);
-              const sendable = candidates.filter((l) => !!l.phone);
-              const skipped = candidates.filter((l) => !l.phone);
+              const sendable = candidates.filter((l) => {
+                if (ch === "sms") return !!l.phone;
+                if (ch === "email") return !!l.email;
+                // 'both': server sends via whichever channel(s) are available, so either phone or email qualifies
+                return !!l.phone || !!l.email;
+              });
+              const skipped = candidates.filter((l) => !sendable.find(s => s.id === l.id));
               return (
                 <div className="space-y-2">
-                  <div className="border rounded-md bg-muted/30 max-h-60 overflow-y-auto p-2" data-testid="recipient-list">
+                  <div className="border rounded-md bg-muted/30 max-h-48 overflow-y-auto p-2" data-testid="recipient-list">
                     <div className="text-xs font-medium mb-1 text-muted-foreground">
                       Will receive a message ({sendable.length})
                     </div>
                     {sendable.length === 0 ? (
-                      <div className="text-xs text-muted-foreground italic">No recipients</div>
+                      <div className="text-xs text-muted-foreground italic">No eligible recipients for this channel.</div>
                     ) : (
                       <ul className="text-xs space-y-0.5">
                         {sendable.map((r) => (
                           <li key={r.id} className="flex justify-between gap-2" data-testid={`recipient-${r.id}`}>
-                            <span className="truncate">
-                              {r.name} <span className="text-muted-foreground">· {r.locationCode}</span>
-                            </span>
-                            <span className="text-muted-foreground shrink-0">{r.phone}</span>
+                            <span className="truncate">{r.name} <span className="text-muted-foreground">· {r.locationCode}</span></span>
+                            <span className="text-muted-foreground shrink-0">{r.phone || r.email}</span>
                           </li>
                         ))}
                       </ul>
                     )}
                   </div>
                   {skipped.length > 0 && (
-                    <div className="border border-amber-300 bg-amber-50 rounded-md max-h-32 overflow-y-auto p-2" data-testid="recipient-skipped-list">
+                    <div className="border border-amber-300 bg-amber-50 rounded-md max-h-24 overflow-y-auto p-2" data-testid="recipient-skipped-list">
                       <div className="text-xs font-medium mb-1 text-amber-800">
-                        Will be skipped — no phone on file ({skipped.length})
+                        Will be skipped — missing contact info for this channel ({skipped.length})
                       </div>
                       <ul className="text-xs space-y-0.5">
                         {skipped.map((r) => (
@@ -1235,29 +1135,77 @@ export default function AdminLocations() {
             })()}
 
             <div className="space-y-4 py-2">
+              {/* Channel picker */}
               <div>
                 <Label className="text-sm font-medium">Channel</Label>
                 <RadioGroup
                   value={welcomeChannel}
                   onValueChange={(v) => setWelcomeChannel(v as OperatorWelcomeChannel)}
-                  className="grid grid-cols-3 gap-2 mt-2"
+                  className="grid grid-cols-2 gap-2 mt-2"
                 >
-                  {[
-                    { v: "sms" as const, label: "SMS", icon: MessageSquare, disabled: !twilioStatusQuery.data?.sms.configured },
-                    { v: "whatsapp" as const, label: "WhatsApp", icon: MessageCircle, disabled: !twilioStatusQuery.data?.whatsapp.configured },
-                    { v: "both" as const, label: "Both", icon: Send, disabled: !twilioStatusQuery.data?.sms.configured && !twilioStatusQuery.data?.whatsapp.configured },
-                  ].map(({ v, label, icon: Icon, disabled }) => (
-                    <Label
-                      key={v}
-                      htmlFor={`channel-${v}`}
-                      className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm ${welcomeChannel === v ? "border-primary bg-primary/5" : "border-input"} ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                      data-testid={`channel-option-${v}`}
-                    >
-                      <RadioGroupItem id={`channel-${v}`} value={v} disabled={disabled} className="sr-only" />
-                      <Icon className="h-4 w-4" />
-                      {label}
-                    </Label>
-                  ))}
+                  {/* SMS */}
+                  <Label
+                    htmlFor="channel-sms"
+                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "sms" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.sms.configured ? "opacity-50" : ""}`}
+                    data-testid="channel-option-sms"
+                  >
+                    <RadioGroupItem id="channel-sms" value="sms" disabled={!serviceStatusQuery.data?.sms.configured} className="sr-only" />
+                    <MessageSquare className="h-4 w-4" />
+                    SMS
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.sms.configured && (
+                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    )}
+                  </Label>
+
+                  {/* Email */}
+                  <Label
+                    htmlFor="channel-email"
+                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "email" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.email?.configured ? "opacity-50" : ""}`}
+                    data-testid="channel-option-email"
+                  >
+                    <RadioGroupItem id="channel-email" value="email" disabled={!serviceStatusQuery.data?.email?.configured} className="sr-only" />
+                    <Mail className="h-4 w-4" />
+                    Email
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.email?.configured && (
+                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    )}
+                  </Label>
+
+                  {/* Both (SMS + Email) */}
+                  {(() => {
+                    const bothEnabled = !!serviceStatusQuery.data?.sms.configured && !!serviceStatusQuery.data?.email?.configured;
+                    return (
+                      <Label
+                        htmlFor="channel-both"
+                        className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "both" ? "border-primary bg-primary/5" : "border-input"} ${!bothEnabled ? "opacity-50" : ""}`}
+                        data-testid="channel-option-both"
+                      >
+                        <RadioGroupItem id="channel-both" value="both" disabled={!bothEnabled} className="sr-only" />
+                        <span className="flex gap-0.5"><MessageSquare className="h-4 w-4" /><Mail className="h-4 w-4" /></span>
+                        Both
+                        {serviceStatusQuery.data && !bothEnabled && (
+                          <span className="text-[10px] text-muted-foreground">Needs both configured</span>
+                        )}
+                      </Label>
+                    );
+                  })()}
+
+                  {/* WhatsApp — disabled, coming soon */}
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <div
+                        className="flex flex-col items-center gap-1 border rounded-md p-2 text-sm opacity-40 cursor-not-allowed select-none border-input"
+                        data-testid="channel-option-whatsapp"
+                      >
+                        <MessageCircle className="h-4 w-4" />
+                        WhatsApp
+                        <span className="text-[10px] text-muted-foreground">Coming soon</span>
+                      </div>
+                    </TooltipTrigger>
+                    <TooltipContent className="max-w-xs text-xs">
+                      WhatsApp requires WhatsApp Business API approval — coming soon.
+                    </TooltipContent>
+                  </Tooltip>
                 </RadioGroup>
                 {welcomeChannel !== defaultChannel && (
                   <button
@@ -1280,132 +1228,161 @@ export default function AdminLocations() {
                 </label>
               </div>
 
-              {twilioStatusQuery.data && (
+              {serviceStatusQuery.data && (
                 <>
-                  {welcomeChannel !== "whatsapp" && !twilioStatusQuery.data.sms.configured && (
+                  {(welcomeChannel === "sms" || welcomeChannel === "both") && !serviceStatusQuery.data.sms.configured && (
                     <p className="text-xs text-destructive flex items-start gap-1">
                       <AlertTriangle className="h-3 w-3 mt-0.5" />
-                      SMS unavailable: {twilioStatusQuery.data.sms.reason}
+                      SMS unavailable: {serviceStatusQuery.data.sms.reason}
                     </p>
                   )}
-                  {welcomeChannel !== "sms" && !twilioStatusQuery.data.whatsapp.configured && (
+                  {(welcomeChannel === "email" || welcomeChannel === "both") && !serviceStatusQuery.data.email?.configured && (
                     <p className="text-xs text-destructive flex items-start gap-1">
                       <AlertTriangle className="h-3 w-3 mt-0.5" />
-                      WhatsApp unavailable: {twilioStatusQuery.data.whatsapp.reason}
+                      Email unavailable: {serviceStatusQuery.data.email?.reason}
                     </p>
                   )}
                 </>
               )}
 
+              {/* Message body — editable for single sends, read-only preview for bulk */}
               {welcomeTarget?.kind === "single" && (
                 <div>
-                  <Label className="text-sm font-medium">Preview</Label>
+                  <Label className="text-sm font-medium">Message</Label>
                   {previewQuery.isLoading && (
                     <div className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
                       <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
                     </div>
                   )}
                   {previewQuery.data && (
-                    <Tabs defaultValue={previewQuery.data.message.resolvedLanguage} className="mt-2">
-                      <TabsList className="grid grid-cols-2 w-full">
-                        <TabsTrigger value="en" data-testid="preview-tab-en">English {previewQuery.data.message.resolvedLanguage === "en" && "(default)"}</TabsTrigger>
-                        <TabsTrigger value="he" data-testid="preview-tab-he">עברית {previewQuery.data.message.resolvedLanguage === "he" && "(default)"}</TabsTrigger>
-                      </TabsList>
-                      <TabsContent value="en">
-                        <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono" data-testid="preview-body-en">
-                          {previewQuery.data.message.en.body}
-                        </pre>
-                      </TabsContent>
-                      <TabsContent value="he">
-                        <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono" data-testid="preview-body-he">
-                          {previewQuery.data.message.he.body}
-                        </pre>
-                      </TabsContent>
-                    </Tabs>
-                  )}
-                  {previewQuery.data?.welcomeUrl && (
-                    <a
-                      href={previewQuery.data.welcomeUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-primary inline-flex items-center gap-1 mt-2"
-                    >
-                      <ExternalLink className="h-3 w-3" /> Open welcome link in a new tab
-                    </a>
+                    <>
+                      <Tabs
+                        defaultValue={previewQuery.data.message.resolvedLanguage}
+                        onValueChange={(lang) => {
+                          const msg = previewQuery.data!.message[lang as "en" | "he"];
+                          const body = (welcomeChannel === "email") ? msg.emailBody : msg.body;
+                          setMessageBody(body);
+                        }}
+                        className="mt-2"
+                      >
+                        <TabsList className="grid grid-cols-2 w-full">
+                          <TabsTrigger value="en" data-testid="preview-tab-en">English {previewQuery.data.message.resolvedLanguage === "en" && "(default)"}</TabsTrigger>
+                          <TabsTrigger value="he" data-testid="preview-tab-he">עברית {previewQuery.data.message.resolvedLanguage === "he" && "(default)"}</TabsTrigger>
+                        </TabsList>
+                        <TabsContent value="en">
+                          <Textarea
+                            className="mt-1 text-xs font-mono min-h-[120px] resize-y"
+                            value={messageBody}
+                            onChange={(e) => setMessageBody(e.target.value)}
+                            dir="ltr"
+                            data-testid="preview-body-en"
+                            placeholder="Message body…"
+                          />
+                        </TabsContent>
+                        <TabsContent value="he">
+                          <Textarea
+                            className="mt-1 text-xs font-mono min-h-[120px] resize-y"
+                            value={messageBody}
+                            onChange={(e) => setMessageBody(e.target.value)}
+                            dir="rtl"
+                            data-testid="preview-body-he"
+                            placeholder="גוף ההודעה…"
+                          />
+                        </TabsContent>
+                      </Tabs>
+                      <p className="text-[10px] text-muted-foreground mt-1">You can freely edit the message above before sending.</p>
+                      {previewQuery.data.welcomeUrl && (
+                        <a
+                          href={previewQuery.data.welcomeUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="text-xs text-primary inline-flex items-center gap-1 mt-1"
+                        >
+                          <ExternalLink className="h-3 w-3" /> Open welcome link in a new tab
+                        </a>
+                      )}
+                    </>
                   )}
                 </div>
               )}
 
+              {/* Bulk message body — editable template + read-only sample preview */}
               {welcomeTarget && welcomeTarget.kind !== "single" && (
-                <div>
-                  <Label className="text-sm font-medium">Message preview</Label>
-                  <p className="text-xs text-muted-foreground mt-1 mb-2">
-                    Each location's message uses their own language and a unique welcome link. Sample(s) below show the actual outgoing text using a real recipient from this batch.
-                  </p>
-                  {!bulkPreviewSamples.en && !bulkPreviewSamples.he && (
-                    <div className="text-xs text-muted-foreground italic">No sendable recipients to preview.</div>
+                <div className="space-y-3">
+                  <div>
+                    <div className="flex items-center justify-between">
+                      <Label className="text-sm font-medium">Message template</Label>
+                      <div className="flex gap-1">
+                        <button type="button" className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50" onClick={() => setMessageBody(BULK_TEMPLATE_EN)}>EN template</button>
+                        <button type="button" className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50" onClick={() => setMessageBody(BULK_TEMPLATE_HE)}>עב template</button>
+                      </div>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5 mb-1">
+                      Use <code className="bg-muted px-0.5 rounded">{"{{name}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{code}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{pin}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{url}}"}</code> — each will be replaced with the recipient's actual values.
+                    </p>
+                    <Textarea
+                      className="mt-1 text-xs font-mono min-h-[120px] resize-y"
+                      value={messageBody}
+                      onChange={(e) => setMessageBody(e.target.value)}
+                      dir="auto"
+                      data-testid="bulk-message-body"
+                      placeholder="Message template…"
+                    />
+                    <p className="text-[10px] text-muted-foreground mt-1">You can freely edit the template above before sending.</p>
+                  </div>
+
+                  {/* Read-only per-location sample for reference */}
+                  {(bulkPreviewSamples.en || bulkPreviewSamples.he) && (
+                    <details className="text-xs">
+                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
+                        Sample preview (how it looks for a specific location)
+                      </summary>
+                      {(() => {
+                        const hasEn = !!bulkPreviewSamples.en;
+                        const hasHe = !!bulkPreviewSamples.he;
+                        const defaultTab = hasEn ? "en" : "he";
+                        return (
+                          <Tabs defaultValue={defaultTab} className="mt-1">
+                            <TabsList className={`grid w-full ${hasEn && hasHe ? "grid-cols-2" : "grid-cols-1"}`}>
+                              {hasEn && <TabsTrigger value="en" data-testid="bulk-preview-tab-en">English · {bulkPreviewSamples.en?.locationCode}</TabsTrigger>}
+                              {hasHe && <TabsTrigger value="he" data-testid="bulk-preview-tab-he">עברית · {bulkPreviewSamples.he?.locationCode}</TabsTrigger>}
+                            </TabsList>
+                            {hasEn && (
+                              <TabsContent value="en">
+                                {bulkPreviewEnQuery.isLoading && <div className="flex items-center gap-2 mt-2"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</div>}
+                                {bulkPreviewEnQuery.data && (
+                                  <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-en">
+                                    {welcomeChannel === "email" ? bulkPreviewEnQuery.data.message.en.emailBody : bulkPreviewEnQuery.data.message.en.body}
+                                  </pre>
+                                )}
+                              </TabsContent>
+                            )}
+                            {hasHe && (
+                              <TabsContent value="he">
+                                {bulkPreviewHeQuery.isLoading && <div className="flex items-center gap-2 mt-2"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</div>}
+                                {bulkPreviewHeQuery.data && (
+                                  <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-he">
+                                    {welcomeChannel === "email" ? bulkPreviewHeQuery.data.message.he.emailBody : bulkPreviewHeQuery.data.message.he.body}
+                                  </pre>
+                                )}
+                              </TabsContent>
+                            )}
+                          </Tabs>
+                        );
+                      })()}
+                    </details>
                   )}
-                  {(bulkPreviewSamples.en || bulkPreviewSamples.he) && (() => {
-                    const hasEn = !!bulkPreviewSamples.en;
-                    const hasHe = !!bulkPreviewSamples.he;
-                    const defaultTab = hasEn ? "en" : "he";
-                    return (
-                      <Tabs defaultValue={defaultTab} className="mt-1">
-                        <TabsList className={`grid w-full ${hasEn && hasHe ? "grid-cols-2" : "grid-cols-1"}`}>
-                          {hasEn && (
-                            <TabsTrigger value="en" data-testid="bulk-preview-tab-en">
-                              English sample · {bulkPreviewSamples.en?.locationCode}
-                            </TabsTrigger>
-                          )}
-                          {hasHe && (
-                            <TabsTrigger value="he" data-testid="bulk-preview-tab-he">
-                              עברית sample · {bulkPreviewSamples.he?.locationCode}
-                            </TabsTrigger>
-                          )}
-                        </TabsList>
-                        {hasEn && (
-                          <TabsContent value="en">
-                            {bulkPreviewEnQuery.isLoading && (
-                              <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
-                                <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
-                              </div>
-                            )}
-                            {bulkPreviewEnQuery.data && (
-                              <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-en">
-                                {bulkPreviewEnQuery.data.message.en.body}
-                              </pre>
-                            )}
-                          </TabsContent>
-                        )}
-                        {hasHe && (
-                          <TabsContent value="he">
-                            {bulkPreviewHeQuery.isLoading && (
-                              <div className="text-xs text-muted-foreground mt-2 flex items-center gap-2">
-                                <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
-                              </div>
-                            )}
-                            {bulkPreviewHeQuery.data && (
-                              <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-he">
-                                {bulkPreviewHeQuery.data.message.he.body}
-                              </pre>
-                            )}
-                          </TabsContent>
-                        )}
-                      </Tabs>
-                    );
-                  })()}
                 </div>
               )}
             </div>
 
             <DialogFooter>
               <Button variant="outline" onClick={() => setWelcomeDialogOpen(false)} disabled={dialogIsPending}>Cancel</Button>
-              <Button
-                onClick={sendFromDialog}
-                disabled={dialogIsPending}
-                data-testid="button-send-welcome-confirm"
-              >
-                {dialogIsPending ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</> : <><Send className="h-4 w-4 mr-2" />Send Welcome</>}
+              <Button onClick={sendFromDialog} disabled={dialogIsPending} data-testid="button-send-welcome-confirm">
+                {dialogIsPending
+                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</>
+                  : <><Send className="h-4 w-4 mr-2" />Send Welcome</>
+                }
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1435,96 +1412,50 @@ export default function AdminLocations() {
                   id="admin-new-pin"
                   type="password"
                   inputMode="numeric"
-                  placeholder="4–6 digits"
                   maxLength={6}
+                  placeholder="4–6 digits"
                   value={newPin}
-                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={(e) => setNewPin(e.target.value.replace(/\D/g, ""))}
+                  data-testid="input-new-pin"
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="admin-confirm-pin">Confirm New PIN</Label>
+                <Label htmlFor="admin-confirm-pin">Confirm PIN</Label>
                 <Input
                   id="admin-confirm-pin"
                   type="password"
                   inputMode="numeric"
-                  placeholder="Re-enter PIN"
                   maxLength={6}
+                  placeholder="Repeat PIN"
                   value={confirmPin}
-                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                  onChange={(e) => setConfirmPin(e.target.value.replace(/\D/g, ""))}
+                  data-testid="input-confirm-pin"
                 />
-                {confirmPin && newPin !== confirmPin && (
-                  <p className="text-sm text-red-500">PINs do not match</p>
-                )}
               </div>
+              {newPin && confirmPin && newPin !== confirmPin && (
+                <p className="text-xs text-destructive">PINs do not match.</p>
+              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsPinDialogOpen(false)}>
-                Cancel
-              </Button>
+              <Button variant="outline" onClick={() => setIsPinDialogOpen(false)}>Cancel</Button>
               <Button
                 onClick={() => {
-                  if (pinLocation) {
-                    changePinMutation.mutate({ id: pinLocation.id, newPin, confirmPin });
-                  }
+                  if (!pinLocation) return;
+                  changePinMutation.mutate({ id: pinLocation.id, newPin, confirmPin });
                 }}
-                disabled={
-                  changePinMutation.isPending ||
-                  newPin.length < 4 ||
-                  confirmPin.length < 4 ||
-                  newPin !== confirmPin
-                }
+                disabled={changePinMutation.isPending || !newPin || !confirmPin || newPin !== confirmPin || newPin.length < 4}
+                data-testid="button-save-pin"
               >
-                {changePinMutation.isPending ? (
-                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Saving...</>
-                ) : (
-                  <><ShieldCheck className="h-4 w-4 mr-2" /> Save PIN</>
-                )}
+                {changePinMutation.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
+                  : <><ShieldCheck className="h-4 w-4 mr-2" />Save PIN</>
+                }
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
     </div>
-  );
-}
-
-function OnboardingStatusBadge({ status }: { status: "onboarded" | "sent" | "failed" | "not-sent" }) {
-  if (status === "onboarded") return <Badge className="bg-green-600 hover:bg-green-600 text-white text-xs w-fit">Onboarded</Badge>;
-  if (status === "sent") return <Badge variant="secondary" className="text-xs w-fit">Sent</Badge>;
-  if (status === "failed") return <Badge variant="destructive" className="text-xs w-fit">Failed</Badge>;
-  return <Badge variant="outline" className="text-xs w-fit">Not sent</Badge>;
-}
-
-function TwilioStatusBadge({
-  status,
-  loading,
-}: {
-  status: { sms: { configured: boolean; reason?: string }; whatsapp: { configured: boolean; reason?: string } } | undefined;
-  loading: boolean;
-}) {
-  if (loading || !status) {
-    return <Badge variant="outline" className="text-xs"><Loader2 className="h-3 w-3 animate-spin mr-1" />Twilio</Badge>;
-  }
-  const smsOk = status.sms.configured;
-  const waOk = status.whatsapp.configured;
-  return (
-    <div className="flex gap-1">
-      <Badge
-        variant={smsOk ? "secondary" : "outline"}
-        className={`text-xs ${smsOk ? "" : "text-muted-foreground"}`}
-        title={smsOk ? "SMS ready" : status.sms.reason}
-        data-testid="badge-twilio-sms"
-      >
-        <MessageSquare className="h-3 w-3 mr-1" /> {smsOk ? "SMS ✓" : "SMS off"}
-      </Badge>
-      <Badge
-        variant={waOk ? "secondary" : "outline"}
-        className={`text-xs ${waOk ? "" : "text-muted-foreground"}`}
-        title={waOk ? "WhatsApp ready" : status.whatsapp.reason}
-        data-testid="badge-twilio-wa"
-      >
-        <MessageCircle className="h-3 w-3 mr-1" /> {waOk ? "WA ✓" : "WA off"}
-      </Badge>
-    </div>
+    </TooltipProvider>
   );
 }

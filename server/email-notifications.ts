@@ -94,15 +94,13 @@ export interface OperatorWelcomeContext {
   defaultPin: string;
   /** Optional personalized opening line; if omitted, a neutral one is used. */
   opener?: string;
+  /** Optional fully-custom body (admin-edited). Overrides template when set. */
+  customBody?: string;
 }
 
-function buildWelcomeEmail(ctx: OperatorWelcomeContext): { subject: string; body: string } {
-  const subject = `Your Baby Banz Gemach dashboard is ready — ${ctx.locationName}`;
-  const opener =
-    (ctx.opener && ctx.opener.trim()) ||
-    `Quick note to confirm the ${ctx.locationName} dashboard is set up and ready whenever you are.`;
-
-  const body = `${opener}
+export function buildWelcomeEmailBody(ctx: Omit<OperatorWelcomeContext, 'customBody' | 'opener'>): string {
+  const opener = `Quick note to confirm the ${ctx.locationName} dashboard is set up and ready whenever you are.`;
+  return `${opener}
 
 Log in:  ${ctx.dashboardUrl}
 Code:    ${ctx.locationCode}
@@ -112,6 +110,13 @@ That's it — no action needed today. Reply to this email any time you need a ha
 
 — Baby Banz Gemach
 `;
+}
+
+function buildWelcomeEmail(ctx: OperatorWelcomeContext): { subject: string; body: string } {
+  const subject = `Your Baby Banz Gemach dashboard is ready — ${ctx.locationName}`;
+  const body = ctx.customBody
+    ? ctx.customBody
+    : buildWelcomeEmailBody(ctx);
   return { subject, body };
 }
 
