@@ -4105,10 +4105,19 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const newRefundedCents = finalCumulativeCents;
       const newStatus = finalStatus;
 
-      // Inventory restock is opt-in: only when the operator confirms the item
-      // is physically being returned alongside the refund.
-      if (itemPhysicallyReturned && transaction.headbandColor && transaction.locationId) {
-        await storage.adjustInventory(transaction.locationId, transaction.headbandColor, 1);
+      // Inventory restock + return-state recording are opt-in: only when the
+      // operator confirms the item is physically being returned alongside the
+      // refund. Idempotency: we only restock and only flip isReturned=true if
+      // the transaction was NOT already marked returned. This guards against
+      // repeated refund retries (e.g., a network-flaky operator clicking twice)
+      // double-restocking inventory or overwriting an earlier actualReturnDate.
+      if (itemPhysicallyReturned && !transaction.isReturned) {
+        // markTransactionReturned() flips isReturned + sets actualReturnDate
+        // and is the same code path used by the normal return flow, so the
+        // resulting transaction state is indistinguishable from a wizard
+        // return. Inventory restock is also done by that helper, so we do
+        // NOT also call adjustInventory here (which would double-restock).
+        await storage.markTransactionReturned(transactionId);
       }
 
       // Audit log: actor, amount, cumulative, status, reason, Stripe id, restock.
