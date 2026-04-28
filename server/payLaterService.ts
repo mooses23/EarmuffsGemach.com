@@ -10,6 +10,12 @@ import { notifyBorrowerBeforeCharge, notifyBorrowerAfterCharge } from './chargeN
 const DEFAULT_MAX_CARD_AGE_DAYS = 90;
 const MAX_CARD_AGE_SETTING_KEY = 'stripe.maxCardAgeDays';
 
+// Task #39: pre-charge notification gate. When enabled (default: false), the
+// off-session charge is blocked if the borrower cannot be notified (no phone,
+// no email, or send failed). Set stripe.requirePreChargeNotification = 'true'
+// in global_settings to enforce this policy.
+const REQUIRE_NOTIFY_SETTING_KEY = 'stripe.requirePreChargeNotification';
+
 export async function getMaxCardAgeDays(): Promise<number> {
   const row = await storage.getGlobalSetting(MAX_CARD_AGE_SETTING_KEY);
   if (!row?.value) return DEFAULT_MAX_CARD_AGE_DAYS;
@@ -20,6 +26,15 @@ export async function getMaxCardAgeDays(): Promise<number> {
 export async function setMaxCardAgeDays(days: number): Promise<void> {
   if (!Number.isFinite(days) || days <= 0) throw new Error('maxCardAgeDays must be a positive number');
   await storage.setGlobalSetting(MAX_CARD_AGE_SETTING_KEY, String(Math.floor(days)));
+}
+
+export async function getRequirePreChargeNotification(): Promise<boolean> {
+  const row = await storage.getGlobalSetting(REQUIRE_NOTIFY_SETTING_KEY);
+  return row?.value === 'true';
+}
+
+export async function setRequirePreChargeNotification(required: boolean): Promise<void> {
+  await storage.setGlobalSetting(REQUIRE_NOTIFY_SETTING_KEY, required ? 'true' : 'false');
 }
 
 interface CreateSetupIntentResult {
@@ -291,31 +306,55 @@ export class PayLaterService {
     const beforeJson = JSON.stringify(transaction);
     const stripe = getStripeClient();
 
-    // Task #39: pre-charge heads-up notification. Best effort, never blocks.
-    // Reduces "I don't recognize this charge" disputes by giving the borrower
-    // a calm warning + a number to call before the charge actually runs.
+    // Task #39: pre-charge heads-up notification.
+    // If the global setting stripe.requirePreChargeNotification='true', we
+    // BLOCK the charge when notification fails (no contact channel or send
+    // error). When the setting is false/absent (the default) we still attempt
+    // notification but allow the charge to proceed regardless of outcome.
     const location = await storage.getLocation(transaction.locationId);
     const amountToChargeCents =
       transaction.amountPlannedCents || Math.round(transaction.depositAmount * 100);
+    const requireNotification = await getRequirePreChargeNotification();
+
     if (location) {
-      try {
-        const notice = await notifyBorrowerBeforeCharge(transaction, location, amountToChargeCents, operatorNote);
-        await storage.updateTransaction(transaction.id, {
-          chargeNotificationSentAt: notice.sent ? new Date() : undefined,
-          chargeNotificationChannel: notice.channel,
-        });
+      const notice = await notifyBorrowerBeforeCharge(transaction, location, amountToChargeCents, operatorNote);
+
+      await storage.updateTransaction(transaction.id, {
+        chargeNotificationSentAt: notice.sent ? new Date() : undefined,
+        chargeNotificationChannel: notice.channel,
+      });
+      await storage.createAuditLog({
+        actorUserId: operatorUserId,
+        actorType: operatorUserId ? 'operator' : 'system',
+        action: 'pre_charge_notification',
+        entityType: 'transaction',
+        entityId: transaction.id,
+        afterJson: JSON.stringify(notice),
+      });
+
+      // Enforce notification gate if policy requires it.
+      if (requireNotification && !notice.sent) {
         await storage.createAuditLog({
           actorUserId: operatorUserId,
           actorType: operatorUserId ? 'operator' : 'system',
-          action: 'pre_charge_notification',
+          action: 'charge_blocked_notification_required',
           entityType: 'transaction',
           entityId: transaction.id,
-          afterJson: JSON.stringify(notice),
+          afterJson: JSON.stringify({ reason: notice.error }),
         });
-      } catch (notifyErr: any) {
-        // Logged, swallowed — never block a legitimate charge on a notify failure.
-        console.error('[payLaterService] pre-charge notification failed:', notifyErr?.message || notifyErr);
+        return {
+          success: false,
+          status: 'CHARGE_FAILED',
+          errorMessage: `Charge blocked: pre-charge notification could not be sent (${notice.error || 'no channel available'}). Add a phone or email for this borrower, or disable the notification requirement in admin settings.`,
+        };
       }
+    } else if (requireNotification) {
+      // No location means we cannot determine a channel — block.
+      return {
+        success: false,
+        status: 'CHARGE_FAILED',
+        errorMessage: 'Charge blocked: pre-charge notification required but location not found.',
+      };
     }
 
     try {

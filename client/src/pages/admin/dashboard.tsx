@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { 
   DropdownMenu,
   DropdownMenuContent,
@@ -11,15 +12,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation } from "@tanstack/react-query";
+import { queryClient, apiRequest } from "@/lib/queryClient";
 import { Location, Transaction, GemachApplication, Contact } from "@/lib/types";
 import { 
   Users, MapPin, FileText, Package, Settings, Grid, List, 
   DollarSign, RefreshCw, AlarmClock, CreditCard, CheckCircle, BarChart3, Mail, MessageSquare,
-  Shield, AlertTriangle, BookOpen
+  Shield, AlertTriangle, BookOpen, Save
 } from "lucide-react";
 import { Link } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
+import { useToast } from "@/hooks/use-toast";
 
 interface DisputeSummaryRow {
   locationId: number;
@@ -33,6 +36,139 @@ interface DisputeSummary {
   warnThreshold: number;
   windowDays: number;
   rows: DisputeSummaryRow[];
+}
+
+interface LocationFee { locationId: number; name: string; processingFeePercent: number; processingFeeFixed: number; }
+interface StripeAdminSettings { maxCardAgeDays: number; requirePreChargeNotification: boolean; locationFees: LocationFee[]; }
+
+function StripeSettingsCard() {
+  const { toast } = useToast();
+  const { data, isLoading } = useQuery<StripeAdminSettings>({
+    queryKey: ["/api/admin/settings/stripe"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/settings/stripe", { credentials: "include" });
+      return res.json();
+    },
+  });
+
+  const [maxCardAgeDays, setMaxCardAgeDays] = useState<string>("");
+  const [requireNotify, setRequireNotify] = useState<boolean>(false);
+  const [feeEdits, setFeeEdits] = useState<Record<number, { processingFeePercent: string; processingFeeFixed: string }>>({});
+
+  // Seed local state once data loads
+  const [seeded, setSeeded] = useState(false);
+  if (data && !seeded) {
+    setMaxCardAgeDays(String(data.maxCardAgeDays));
+    setRequireNotify(data.requirePreChargeNotification);
+    const edits: typeof feeEdits = {};
+    for (const loc of data.locationFees ?? []) {
+      edits[loc.locationId] = {
+        processingFeePercent: String(loc.processingFeePercent),
+        processingFeeFixed: String(loc.processingFeeFixed),
+      };
+    }
+    setFeeEdits(edits);
+    setSeeded(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const locationFees = Object.entries(feeEdits).map(([id, v]) => ({
+        locationId: Number(id),
+        processingFeePercent: Number(v.processingFeePercent),
+        processingFeeFixed: Number(v.processingFeeFixed),
+      }));
+      const res = await apiRequest("PATCH", "/api/admin/settings/stripe", {
+        maxCardAgeDays: Number(maxCardAgeDays),
+        requirePreChargeNotification: requireNotify,
+        locationFees,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/stripe"] });
+      setSeeded(false);
+      toast({ title: "Saved", description: "Stripe settings updated." });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <Card data-testid="card-stripe-settings">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Settings className="h-5 w-5" />
+          Stripe charge settings
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">Loading…</p>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-xs font-medium mb-1">Max card age (days)</label>
+                <input
+                  type="number" min={1} max={365}
+                  className="w-full border rounded px-2 py-1 text-sm"
+                  value={maxCardAgeDays}
+                  onChange={e => setMaxCardAgeDays(e.target.value)}
+                />
+                <p className="text-xs text-muted-foreground mt-1">Cards older than this are blocked from off-session charges (default 90).</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium mb-1">Require pre-charge notification</label>
+                <div className="flex items-center gap-2 mt-2">
+                  <Switch checked={requireNotify} onCheckedChange={setRequireNotify} data-testid="switch-require-notify" />
+                  <span className="text-sm">{requireNotify ? "Enforced" : "Best-effort (default)"}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">When on, charges are blocked if the borrower cannot be notified.</p>
+              </div>
+            </div>
+
+            {(data?.locationFees ?? []).length > 0 && (
+              <div>
+                <p className="text-xs font-medium mb-2">Per-location processing fee (applied to card deposits)</p>
+                <div className="space-y-2">
+                  {(data?.locationFees ?? []).map(loc => (
+                    <div key={loc.locationId} className="grid grid-cols-3 gap-2 items-center">
+                      <span className="text-sm truncate">{loc.name}</span>
+                      <div>
+                        <label className="text-xs text-muted-foreground">% (basis pts)</label>
+                        <input
+                          type="number" min={0} max={10000}
+                          className="w-full border rounded px-2 py-1 text-sm"
+                          value={feeEdits[loc.locationId]?.processingFeePercent ?? ""}
+                          onChange={e => setFeeEdits(prev => ({ ...prev, [loc.locationId]: { ...prev[loc.locationId], processingFeePercent: e.target.value } }))}
+                          title="Basis points: 290 = 2.90%"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground">Fixed (¢)</label>
+                        <input
+                          type="number" min={0} max={9999}
+                          className="w-full border rounded px-2 py-1 text-sm"
+                          value={feeEdits[loc.locationId]?.processingFeeFixed ?? ""}
+                          onChange={e => setFeeEdits(prev => ({ ...prev, [loc.locationId]: { ...prev[loc.locationId], processingFeeFixed: e.target.value } }))}
+                          title="Cents: 30 = $0.30"
+                        />
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+              <Save className="h-4 w-4 mr-2" />
+              {saveMutation.isPending ? "Saving…" : "Save settings"}
+            </Button>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
 }
 
 function StripeRiskCard() {
@@ -325,6 +461,7 @@ export default function Dashboard() {
                 </CardContent>
               </Card>
 
+              <StripeSettingsCard />
               <StripeRiskCard />
 
               <Card>

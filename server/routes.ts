@@ -10,7 +10,7 @@ import { AuditTrailService } from "./audit-trail.js";
 import { PaymentAnalyticsEngine } from "./analytics-engine.js";
 import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
-import { PayLaterService, prepareBorrowerStatusToken, commitBorrowerStatusToken, getMaxCardAgeDays, setMaxCardAgeDays } from "./payLaterService.js";
+import { PayLaterService, prepareBorrowerStatusToken, commitBorrowerStatusToken, getMaxCardAgeDays, setMaxCardAgeDays, getRequirePreChargeNotification, setRequirePreChargeNotification } from "./payLaterService.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
 import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
 import { getTwilioConfigStatus, sendReturnReminderSMS, normalizePhoneForSms, validateTwilioSignature } from "./twilio-client.js";
@@ -3940,28 +3940,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Admin: read Stripe-policy settings.
+  // Admin: read Stripe-policy settings (global + per-location fee config).
   app.get("/api/admin/settings/stripe", async (req, res) => {
     if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
       return res.status(403).json({ message: "Admin access required" });
     }
     const maxCardAgeDays = await getMaxCardAgeDays();
-    res.json({ maxCardAgeDays });
+    const requirePreChargeNotification = await getRequirePreChargeNotification();
+    // Return per-location fee config so admin UI can display it.
+    const locations = await storage.getAllLocations();
+    const locationFees = locations.map((loc: LocationRow) => ({
+      locationId: loc.id,
+      name: loc.name,
+      processingFeePercent: loc.processingFeePercent ?? 300,   // basis points (300 = 3.00%)
+      processingFeeFixed: loc.processingFeeFixed ?? 30,        // cents (30 = $0.30)
+    }));
+    res.json({ maxCardAgeDays, requirePreChargeNotification, locationFees });
   });
 
-  // Admin: update Stripe-policy settings (currently just stale-card threshold).
+  // Admin: update Stripe-policy settings.
+  // Accepts: maxCardAgeDays, requirePreChargeNotification, locationFees (array).
   app.patch("/api/admin/settings/stripe", async (req, res) => {
     if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
       return res.status(403).json({ message: "Admin access required" });
     }
     try {
-      const { maxCardAgeDays } = req.body || {};
-      const n = Number(maxCardAgeDays);
-      if (!Number.isFinite(n) || n <= 0 || n > 365) {
-        return res.status(400).json({ message: "maxCardAgeDays must be 1-365" });
+      const { maxCardAgeDays, requirePreChargeNotification, locationFees } = req.body || {};
+
+      if (maxCardAgeDays !== undefined) {
+        const n = Number(maxCardAgeDays);
+        if (!Number.isFinite(n) || n <= 0 || n > 365) {
+          return res.status(400).json({ message: "maxCardAgeDays must be 1-365" });
+        }
+        await setMaxCardAgeDays(Math.floor(n));
       }
-      await setMaxCardAgeDays(Math.floor(n));
-      res.json({ maxCardAgeDays: Math.floor(n) });
+
+      if (requirePreChargeNotification !== undefined) {
+        await setRequirePreChargeNotification(Boolean(requirePreChargeNotification));
+      }
+
+      // Update per-location fee config if provided.
+      if (Array.isArray(locationFees)) {
+        for (const item of locationFees) {
+          const locId = Number(item?.locationId);
+          if (!Number.isFinite(locId) || locId <= 0) continue;
+          const patch: Record<string, number> = {};
+          if (Number.isFinite(Number(item?.processingFeePercent))) {
+            patch.processingFeePercent = Math.max(0, Math.floor(Number(item.processingFeePercent)));
+          }
+          if (Number.isFinite(Number(item?.processingFeeFixed))) {
+            patch.processingFeeFixed = Math.max(0, Math.floor(Number(item.processingFeeFixed)));
+          }
+          if (Object.keys(patch).length > 0) {
+            await storage.updateLocation(locId, patch);
+          }
+        }
+      }
+
+      const updatedMaxCardAgeDays = await getMaxCardAgeDays();
+      const updatedRequireNotification = await getRequirePreChargeNotification();
+      res.json({ maxCardAgeDays: updatedMaxCardAgeDays, requirePreChargeNotification: updatedRequireNotification });
     } catch (error: any) {
       console.error("admin/settings/stripe PATCH error:", error);
       res.status(500).json({ message: error.message || "Failed to update settings" });
