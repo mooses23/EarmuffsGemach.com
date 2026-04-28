@@ -542,7 +542,9 @@ export const translations = {
     // Unified Inbox
     inboxTitle: "Inbox",
     inboxSubtitle: "All contact-form messages and Gmail emails in one place",
-    inboxSearchPlaceholder: "Search by sender, subject, or content...",
+    inboxSearchPlaceholder: "Search any message in a thread (sender, subject, or content)…",
+    inboxFilterUnreplied: "Needs reply",
+    inboxFilterReplied: "Replied",
     inboxSourceEmail: "Email",
     inboxSourceForm: "Web Form",
     inboxReplied: "Replied",
@@ -1712,7 +1714,9 @@ export const translations = {
     // Unified Inbox
     inboxTitle: "תיבת הדואר",
     inboxSubtitle: "כל ההודעות מטופס יצירת קשר ומ-Gmail במקום אחד",
-    inboxSearchPlaceholder: "חיפוש לפי שולח, נושא או תוכן...",
+    inboxSearchPlaceholder: "חיפוש בכל הודעה בשיחה (שולח, נושא או תוכן)…",
+    inboxFilterUnreplied: "ממתין למענה",
+    inboxFilterReplied: "נענה",
     inboxSourceEmail: "אימייל",
     inboxSourceForm: "טופס באתר",
     inboxReplied: "נענה",

@@ -66,6 +66,7 @@ import type { TranslationKey } from "@/lib/translations";
 
 type SourceFilter = "all" | "email" | "form";
 type ReadFilter = "all" | "unread" | "read";
+type ReplyFilter = "all" | "unreplied" | "replied";
 type Folder = "inbox" | "spam" | "trash";
 
 interface GmailEmail {
@@ -204,6 +205,7 @@ export default function AdminInbox() {
   const [search, setSearch] = useState("");
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>("all");
   const [readFilter, setReadFilter] = useState<ReadFilter>("all");
+  const [replyFilter, setReplyFilter] = useState<ReplyFilter>("all");
   const [folder, setFolder] = useState<Folder>("inbox");
   // Bulk-select mode lets the admin tick multiple rows and apply a single
   // batch action (Archive / Trash / Report-spam / Mark read) instead of
@@ -378,21 +380,13 @@ export default function AdminInbox() {
     return true;
   });
 
+  // Source filter still operates per-item (a form-only or email-only view of
+  // the folder). Read/replied/search filters move to the THREAD level below
+  // so a long thread isn't reduced to a partial transcript by a search hit
+  // on an old message — the row should appear with its full message count
+  // even when the match is buried in the conversation.
   const filtered = folderFiltered.filter((it) => {
     if (sourceFilter !== "all" && it.source !== sourceFilter) return false;
-    if (readFilter === "read" && !it.isRead) return false;
-    if (readFilter === "unread" && it.isRead) return false;
-    if (search) {
-      const q = search.toLowerCase();
-      if (
-        !it.fromName.toLowerCase().includes(q) &&
-        !it.fromEmail.toLowerCase().includes(q) &&
-        !it.subject.toLowerCase().includes(q) &&
-        !it.body.toLowerCase().includes(q)
-      ) {
-        return false;
-      }
-    }
     return true;
   });
 
@@ -448,7 +442,67 @@ export default function AdminInbox() {
     });
   };
 
-  const threadGroups: InboxThread[] = useMemo(() => buildGroups(filtered), [filtered]);
+  // Replied-state lookup at the thread level. For Gmail threads every
+  // member shares the same threadId so the existing per-item lookup is
+  // sufficient. For form threads the saved reply is keyed by the original
+  // contact id, so we walk every sibling and surface the most recent
+  // replied-at timestamp. Defined here (above threadGroups) because the
+  // visible-list memo uses it to apply the replied/un-replied filter.
+  const lookupRepliedForGroup = (g: InboxThread): string | null => {
+    if (g.latest.source === "email") return lookupReplied(g.latest);
+    let latest: string | null = null;
+    for (const m of g.members) {
+      const r = lookupReplied(m);
+      if (r === null) continue;
+      if (latest === null || (r && r.localeCompare(latest) > 0)) latest = r;
+    }
+    return latest;
+  };
+
+  // Build thread groups first (so messageCount stays full), then apply the
+  // read/replied/search filters at the THREAD level. A thread matches the
+  // search if ANY of its messages contain the query — so a hit in an old
+  // message correctly surfaces the conversation row with its full
+  // "{N} messages" badge intact, instead of dropping the thread entirely or
+  // collapsing it to just the matching message.
+  const threadGroups: InboxThread[] = useMemo(() => {
+    const allGroups = buildGroups(filtered);
+    const q = search.trim().toLowerCase();
+    return allGroups.filter((g) => {
+      // Read filter — a thread is "unread" if any sibling is unread, "read"
+      // when every sibling has been read.
+      if (readFilter === "unread" && g.unreadCount === 0) return false;
+      if (readFilter === "read" && g.unreadCount > 0) return false;
+
+      // Replied filter — operates against the per-thread replied lookup so
+      // it stays accurate for both Gmail (one shared threadId) and form
+      // (per-contact saved replies, latest wins).
+      if (replyFilter !== "all") {
+        const repliedAt = lookupRepliedForGroup(g);
+        if (replyFilter === "replied" && repliedAt === null) return false;
+        if (replyFilter === "unreplied" && repliedAt !== null) return false;
+      }
+
+      // Search — match across every message in the thread, not just the
+      // latest. fromName/email tend to be identical across siblings, but
+      // subject and body can differ (especially with Re:/Fwd: variants).
+      if (q) {
+        const hit = g.members.some((m) =>
+          m.fromName.toLowerCase().includes(q) ||
+          m.fromEmail.toLowerCase().includes(q) ||
+          m.subject.toLowerCase().includes(q) ||
+          m.body.toLowerCase().includes(q),
+        );
+        if (!hit) return false;
+      }
+      return true;
+    });
+    // `repliedRefMap` is the underlying data source `lookupRepliedForGroup`
+    // reads from. Including it in deps ensures the visible list recomputes
+    // when the replied-refs query loads or refreshes — without it, an admin
+    // who switches to "Needs reply" before the refs query resolves would see
+    // stale results until another listed dep changed.
+  }, [filtered, readFilter, replyFilter, search, repliedRefMap]);
 
   // Canonical thread map across ALL loaded messages (no filters
   // applied). Mutation handlers — bulk actions, swipe gestures, detail
@@ -465,22 +519,6 @@ export default function AdminInbox() {
     if (!item) return [];
     const g = allThreadGroupsByKey.get(groupKey(item));
     return g?.members ?? [item];
-  };
-
-  // Replied-state lookup at the thread level. For Gmail threads every
-  // member shares the same threadId so the existing per-item lookup is
-  // sufficient. For form threads the saved reply is keyed by the original
-  // contact id, so we walk every sibling and surface the most recent
-  // replied-at timestamp.
-  const lookupRepliedForGroup = (g: InboxThread): string | null => {
-    if (g.latest.source === "email") return lookupReplied(g.latest);
-    let latest: string | null = null;
-    for (const m of g.members) {
-      const r = lookupReplied(m);
-      if (r === null) continue;
-      if (latest === null || (r && r.localeCompare(latest) > 0)) latest = r;
-    }
-    return latest;
   };
 
   // Items currently selected in bulk mode, resolved against the visible list.
@@ -1679,11 +1717,31 @@ export default function AdminInbox() {
                   {r === "all" ? t("msgAll") : r === "unread" ? t("unread") : t("read")}
                 </Button>
               ))}
-              {(sourceFilter !== "all" || readFilter !== "all" || search) && (
+              <div className="w-px h-6 bg-border mx-1" />
+              {/* Reply-state filter — pairs with the read filter so admins
+                  can quickly narrow the list to "threads that still need a
+                  reply" (the most common triage need now that conversations
+                  are collapsed into one row each). */}
+              {(["all", "unreplied", "replied"] as ReplyFilter[]).map((r) => (
+                <Button
+                  key={r}
+                  variant={replyFilter === r ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setReplyFilter(r)}
+                  data-testid={`filter-reply-${r}`}
+                >
+                  {r === "all"
+                    ? t("msgAll")
+                    : r === "unreplied"
+                      ? t("inboxFilterUnreplied")
+                      : t("inboxFilterReplied")}
+                </Button>
+              ))}
+              {(sourceFilter !== "all" || readFilter !== "all" || replyFilter !== "all" || search) && (
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => { setSourceFilter("all"); setReadFilter("all"); setSearch(""); }}
+                  onClick={() => { setSourceFilter("all"); setReadFilter("all"); setReplyFilter("all"); setSearch(""); }}
                   data-testid="button-clear-filters"
                 >
                   {t("inboxClearFilters")}
