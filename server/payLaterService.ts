@@ -2,7 +2,7 @@ import { getStripeClient } from './stripeClient.js';
 import { storage } from './storage.js';
 import { randomBytes, createHash } from 'crypto';
 import type { Transaction, PayLaterStatus } from '../shared/schema.js';
-import { computeFeeForLocation, computeFeeForPaymentMethod } from './depositFees.js';
+import { computeFeeForPaymentMethod } from './depositFees.js';
 import { notifyBorrowerBeforeCharge, notifyBorrowerAfterCharge } from './chargeNotifications.js';
 
 // Stale-card guardrail: refuse off-session charges on cards older than this.

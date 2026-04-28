@@ -953,6 +953,7 @@ export class DatabaseStorage implements IStorage {
       SELECT location_id, COUNT(*)::int AS count
       FROM disputes
       WHERE created_at >= ${since}
+        AND location_id IS NOT NULL
       GROUP BY location_id
     `);
     // Denominator: all Stripe card charges in window regardless of flow.
