@@ -1,0 +1,78 @@
+02:28:46.463 Running build in Washington, D.C., USA (East) – iad1
+02:28:46.464 Build machine configuration: 2 cores, 8 GB
+02:28:46.614 Cloning github.com/mooses23/EarmuffsGemach.com (Branch: main, Commit: c6aeceb)
+02:28:48.553 Cloning completed: 1.938s
+02:28:48.612 Found .vercelignore
+02:28:48.616 Removed 1 ignored files defined in .vercelignore
+02:28:48.616   /.replit
+02:28:48.679 Restored build cache from previous deployment (GoUhonDcvjyMJijcwF1U5jrXjVFg)
+02:28:48.924 Running "vercel build"
+02:28:49.766 Vercel CLI 51.6.1
+02:28:50.650 Running "install" command: `npm ci --legacy-peer-deps --include=dev || npm install --legacy-peer-deps --include=dev`...
+02:28:56.113 npm warn deprecated scmp@2.1.0: Just use Node.js's crypto.timingSafeEqual()
+02:28:57.003 npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+02:28:58.935 npm warn deprecated glob@8.1.0: Glob versions prior to v9 are no longer supported
+02:29:10.506 
+02:29:10.507 added 625 packages, and audited 626 packages in 20s
+02:29:10.508 
+02:29:10.508 79 packages are looking for funding
+02:29:10.509   run `npm fund` for details
+02:29:10.577 
+02:29:10.578 18 vulnerabilities (1 low, 10 moderate, 7 high)
+02:29:10.579 
+02:29:10.579 To address issues that do not require attention, run:
+02:29:10.579   npm audit fix
+02:29:10.580 
+02:29:10.580 To address all issues (including breaking changes), run:
+02:29:10.580   npm audit fix --force
+02:29:10.580 
+02:29:10.581 Run `npm audit` for details.
+02:29:10.915 
+02:29:10.915 > rest-express@1.0.0 build
+02:29:10.915 > npm run build:client && npm run build:server
+02:29:10.916 
+02:29:11.061 
+02:29:11.061 > rest-express@1.0.0 build:client
+02:29:11.062 > vite build
+02:29:11.062 
+02:29:11.347 [36mvite v7.3.1 [32mbuilding client environment for production...[36m[39m
+02:29:11.426 transforming...
+02:29:12.322 Browserslist: browsers data (caniuse-lite) is 18 months old. Please run:
+02:29:12.323   npx update-browserslist-db@latest
+02:29:12.324   Why you should do it regularly: https://github.com/browserslist/update-db#readme
+02:29:20.704 [32m✓[39m 3071 modules transformed.
+02:29:21.623 rendering chunks...
+02:29:21.648 computing gzip size...
+02:29:21.690 [2m../dist/public/[22m[32mindex.html                                         [39m[1m[2m    0.63 kB[22m[1m[22m[2m │ gzip:   0.38 kB[22m
+02:29:21.691 [2m../dist/public/[22m[2massets/[22m[32mBabyBanz_Gemach_1769321439923-hVgeZ7U8.jpg  [39m[1m[2m  132.48 kB[22m[1m[22m
+02:29:21.692 [2m../dist/public/[22m[2massets/[22m[32mbaby_1769929839890-D8etFoDH.jpg             [39m[1m[2m  404.84 kB[22m[1m[22m
+02:29:21.692 [2m../dist/public/[22m[2massets/[22m[35mindex-VfLxzApV.css                          [39m[1m[2m  100.14 kB[22m[1m[22m[2m │ gzip:  17.36 kB[22m
+02:29:21.692 [2m../dist/public/[22m[2massets/[22m[36mindex-BVoN2l5T.js                           [39m[1m[33m1,204.03 kB[39m[22m[2m │ gzip: 342.99 kB[22m
+02:29:21.693 [33m
+02:29:21.693 (!) Some chunks are larger than 500 kB after minification. Consider:
+02:29:21.693 - Using dynamic import() to code-split the application
+02:29:21.693 - Use build.rollupOptions.output.manualChunks to improve chunking: https://rollupjs.org/configuration-options/#output-manualchunks
+02:29:21.693 - Adjust chunk size limit for this warning via build.chunkSizeWarningLimit.[39m
+02:29:21.694 [32m✓ built in 10.31s[39m
+02:29:21.895 
+02:29:21.895 > rest-express@1.0.0 build:server
+02:29:21.895 > esbuild server/index.ts --platform=node --packages=external --bundle --format=esm --outdir=dist
+02:29:21.895 
+02:29:21.951 
+02:29:21.951   dist/index.js  462.0kb
+02:29:21.951 
+02:29:21.952 ⚡ Done in 44ms
+02:29:22.006 Installing dependencies...
+02:29:23.372 
+02:29:23.373 up to date in 1s
+02:29:23.375 
+02:29:23.375 79 packages are looking for funding
+02:29:23.375   run `npm fund` for details
+02:29:23.966 Using TypeScript 5.6.3 (local user-provided)
+02:30:20.392 Build Completed in /vercel/output [1m]
+02:30:21.252 Deploying outputs...
+02:30:28.221 Deployment completed
+02:30:28.361 Creating build cache...
+02:31:01.442 Created build cache: 33s
+02:31:01.442 Uploading build cache [101.77 MB]
+02:31:03.180 Build cache uploaded: 1.737s

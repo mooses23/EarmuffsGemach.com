@@ -2680,13 +2680,14 @@ export class MemStorage implements IStorage {
       chargeErrorCode: insertTransaction.chargeErrorCode ?? null,
       chargeErrorMessage: insertTransaction.chargeErrorMessage ?? null,
       // Task #39: consent + fee + notification + card-age fields
-      consentText: (insertTransaction as any).consentText ?? null,
-      consentAcceptedAt: (insertTransaction as any).consentAcceptedAt ?? null,
-      consentMaxChargeCents: (insertTransaction as any).consentMaxChargeCents ?? null,
-      cardSavedAt: (insertTransaction as any).cardSavedAt ?? null,
-      chargeNotificationSentAt: (insertTransaction as any).chargeNotificationSentAt ?? null,
-      chargeNotificationChannel: (insertTransaction as any).chargeNotificationChannel ?? null,
-      depositFeeCents: (insertTransaction as any).depositFeeCents ?? null,
+      consentText: insertTransaction.consentText ?? null,
+      consentAcceptedAt: insertTransaction.consentAcceptedAt ?? null,
+      consentMaxChargeCents: insertTransaction.consentMaxChargeCents ?? null,
+      cardSavedAt: insertTransaction.cardSavedAt ?? null,
+      chargeNotificationSentAt: insertTransaction.chargeNotificationSentAt ?? null,
+      chargeNotificationChannel: insertTransaction.chargeNotificationChannel ?? null,
+      depositFeeCents: insertTransaction.depositFeeCents ?? null,
+      chargedAt: insertTransaction.chargedAt ?? null,
     };
     
     this.transactions.set(id, transaction);

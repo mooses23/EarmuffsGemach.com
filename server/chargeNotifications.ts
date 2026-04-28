@@ -35,30 +35,58 @@ function normalizePhoneForSms(raw: string | null | undefined): string | null {
   return null;
 }
 
-function buildSmsBody(transaction: Transaction, location: Location, amountCents: number): string {
+function buildStatusUrl(transaction: Transaction): string | null {
+  if (!transaction.magicToken) return null;
+  const base = process.env.APP_ORIGIN || process.env.VITE_APP_URL || 'https://earmuffsgemach.com';
+  return `${base}/status/${transaction.magicToken}`;
+}
+
+function buildSmsBody(
+  transaction: Transaction,
+  location: Location,
+  amountCents: number,
+  operatorNote?: string,
+): string {
   const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
   const dollars = (amountCents / 100).toFixed(2);
-  return `Hi ${firstName} — heads up: the ${location.name} Baby Banz Earmuffs Gemach is about to charge $${dollars} on the card you saved for the unreturned earmuffs. If you've already returned them or this looks wrong, please call ${location.phone} right away.`;
+  const statusUrl = buildStatusUrl(transaction);
+  const noteLine = operatorNote ? ` Note from the gemach: "${operatorNote}"` : '';
+  const linkLine = statusUrl ? ` Check status: ${statusUrl}` : '';
+  return (
+    `Hi ${firstName} — heads up: the ${location.name} Baby Banz Earmuffs Gemach is about to charge $${dollars} on the card you saved for the unreturned earmuffs.${noteLine} If you've already returned them or this looks wrong, please call ${location.phone} right away.${linkLine}`
+  );
 }
 
 function buildEmailSubject(location: Location): string {
   return `Heads up — pending charge from ${location.name} Baby Banz Earmuffs Gemach`;
 }
 
-function buildEmailBody(transaction: Transaction, location: Location, amountCents: number): string {
+function buildEmailBody(
+  transaction: Transaction,
+  location: Location,
+  amountCents: number,
+  operatorNote?: string,
+): string {
   const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || 'Hi';
   const dollars = (amountCents / 100).toFixed(2);
+  const statusUrl = buildStatusUrl(transaction);
+  const noteSection = operatorNote
+    ? `\nAdditional note from the gemach coordinator:\n  "${operatorNote}"\n`
+    : '';
+  const linkSection = statusUrl
+    ? `\nYou can also view the status of your loan at any time:\n  ${statusUrl}\n`
+    : '';
   return `Hi ${firstName},
 
 This is a heads-up note from the ${location.name} Baby Banz Earmuffs Gemach.
 
 We are about to charge $${dollars} on the card you saved when you borrowed earmuffs from us, because the earmuffs have not been returned. The charge will be processed shortly.
-
+${noteSection}
 If you have already returned the earmuffs, or if anything about this looks wrong, please get in touch with us right away:
 
   Phone: ${location.phone}
   Email: ${location.email}
-
+${linkSection}
 We would much rather sort this out with you than process a charge in error.
 
 Thank you,
@@ -69,7 +97,8 @@ ${location.name} Baby Banz Earmuffs Gemach
 async function trySendSms(
   transaction: Transaction,
   location: Location,
-  amountCents: number
+  amountCents: number,
+  operatorNote?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   const status = getTwilioConfigStatus();
   if (!status.configured) {
@@ -85,7 +114,7 @@ async function trySendSms(
     await client.messages.create({
       to,
       from: process.env.TWILIO_FROM_NUMBER!,
-      body: buildSmsBody(transaction, location, amountCents),
+      body: buildSmsBody(transaction, location, amountCents, operatorNote),
     });
     return { ok: true };
   } catch (e: any) {
@@ -96,14 +125,15 @@ async function trySendSms(
 async function trySendEmail(
   transaction: Transaction,
   location: Location,
-  amountCents: number
+  amountCents: number,
+  operatorNote?: string,
 ): Promise<{ ok: boolean; error?: string }> {
   if (!transaction.borrowerEmail) return { ok: false, error: 'No email on file' };
   try {
     await sendNewEmail(
       transaction.borrowerEmail,
       buildEmailSubject(location),
-      buildEmailBody(transaction, location, amountCents)
+      buildEmailBody(transaction, location, amountCents, operatorNote),
     );
     return { ok: true };
   } catch (e: any) {
@@ -114,16 +144,21 @@ async function trySendEmail(
 /**
  * Notify the borrower that an off-session charge is about to be made.
  * Tries SMS first, falls back to email. Never throws.
+ *
+ * @param operatorNote Optional free-text note from the operator (e.g. "your
+ *   borrow was 45 days ago") included verbatim in the message so borrowers
+ *   understand the context before the charge lands.
  */
 export async function notifyBorrowerBeforeCharge(
   transaction: Transaction,
   location: Location,
-  amountCents: number
+  amountCents: number,
+  operatorNote?: string,
 ): Promise<ChargeNotificationResult> {
-  const sms = await trySendSms(transaction, location, amountCents);
+  const sms = await trySendSms(transaction, location, amountCents, operatorNote);
   if (sms.ok) return { channel: 'sms', sent: true };
 
-  const email = await trySendEmail(transaction, location, amountCents);
+  const email = await trySendEmail(transaction, location, amountCents, operatorNote);
   if (email.ok) return { channel: 'email', sent: true };
 
   return {

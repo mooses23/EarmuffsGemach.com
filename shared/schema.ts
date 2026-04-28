@@ -291,6 +291,8 @@ export const transactions = pgTable("transactions", {
   chargeNotificationChannel: text("charge_notification_channel"), // 'sms' | 'whatsapp' | 'email' | 'none'
   // Task #39: fee component included in amountPlannedCents (so operator UI can show breakdown)
   depositFeeCents: integer("deposit_fee_cents"),
+  // Task #39: timestamp when a successful off-session charge ran (used as dispute-rate denominator)
+  chargedAt: timestamp("charged_at"),
 });
 
 // Per-send history of return reminders for each transaction.
@@ -333,6 +335,15 @@ export const insertTransactionSchema = createInsertSchema(transactions).pick({
   magicTokenExpiresAt: true,
   chargeErrorCode: true,
   chargeErrorMessage: true,
+  // Task #39: consent, card age, notification, fee breakdown, charge timestamp
+  consentText: true,
+  consentAcceptedAt: true,
+  consentMaxChargeCents: true,
+  cardSavedAt: true,
+  chargeNotificationSentAt: true,
+  chargeNotificationChannel: true,
+  depositFeeCents: true,
+  chargedAt: true,
 }).extend({
   expectedReturnDate: z.union([
     z.date(),

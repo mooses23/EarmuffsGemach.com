@@ -954,12 +954,16 @@ export class DatabaseStorage implements IStorage {
       WHERE created_at >= ${since}
       GROUP BY location_id
     `);
-    // Per-location successful charges in window (denominator). We use
-    // pay-later 'CHARGED' transactions as the proxy for "card charges run".
+    // Per-location successful charges in window (denominator). Use the
+    // charged_at timestamp stamped when the off-session PaymentIntent
+    // succeeded — this is the true "charges in this window" count and
+    // matches what Stripe's dispute rate metric measures.
     const chargedRows = await db.execute(sql`
       SELECT location_id, COUNT(*)::int AS count
       FROM transactions
-      WHERE pay_later_status = 'CHARGED' AND borrow_date >= ${since}
+      WHERE pay_later_status = 'CHARGED'
+        AND charged_at IS NOT NULL
+        AND charged_at >= ${since}
       GROUP BY location_id
     `);
     const disputeMap = new Map<number, number>();
@@ -1228,6 +1232,8 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS charge_notification_sent_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS charge_notification_channel TEXT`);
     await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS deposit_fee_cents INTEGER`);
+    await db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS charged_at TIMESTAMP`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS transactions_charged_at_idx ON transactions (charged_at) WHERE charged_at IS NOT NULL`);
     await db.execute(sql`
       CREATE TABLE IF NOT EXISTS disputes (
         id SERIAL PRIMARY KEY,

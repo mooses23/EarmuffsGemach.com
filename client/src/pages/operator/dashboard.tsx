@@ -1035,6 +1035,7 @@ function ReturnWizard({
   const [refundAmount, setRefundAmount] = useState("");
   const [isPartialRefund, setIsPartialRefund] = useState(false);
   const [cardAction, setCardAction] = useState<"charge" | "release" | null>(null);
+  const [chargeNote, setChargeNote] = useState("");
   
   const activeTransactions = transactions.filter(tx => !tx.isReturned);
   
@@ -1052,7 +1053,9 @@ function ReturnWizard({
   
   const chargeCardMutation = useMutation({
     mutationFn: async (transactionId: number) => {
-      const res = await apiRequest("POST", `/api/operator/transactions/${transactionId}/charge`);
+      const res = await apiRequest("POST", `/api/operator/transactions/${transactionId}/charge`, {
+        operatorNote: chargeNote.trim() || undefined,
+      });
       return res.json();
     },
     onSuccess: (data) => {
@@ -1380,10 +1383,25 @@ function ReturnWizard({
               </div>
               
               {cardAction === "charge" && (
-                <div className="p-3 bg-green-500/20 border border-green-500/30 rounded-lg">
-                  <div className="flex items-center gap-2 text-green-300 text-sm">
-                    <CheckCircle className="h-4 w-4" />
-                    <span>{t('cardWillBeCharged').replace('${amount}', selectedTransaction.depositAmount.toFixed(2))}</span>
+                <div className="space-y-2">
+                  <div className="p-3 bg-green-500/20 border border-green-500/30 rounded-lg">
+                    <div className="flex items-center gap-2 text-green-300 text-sm">
+                      <CheckCircle className="h-4 w-4" />
+                      <span>{t('cardWillBeCharged').replace('${amount}', selectedTransaction.depositAmount.toFixed(2))}</span>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs text-slate-400 mb-1">
+                      Note to borrower (optional — included in the heads-up notification)
+                    </label>
+                    <textarea
+                      className="w-full bg-white/10 border border-white/20 rounded-md px-3 py-2 text-sm text-white placeholder-slate-400 resize-none focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      rows={2}
+                      maxLength={200}
+                      placeholder="e.g. Your earmuffs were borrowed 45 days ago on Jan 3rd"
+                      value={chargeNote}
+                      onChange={e => setChargeNote(e.target.value)}
+                    />
                   </div>
                 </div>
               )}

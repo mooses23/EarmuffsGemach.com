@@ -3859,8 +3859,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const userId = req.isAuthenticated() ? (req.user as any).id : undefined;
       const locationId = operatorLocationId || (req.user as any)?.locationId;
+      const operatorNote: string | undefined = typeof req.body?.operatorNote === 'string'
+        ? req.body.operatorNote.trim() || undefined
+        : undefined;
 
-      const result = await PayLaterService.chargeTransaction(transactionId, userId, locationId);
+      const result = await PayLaterService.chargeTransaction(transactionId, userId, locationId, operatorNote);
 
       if (result.success) {
         res.json({ 

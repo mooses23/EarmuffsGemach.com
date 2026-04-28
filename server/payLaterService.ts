@@ -112,7 +112,7 @@ export class PayLaterService {
       consentAcceptedAt: data.consentText ? new Date() : undefined,
       consentMaxChargeCents: consentMax,
       depositFeeCents: feeCents,
-    } as any);
+    });
 
     const customer = await stripe.customers.create({
       email: data.borrowerEmail || undefined,
@@ -186,7 +186,7 @@ export class PayLaterService {
     await storage.updateTransactionPayLaterStatus(transaction.id, 'CARD_SETUP_COMPLETE', {
       stripePaymentMethodId: paymentMethodId,
       cardSavedAt: new Date(),
-    } as any);
+    });
 
     const stripe = getStripeClient();
     if (transaction.stripeCustomerId) {
@@ -214,7 +214,8 @@ export class PayLaterService {
   static async chargeTransaction(
     transactionId: number,
     operatorUserId?: number,
-    operatorLocationId?: number
+    operatorLocationId?: number,
+    operatorNote?: string,
   ): Promise<ChargeResult> {
     const transaction = await storage.getTransaction(transactionId);
     if (!transaction) {
@@ -244,7 +245,7 @@ export class PayLaterService {
     // missing consent_text by charge time means an off-session charge with no
     // documented authorization — exactly the dispute risk we're trying to
     // avoid. Better to fail loudly here than to argue with Stripe later.
-    if (!(transaction as any).consentText || !(transaction as any).consentAcceptedAt) {
+    if (!transaction.consentText || !transaction.consentAcceptedAt) {
       await storage.createAuditLog({
         actorUserId: operatorUserId,
         actorType: operatorUserId ? 'operator' : 'system',
@@ -266,9 +267,7 @@ export class PayLaterService {
     // tolerant of recent cards; old saved cards fail at higher rates and the
     // failures are more likely to surface as disputes.
     const maxCardAgeDays = await getMaxCardAgeDays();
-    const cardSavedAt = (transaction as any).cardSavedAt
-      ? new Date((transaction as any).cardSavedAt)
-      : null;
+    const cardSavedAt = transaction.cardSavedAt ? new Date(transaction.cardSavedAt) : null;
     if (cardSavedAt) {
       const ageDays = (Date.now() - cardSavedAt.getTime()) / (1000 * 60 * 60 * 24);
       if (ageDays > maxCardAgeDays) {
@@ -300,11 +299,11 @@ export class PayLaterService {
       transaction.amountPlannedCents || Math.round(transaction.depositAmount * 100);
     if (location) {
       try {
-        const notice = await notifyBorrowerBeforeCharge(transaction, location, amountToChargeCents);
+        const notice = await notifyBorrowerBeforeCharge(transaction, location, amountToChargeCents, operatorNote);
         await storage.updateTransaction(transaction.id, {
-          chargeNotificationSentAt: notice.sent ? new Date() : null,
+          chargeNotificationSentAt: notice.sent ? new Date() : undefined,
           chargeNotificationChannel: notice.channel,
-        } as any);
+        });
         await storage.createAuditLog({
           actorUserId: operatorUserId,
           actorType: operatorUserId ? 'operator' : 'system',
@@ -340,6 +339,7 @@ export class PayLaterService {
       if (paymentIntent.status === 'succeeded') {
         await storage.updateTransactionPayLaterStatus(transaction.id, 'CHARGED', {
           stripePaymentIntentId: paymentIntent.id,
+          chargedAt: new Date(), // Task #39: accurate dispute-rate denominator
         });
 
         await storage.createAuditLog({
