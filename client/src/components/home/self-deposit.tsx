@@ -140,7 +140,7 @@ export function SelfDeposit() {
                       <FeeCalculator 
                         depositAmount={selectedLocationData.depositAmount}
                         processingFeePercent={selectedLocationData.processingFeePercent || 290}
-                        processingFeeFixedCents={(selectedLocationData as any).processingFeeFixed ?? 30}
+                        processingFeeFixedCents={selectedLocationData.processingFeeFixed ?? 30}
                         selectedPaymentMethod={selectedPaymentMethod}
                       />
                       
@@ -152,7 +152,7 @@ export function SelfDeposit() {
                         borrowerPhone={borrowerPhone}
                         paymentMethod={selectedPaymentMethod}
                         processingFeePercent={selectedLocationData.processingFeePercent || 290}
-                        processingFeeFixedCents={(selectedLocationData as any).processingFeeFixed ?? 30}
+                        processingFeeFixedCents={selectedLocationData.processingFeeFixed ?? 30}
                         onSuccess={() => {
                           setShowPayment(false);
                           setSelectedLocation("");
@@ -331,7 +331,7 @@ export function SelfDeposit() {
                     <FeeCalculator 
                       depositAmount={selectedLocationData.depositAmount}
                       processingFeePercent={selectedLocationData.processingFeePercent || 290}
-                      processingFeeFixedCents={(selectedLocationData as any).processingFeeFixed ?? 30}
+                      processingFeeFixedCents={selectedLocationData.processingFeeFixed ?? 30}
                       selectedPaymentMethod={selectedPaymentMethod}
                     />
                   </div>

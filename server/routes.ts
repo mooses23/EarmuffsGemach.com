@@ -3706,8 +3706,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           await storage.updateTransaction(tx.id, {
             consentText,
             consentAcceptedAt: new Date(),
-            consentMaxChargeCents: typeof consentMaxChargeCents === 'number' ? consentMaxChargeCents : tx.consentMaxChargeCents,
-          } as any);
+            consentMaxChargeCents: typeof consentMaxChargeCents === 'number' ? consentMaxChargeCents : (tx.consentMaxChargeCents ?? undefined),
+          });
         }
       }
 

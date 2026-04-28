@@ -956,8 +956,15 @@ function LendWizard({
             clientSecret={stripeClientSecret}
             publishableKey={stripePublishableKey}
             gemachName={location.name}
-            maxChargeAmount={parseFloat(depositAmount) || 0}
-            currency={(location as any).currency || "usd"}
+            maxChargeAmount={(() => {
+              const depositCents = Math.round((parseFloat(depositAmount) || 0) * 100);
+              const feeCents = Math.ceil(
+                (depositCents * (location.processingFeePercent ?? 300) / 10000) +
+                (location.processingFeeFixed ?? 30)
+              );
+              return (depositCents + feeCents) / 100;
+            })()}
+            currency="usd"
             onSuccess={async () => {
               try {
                 // For card deposit, we need to assign the headband and update inventory
@@ -1036,7 +1043,41 @@ function ReturnWizard({
   const [isPartialRefund, setIsPartialRefund] = useState(false);
   const [cardAction, setCardAction] = useState<"charge" | "release" | null>(null);
   const [chargeNote, setChargeNote] = useState("");
-  
+
+  // Task #39: stale-card guardrail — same policy as PayLaterTransactions panel.
+  const { data: rwStripeSettings } = useQuery<{ maxCardAgeDays: number }>({
+    queryKey: ["/api/operator/stripe-settings"],
+    queryFn: async () => {
+      const res = await fetch("/api/operator/stripe-settings", { credentials: "include" });
+      if (!res.ok) return { maxCardAgeDays: 90 };
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+  const rwMaxCardAgeDays = rwStripeSettings?.maxCardAgeDays ?? 90;
+
+  const rwCardAgeDays = (tx: Transaction): number | null => {
+    if (!tx.cardSavedAt) return null;
+    return Math.floor((Date.now() - new Date(tx.cardSavedAt).getTime()) / (1000 * 60 * 60 * 24));
+  };
+  const rwIsStale = (tx: Transaction): boolean => {
+    const a = rwCardAgeDays(tx);
+    return a !== null && a > rwMaxCardAgeDays;
+  };
+
+  const rwRequestNewCardMutation = useMutation({
+    mutationFn: async (transactionId: number) => {
+      const res = await apiRequest("POST", `/api/operator/transactions/${transactionId}/request-new-card`);
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: t('success'), description: "New card setup link sent to borrower." });
+    },
+    onError: (err: Error) => {
+      toast({ title: t('error'), description: err.message, variant: "destructive" });
+    },
+  });
+
   const activeTransactions = transactions.filter(tx => !tx.isReturned);
   
   const filteredTransactions = searchPhone
@@ -1359,6 +1400,29 @@ function ReturnWizard({
                   </div>
                 </div>
               )}
+
+              {/* Task #39: stale-card guardrail — show explanation + request-new-card CTA */}
+              {["CARD_SETUP_COMPLETE", "APPROVED"].includes(selectedTransaction.payLaterStatus || "") &&
+                rwIsStale(selectedTransaction) && (
+                <div className="p-3 bg-amber-500/20 border border-amber-500/30 rounded-lg">
+                  <div className="flex items-start gap-2 text-amber-300 text-sm">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-amber-200">Card saved {rwCardAgeDays(selectedTransaction)} days ago — exceeds the {rwMaxCardAgeDays}-day limit.</p>
+                      <p className="mt-1">Charging a stale card raises the risk of a dispute. Ask the borrower to add a fresh card, then return to charge.</p>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="mt-2 border-amber-400/50 text-amber-200 hover:bg-amber-500/20"
+                        onClick={() => rwRequestNewCardMutation.mutate(selectedTransaction.id)}
+                        disabled={rwRequestNewCardMutation.isPending}
+                      >
+                        {rwRequestNewCardMutation.isPending ? "Sending…" : "Request new card from borrower"}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
               
               <div className="flex gap-4">
                 <Button
@@ -1366,7 +1430,10 @@ function ReturnWizard({
                   size="lg"
                   onClick={() => setCardAction("charge")}
                   className={`flex-1 ${cardAction !== "charge" ? "border-white/20 hover:bg-white/10" : ""}`}
-                  disabled={!["CARD_SETUP_COMPLETE", "APPROVED"].includes(selectedTransaction.payLaterStatus || "")}
+                  disabled={
+                    !["CARD_SETUP_COMPLETE", "APPROVED"].includes(selectedTransaction.payLaterStatus || "") ||
+                    rwIsStale(selectedTransaction)
+                  }
                 >
                   <CreditCard className="h-5 w-5 mr-2" />
                   {t('chargeCard')}
@@ -1803,9 +1870,8 @@ function PayLaterTransactions({ location }: { location: Location }) {
   const maxCardAgeDays = stripeSettings?.maxCardAgeDays ?? 90;
 
   const cardAgeDays = (tx: Transaction): number | null => {
-    const saved = (tx as any).cardSavedAt;
-    if (!saved) return null;
-    return Math.floor((Date.now() - new Date(saved).getTime()) / (1000 * 60 * 60 * 24));
+    if (!tx.cardSavedAt) return null;
+    return Math.floor((Date.now() - new Date(tx.cardSavedAt).getTime()) / (1000 * 60 * 60 * 24));
   };
 
   const isStale = (tx: Transaction): boolean => {
