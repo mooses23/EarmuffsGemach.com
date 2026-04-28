@@ -3190,12 +3190,30 @@ export class MemStorage implements IStorage {
   }
   async getRecentDisputeStats(sinceDays: number): Promise<{ locationId: number; disputeCount: number; chargedCount: number; rate: number; }[]> {
     const since = new Date(Date.now() - sinceDays * 24 * 60 * 60 * 1000);
-    const txs = Array.from(this.transactions.values()).filter(t => (t as any).borrowDate && new Date((t as any).borrowDate) >= since && (t as any).payLaterStatus === 'CHARGED');
+    // Denominator mirrors DatabaseStorage: pay-later charges windowed by chargedAt,
+    // plus direct-deposit Stripe card charges windowed by borrowDate (= created_at).
+    // No (as any) casts — Transaction fields are fully typed in shared/schema.ts.
     const chargedByLoc = new Map<number, number>();
-    for (const t of txs) chargedByLoc.set(t.locationId, (chargedByLoc.get(t.locationId) || 0) + 1);
+    for (const t of Array.from(this.transactions.values())) {
+      const isPayLaterCharged =
+        t.payLaterStatus === 'CHARGED' &&
+        t.chargedAt instanceof Date &&
+        t.chargedAt >= since;
+      const isDirectDepositCharged =
+        (t.depositPaymentMethod === 'card' || t.depositPaymentMethod === 'stripe') &&
+        t.stripePaymentIntentId !== null &&
+        t.payLaterStatus === null &&
+        t.borrowDate instanceof Date &&
+        t.borrowDate >= since;
+      if (isPayLaterCharged || isDirectDepositCharged) {
+        chargedByLoc.set(t.locationId, (chargedByLoc.get(t.locationId) || 0) + 1);
+      }
+    }
     const dispByLoc = new Map<number, number>();
     for (const d of Array.from(this.disputesMap.values())) {
-      if (d.createdAt >= since && d.locationId !== null) dispByLoc.set(d.locationId, (dispByLoc.get(d.locationId) || 0) + 1);
+      if (d.createdAt >= since && d.locationId !== null) {
+        dispByLoc.set(d.locationId, (dispByLoc.get(d.locationId) || 0) + 1);
+      }
     }
     const allLocIds = new Set<number>([...Array.from(chargedByLoc.keys()), ...Array.from(dispByLoc.keys())]);
     return Array.from(allLocIds).map(locationId => {
