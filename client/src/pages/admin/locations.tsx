@@ -855,7 +855,7 @@ export default function AdminLocations() {
                   <div className="space-y-2">
                     <p className="text-muted-foreground">{t('noLocationsMatch')}</p>
                     <p className="text-sm text-gray-500">{t('tryAdjustingSearch')}</p>
-                    <Button variant="outline" size="sm" onClick={() => { setSearchTerm(""); setStatusFilter("all"); }}>
+                    <Button variant="outline" size="sm" onClick={() => { setSearchTerm(""); setStatusFilter("all"); setOnboardingFilter("all"); }}>
                       {t('clearAll')}
                     </Button>
                   </div>
