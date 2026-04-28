@@ -1,12 +1,5 @@
-/**
- * Twilio SMS client for sending return-reminder texts to borrowers.
- *
- * Activation is environment-driven: SMS is only available when ALL of
- * `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, and `TWILIO_FROM_NUMBER`
- * are set. Anything else (missing secret, malformed phone) reports
- * "not configured" rather than throwing at import time, so the
- * email-only path keeps working unchanged when SMS isn't enabled yet.
- */
+// Twilio SMS client for return reminders. SMS is enabled only when
+// TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, and TWILIO_FROM_NUMBER are all set.
 
 import twilio, { type Twilio } from 'twilio';
 
@@ -45,26 +38,14 @@ export function getTwilioConfigStatus(): TwilioConfigStatus {
 function getClient(): Twilio {
   const key = configKey();
   if (cachedClient && key === cachedConfigKey) return cachedClient;
-  // Re-initialize when env changes (mostly for tests); twilio() is cheap
-  // but we cache between requests to avoid the overhead in hot paths.
   cachedClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
   cachedConfigKey = key;
   return cachedClient;
 }
 
-// Normalize a phone number to E.164 (e.g. "+15551234567"), which is the
-// only format Twilio's /Messages endpoint accepts reliably across carriers.
-//
-// Returns null when the input cannot be safely upgraded to E.164:
-//   - empty / too-short numbers
-//   - bare 10-digit US numbers (auto-prefixed with "+1")
-//   - bare 11-digit numbers starting with "1" (auto-prefixed with "+")
-//   - any other ambiguous local format (rejected so the operator gets a
-//     clear "phone format" error instead of Twilio rejecting silently)
-//
-// Callers (the route, tests) treat null as "not sendable" and surface a
-// helpful message to the operator rather than gambling on Twilio's geo
-// guesses, which differ by from-number country.
+// Normalize to E.164 ("+<country><subscriber>"). Returns null for
+// ambiguous local formats so callers fail with a clear error instead of
+// letting Twilio guess the country wrong.
 export function normalizePhoneForSms(raw: string | null | undefined): string | null {
   if (!raw) return null;
   const trimmed = raw.trim();
@@ -72,21 +53,14 @@ export function normalizePhoneForSms(raw: string | null | undefined): string | n
 
   if (trimmed.startsWith('+')) {
     const digits = trimmed.slice(1).replace(/\D/g, '');
-    // E.164 max is 15 digits; min country-code+subscriber length is ~8.
     if (digits.length < 8 || digits.length > 15) return null;
     return '+' + digits;
   }
 
   const digits = trimmed.replace(/\D/g, '');
-  // 10 digits → only assume US/CA if the first digit (area code) is 2-9.
-  // Real NANP area codes never start with 0 or 1; numbers like
-  // "0501234567" (Israeli local) would otherwise be wrongly normalized
-  // to "+10501234567" and silently fail at Twilio.
+  // NANP only: area code must start 2-9.
   if (digits.length === 10 && /^[2-9]/.test(digits)) return '+1' + digits;
-  if (digits.length === 11 && digits.startsWith('1') && /^1[2-9]/.test(digits)) return '+' + digits;
-  // Anything else (e.g. "0501234567" Israeli local, "44…" without a +)
-  // is ambiguous without a country prefix — make the operator add the
-  // explicit "+<country>…" so we never deliver to the wrong country.
+  if (digits.length === 11 && /^1[2-9]/.test(digits)) return '+' + digits;
   return null;
 }
 
@@ -95,15 +69,11 @@ export interface ReturnReminderSmsContext {
   borrowerPhone: string;
   locationName: string;
   language: 'en' | 'he';
-  /** When the loan was/is due back. Rendered as a short localized date when present. */
   dueDate?: Date | null;
-  /** Public status-page URL the borrower can open to see the loan. Optional. */
   statusUrl?: string;
 }
 
 function formatDueDate(d: Date, language: 'en' | 'he'): string {
-  // Short localized date — e.g. "Apr 28" / "28 באפר׳" — keeps body under
-  // 2 SMS segments. Falls back gracefully if Intl is unavailable.
   try {
     return new Intl.DateTimeFormat(language === 'he' ? 'he-IL' : 'en-US', {
       month: 'short',
@@ -114,12 +84,8 @@ function formatDueDate(d: Date, language: 'en' | 'he'): string {
   }
 }
 
-// Pure helper — exported for tests. Builds the bilingual SMS body for a
-// return reminder. Kept short (under ~320 chars / 2 SMS segments) to
-// avoid surprise carrier charges and to read well on the lock screen.
-// Includes the gemach name, the borrowed item ("earmuffs" / "האוזניות"),
-// the due date when known, and the borrower status link when provided —
-// mirroring the email reminder template required by the task.
+// Bilingual SMS body. Kept under ~2 SMS segments. Includes gemach name,
+// item, due date (when known), and the borrower status link.
 export function buildReturnReminderSmsBody(ctx: ReturnReminderSmsContext): string {
   const firstName = (ctx.borrowerName || '').trim().split(/\s+/)[0] || ctx.borrowerName || '';
   const dueStr = ctx.dueDate ? formatDueDate(ctx.dueDate, ctx.language) : '';
@@ -132,17 +98,8 @@ export function buildReturnReminderSmsBody(ctx: ReturnReminderSmsContext): strin
   return `Hi ${firstName}, friendly reminder from the ${ctx.locationName} Baby Banz Earmuffs Gemach — please bring back the earmuffs${dueLine} when you can so the next family can use them. If you've already returned them, ignore this note.${link}`;
 }
 
-/**
- * Sends a return-reminder SMS via Twilio.
- *
- * Throws when:
- * - Twilio is not configured (caller should check `getTwilioConfigStatus()` first).
- * - The phone number is unusable after normalization.
- * - Twilio's API rejects the request (network, invalid number, suspended account, etc.).
- *
- * Errors carry a human-readable `message` suitable for surfacing in the
- * operator UI; we intentionally do NOT include any Twilio internals.
- */
+// Sends a return-reminder SMS. Throws when Twilio is not configured,
+// the phone is invalid, or Twilio rejects the request.
 export async function sendReturnReminderSMS(ctx: ReturnReminderSmsContext): Promise<{ sid: string }> {
   const status = getTwilioConfigStatus();
   if (!status.configured) {

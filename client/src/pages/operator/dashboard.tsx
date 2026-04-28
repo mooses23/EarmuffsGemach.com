@@ -339,11 +339,8 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
   const sms = useSmsConfigStatus();
   const smsAvailable = sms.configured;
 
-  // Default channel per spec: prefer SMS only when BOTH contact methods are
-  // present AND Twilio is configured. Otherwise fall back to whichever
-  // option is actually usable, with email as the final fallback. Recomputed
-  // when the dialog opens so a freshly-edited transaction doesn't keep a
-  // stale default.
+  // Prefer SMS when phone + email + Twilio are all available; otherwise
+  // fall back to whichever channel is usable.
   const computeDefaultChannel = (): 'email' | 'sms' => {
     if (smsAvailable && hasPhone && hasEmail) return 'sms';
     if (hasEmail) return 'email';
@@ -352,10 +349,6 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
   };
   const [channel, setChannel] = useState<'email' | 'sms'>(computeDefaultChannel());
 
-  // When the dialog is opened, re-seed the channel so the smart default
-  // tracks the latest contact info / SMS-config flag. Without this, an
-  // operator who first opens the dialog before SMS is enabled would keep
-  // seeing "Email" pre-selected even after Twilio is wired up.
   useEffect(() => {
     if (confirmOpen) setChannel(computeDefaultChannel());
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -380,17 +373,9 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
     },
   });
 
-  // Top-level button is disabled when there is NO usable channel at all.
-  // Fine-grained per-channel reasons (e.g. "phone missing") are surfaced
-  // inside the dialog next to each radio option.
   let disabledReason: string | null = null;
   if (tx.isReturned) disabledReason = t('reminderAlreadyReturnedTooltip');
   else if (!hasEmail && !(smsAvailable && hasPhone)) {
-    // Neither email nor SMS is usable. Pick the most informative tooltip:
-    //  - phone exists but Twilio is off → tell them SMS isn't enabled
-    //    (so they ask an admin), not the misleading "no email" line.
-    //  - no phone at all + Twilio on → tell them no contact method exists.
-    //  - default → no email on file.
     if (hasPhone && !smsAvailable) {
       disabledReason = t('reminderChannelSmsNotConfiguredTooltip');
     } else if (smsAvailable) {
@@ -438,10 +423,6 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
             </DialogDescription>
           </DialogHeader>
 
-          {/* Channel selector. Each option is disabled with a short helper
-              line when its required contact info is missing. SMS is hidden
-              entirely when Twilio is not configured (with a tooltip on the
-              icon) so operators don't see a choice they can't take. */}
           <div className="space-y-2" data-testid={`reminder-channel-group-${tx.id}`}>
             <Label className="text-sm font-medium">{t('reminderChannelLabel')}</Label>
             <RadioGroup
@@ -491,10 +472,6 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
                   </Label>
                 </div>
               ) : hasPhone ? (
-                // Twilio not configured but borrower has a phone: show the
-                // option as unavailable so the operator knows why SMS isn't
-                // an option (and who to ask). When the borrower also has no
-                // phone, hide the row entirely — there's nothing actionable.
                 <TooltipProvider>
                   <Tooltip>
                     <TooltipTrigger asChild>

@@ -101,21 +101,14 @@ app.use((req, res, next) => {
     reusePort: true,
   }, () => {
     log(`serving on port ${port}`);
-    // One-line startup notice when SMS reminders are unavailable, so an
-    // operator wondering why the SMS option is hidden in the dashboard
-    // can find the missing secrets in the server log without digging.
     const sms = getTwilioConfigStatus();
     if (!sms.configured) {
       log(`SMS reminders disabled: ${sms.reason}`);
     }
-    // In production, public links inside borrower SMS/email should come
-    // from a trusted base URL (APP_URL/SITE_URL), not from the inbound
-    // request's Host header (which can be spoofed via proxy). Warn loudly
-    // when neither is configured so an admin sets one before going live.
-    if (process.env.NODE_ENV === 'production'
+    if (app.get('env') === 'production'
         && !process.env.APP_URL?.trim()
         && !process.env.SITE_URL?.trim()) {
-      log('WARNING: APP_URL/SITE_URL is not set. Borrower status links in reminder SMS/email will fall back to the request Host header, which is unsafe behind untrusted proxies.');
+      log('WARNING: APP_URL/SITE_URL is not set; SMS reminders will fail in production.');
     }
   });
 })();

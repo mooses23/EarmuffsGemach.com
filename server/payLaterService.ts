@@ -30,16 +30,9 @@ function hashToken(raw: string): string {
   return createHash('sha256').update(raw).digest('hex');
 }
 
-/**
- * Mints a new magic token for the borrower status page on an existing
- * transaction (overwriting any prior hash) and returns the raw token.
- *
- * Used by the return-reminder flow so the SMS/email body can include a
- * working public link even for plain (non-PayLater) transactions that
- * never went through createSetupIntent. The 30-day expiry mirrors the
- * setup-intent flow so a borrower has plenty of time to act on the
- * reminder before the link goes stale.
- */
+// Mints a fresh borrower status token (30-day expiry) on an existing
+// transaction and returns the raw token. Used by the reminder flow so
+// SMS/email can include a working status link.
 export async function mintBorrowerStatusToken(transactionId: number): Promise<string> {
   const { raw, hashed } = generateMagicToken();
   await storage.updateTransaction(transactionId, {

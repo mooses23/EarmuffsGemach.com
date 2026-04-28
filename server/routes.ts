@@ -2553,9 +2553,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const hasRealEmail = !!email && !email.toLowerCase().endsWith(PLACEHOLDER_EMAIL_SUFFIX);
       const phone = normalizePhoneForSms(transaction.borrowerPhone);
 
-      // Per-channel preconditions BEFORE rate-limit so the operator gets
-      // an actionable error ("no phone on file") instead of a confusing
-      // 429 when both conditions fail.
+      // Per-channel preconditions before rate-limit so failures surface a
+      // clear reason instead of a 429.
       if (channel === 'email' && !hasRealEmail) {
         return res.status(400).json({ message: "No real borrower email on file for this transaction" });
       }
@@ -2569,9 +2568,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         }
       }
 
-      // Rate limit is shared across channels: one reminder per 24h per
-      // transaction, regardless of how it was sent. Keys off
-      // `lastReturnReminderAt`, which is updated for both channels.
+      // Shared 24h rate limit across email + SMS.
       if (transaction.lastReturnReminderAt) {
         const elapsed = Date.now() - new Date(transaction.lastReturnReminderAt).getTime();
         if (elapsed < REMINDER_RATE_LIMIT_MS) {
@@ -2583,8 +2580,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const location = await storage.getLocation(locationId);
       if (!location) return res.status(404).json({ message: "Location not found" });
 
-      // Choose reminder language from canonical location data: if the location
-      // has a Hebrew name populated, treat it as a Hebrew-speaking gemach.
       const language: 'en' | 'he' = location.nameHe ? 'he' : 'en';
       const locationName = (language === 'he' && location.nameHe) ? location.nameHe : location.name;
 
@@ -2601,32 +2596,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(502).json({ message: sendErr?.message || "Failed to send reminder email" });
         }
       } else {
-        // Mint a fresh borrower status link so the SMS body can include
-        // a working public URL even for plain (non-PayLater) loans that
-        // never minted a magic token at borrow time. This invalidates
-        // any prior link, which is acceptable for a reminder send: the
-        // borrower will follow the latest link from the most recent ping.
-        let statusUrl: string | undefined;
-        try {
-          const rawToken = await mintBorrowerStatusToken(transactionId);
-          // Prefer a canonical base URL from configuration so attacker-set
-          // Host / X-Forwarded-* headers can't redirect borrowers to a
-          // spoofed status page. Falls back to req-derived only as a last
-          // resort (matches the convention used elsewhere in this file
-          // for operator welcome links).
-          const envBase = (process.env.APP_URL || process.env.SITE_URL || '').trim();
-          const baseUrl = envBase
-            ? envBase.replace(/\/$/, '')
-            : `${req.protocol}://${req.get('host')}`;
-          if (baseUrl) {
-            statusUrl = `${baseUrl}/status/${transactionId}?token=${rawToken}`;
-          }
-        } catch (tokenErr) {
-          // A token mint failure shouldn't block the SMS send — the
-          // borrower can still get the gist (gemach + due date). Log
-          // and keep going with no link.
-          console.error("Failed to mint borrower status token for reminder SMS:", tokenErr);
+        const envBase = (process.env.APP_URL || process.env.SITE_URL || '').trim();
+        if (!envBase && process.env.NODE_ENV === 'production') {
+          return res.status(500).json({ message: 'APP_URL or SITE_URL must be set to send SMS reminders.' });
         }
+        const baseUrl = (envBase || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+        const rawToken = await mintBorrowerStatusToken(transactionId);
+        const statusUrl = `${baseUrl}/status/${transactionId}?token=${rawToken}`;
 
         try {
           await sendReturnReminderSMS({
