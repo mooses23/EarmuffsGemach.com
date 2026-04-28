@@ -650,14 +650,22 @@ function LocationCard({ location, region }: LocationCardProps) {
             </div>
           )}
           {location.email && (
-            <div className="flex items-center">
-              <Mail className={`h-4 w-4 mr-2 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-400" : "text-slate-400"}`} />
-              <a href={`mailto:${location.email}`} className="text-sm text-slate-300 hover:text-white transition-colors truncate">{location.email}</a>
-              {location.contactPreference === "email" && (
-                <span className="ml-2 text-xs text-blue-400 font-medium flex items-center gap-0.5 flex-shrink-0">
-                  <Star className="w-3 h-3 fill-current" /> {t("preferred")}
-                </span>
-              )}
+            <div className="flex items-start">
+              <Mail className={`h-4 w-4 mr-2 mt-1 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-400" : "text-slate-400"}`} />
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                <a
+                  href={`mailto:${location.email}`}
+                  className="text-sm text-slate-300 hover:text-white transition-colors break-all"
+                  data-testid={`link-location-email-${location.id}`}
+                >
+                  {location.email}
+                </a>
+                {location.contactPreference === "email" && (
+                  <span className="text-xs text-blue-400 font-medium flex items-center gap-0.5 flex-shrink-0">
+                    <Star className="w-3 h-3 fill-current" /> {t("preferred")}
+                  </span>
+                )}
+              </div>
             </div>
           )}
           {locContact && (

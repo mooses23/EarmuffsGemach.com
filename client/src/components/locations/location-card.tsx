@@ -94,9 +94,9 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
               <User className="w-5 h-5 mr-2 text-neutral-500 flex-shrink-0" />
               <span>{locContact}</span>
             </p>
-            <p className="flex items-center mb-2">
-              <MapPin className="w-5 h-5 mr-2 text-neutral-500 flex-shrink-0" />
-              <span>{locAddress}</span>
+            <p className="flex items-start mb-2">
+              <MapPin className="w-5 h-5 mr-2 mt-0.5 text-neutral-500 flex-shrink-0" />
+              <span className="break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</span>
             </p>
             {location.phone && (
               <p className="flex items-center mb-2">
@@ -110,15 +110,23 @@ export function LocationCard({ location, locationNumber }: LocationCardProps) {
               </p>
             )}
             {location.email && (
-              <p className="flex items-center mb-2">
-                <Mail className={`w-5 h-5 mr-2 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-500" : "text-neutral-500"}`} />
-                <a href={`mailto:${location.email}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm truncate">{location.email}</a>
-                {location.contactPreference === "email" && (
-                  <span className="ml-2 text-xs text-blue-500 font-medium flex items-center gap-0.5 flex-shrink-0">
-                    <Star className="w-3 h-3 fill-current" /> preferred
-                  </span>
-                )}
-              </p>
+              <div className="flex items-start mb-2">
+                <Mail className={`w-5 h-5 mr-2 mt-0.5 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-500" : "text-neutral-500"}`} />
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                  <a
+                    href={`mailto:${location.email}`}
+                    className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm break-all"
+                    data-testid={`link-location-email-${location.id}`}
+                  >
+                    {location.email}
+                  </a>
+                  {location.contactPreference === "email" && (
+                    <span className="text-xs text-blue-500 font-medium flex items-center gap-0.5 flex-shrink-0">
+                      <Star className="w-3 h-3 fill-current" /> preferred
+                    </span>
+                  )}
+                </div>
+              </div>
             )}
             <div className="mb-2" data-contact-actions>
               <ContactActionsLight phone={location.phone} locationName={locName} />
