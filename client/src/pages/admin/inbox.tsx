@@ -1220,6 +1220,7 @@ export default function AdminInbox() {
       } else {
         markContactRead.mutate({ id: Number(item.id), isRead: true });
       }
+      setSelected({ ...item, isRead: true });
     }
   };
 
