@@ -2735,12 +2735,16 @@ export class MemStorage implements IStorage {
     if (!transaction) {
       throw new Error(`Transaction with id ${id} not found`);
     }
-    
-    const updatedTransaction: Transaction = { 
-      ...transaction, 
+
+    // Only overwrite refundAmount when the caller explicitly supplies one.
+    // Pay-later (CHARGED) transactions manage refundAmount via recordTransactionRefund;
+    // auto-filling depositAmount here would make the frontend think the refund
+    // already happened and disable the refund button.
+    const updatedTransaction: Transaction = {
+      ...transaction,
       isReturned: true,
       actualReturnDate: new Date(),
-      refundAmount: refundAmount ?? transaction.depositAmount
+      ...(refundAmount !== undefined ? { refundAmount } : {}),
     };
     this.transactions.set(id, updatedTransaction);
     return updatedTransaction;

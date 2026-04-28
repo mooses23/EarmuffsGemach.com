@@ -587,13 +587,22 @@ export class DatabaseStorage implements IStorage {
     if (!transaction) {
       throw new Error(`Transaction with id ${id} not found`);
     }
-    
+
+    // Only write refundAmount when the caller explicitly supplies one.
+    // For pay-later (CHARGED/PARTIALLY_REFUNDED) transactions the refund amount
+    // is owned by recordTransactionRefund (the Stripe-first path); auto-filling
+    // depositAmount here would make the frontend believe the refund already
+    // happened and disable the refund button.
+    const updateData: Record<string, unknown> = {
+      isReturned: true,
+      actualReturnDate: new Date(),
+    };
+    if (refundAmount !== undefined) {
+      updateData.refundAmount = refundAmount;
+    }
+
     const result = await db.update(transactions)
-      .set({
-        isReturned: true,
-        actualReturnDate: new Date(),
-        refundAmount: refundAmount ?? transaction.depositAmount
-      })
+      .set(updateData)
       .where(eq(transactions.id, id))
       .returning();
     return result[0];
