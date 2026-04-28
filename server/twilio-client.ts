@@ -152,44 +152,24 @@ export interface OperatorWelcomeMessageContext {
   signOff?: string;
 }
 
-// Heimish, plain-text welcome body. Same body for SMS and WhatsApp body-mode.
-// No emojis, no shouting, no marketing language, no "Reply STOP", no shortened URLs.
-// Goal: feel like a personal note from a real person at the gemach.
+// Heimish, plain-text welcome body kept short enough to fit a single SMS
+// segment when possible (GSM-7 ~160 chars / UCS-2 ~70 chars). Hebrew is
+// inherently UCS-2 so we keep it tight; both stay well under the 320-char
+// target. No emojis, no shouting, no "Reply STOP" footer, plain URL.
 export function buildOperatorWelcomeMessageBody(ctx: OperatorWelcomeMessageContext): string {
-  const signOff = (ctx.signOff || '').trim() || 'Baby Banz Earmuffs Gemach';
-  const pin = (ctx.defaultPin || '1234').trim();
+  const signOff = (ctx.signOff || '').trim() || 'Earmuffs Gemach';
   if (ctx.language === 'he') {
-    return [
-      `שלום ${ctx.locationName},`,
-      ``,
-      `רצינו רק לעדכן שיש עכשיו דשבורד קטן וידידותי לניהול גמ"ח האוזניות שלך — אפשר לראות מלאי, להשאיל ולקבל תזכורות החזרה.`,
-      ``,
-      `הקישור האישי שלך לכניסה והגדרת הסיסמה החדשה:`,
-      `${ctx.claimUrl}`,
-      ``,
-      `קוד הגמ"ח: ${ctx.locationCode}. סיסמה זמנית: ${pin} (תחליף אותה בקישור).`,
-      ``,
-      `תודה רבה על מה שאתם עושים,`,
-      `— ${signOff}`,
-    ].join('\n');
+    // ~150 chars
+    return `שלום ${ctx.locationName}, יש דשבורד חדש לגמ"ח (${ctx.locationCode}). הקישור שלך לכניסה ולעדכון סיסמה:\n${ctx.claimUrl}\nתודה — ${signOff}`;
   }
-  return [
-    `Hi ${ctx.locationName},`,
-    ``,
-    `Just letting you know there's now a small, friendly dashboard for your earmuffs gemach — you can see your stock, run lend and return, and send return reminders.`,
-    ``,
-    `Your personal link to log in and set your own PIN:`,
-    `${ctx.claimUrl}`,
-    ``,
-    `Location code ${ctx.locationCode}, temporary PIN ${pin} (you'll change it in the link).`,
-    ``,
-    `Thank you for everything you do,`,
-    `— ${signOff}`,
-  ].join('\n');
+  // ~170 chars
+  return `Hi ${ctx.locationName}, there's now a dashboard for the gemach (${ctx.locationCode}). Your link to log in and set your PIN:\n${ctx.claimUrl}\nThank you — ${signOff}`;
 }
 
 export interface OperatorWelcomeSendContext extends OperatorWelcomeMessageContext {
   toPhone: string;
+  /** Optional public URL Twilio will POST delivery updates to. */
+  statusCallbackUrl?: string;
 }
 
 export interface OperatorWelcomeChannelResult {
@@ -239,6 +219,7 @@ export async function sendOperatorWelcomeSms(ctx: OperatorWelcomeSendContext): P
       to,
       from: process.env.TWILIO_FROM_NUMBER!,
       body,
+      ...(ctx.statusCallbackUrl ? { statusCallback: ctx.statusCallbackUrl } : {}),
     });
     return { ok: true, sid: msg.sid };
   } catch (e: any) {
@@ -265,6 +246,7 @@ export async function sendOperatorWelcomeWhatsApp(ctx: OperatorWelcomeSendContex
     ? (process.env.TWILIO_WHATSAPP_CONTENT_SID_HE || '').trim()
     : (process.env.TWILIO_WHATSAPP_CONTENT_SID_EN || '').trim();
   try {
+    const cb = ctx.statusCallbackUrl ? { statusCallback: ctx.statusCallbackUrl } : {};
     const msg = await client.messages.create(
       contentSid
         ? {
@@ -277,11 +259,13 @@ export async function sendOperatorWelcomeWhatsApp(ctx: OperatorWelcomeSendContex
               '3': ctx.locationCode,
               '4': (ctx.defaultPin || '1234').trim(),
             }),
+            ...cb,
           }
         : {
             to: `whatsapp:${to}`,
             from: whatsappFrom(),
             body,
+            ...cb,
           },
     );
     return { ok: true, sid: msg.sid };

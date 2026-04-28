@@ -153,12 +153,16 @@ export const locations = pgTable("locations", {
   claimToken: text("claim_token").unique(),
   claimTokenCreatedAt: timestamp("claim_token_created_at"),
   welcomeSentAt: timestamp("welcome_sent_at"),
-  welcomeSmsStatus: text("welcome_sms_status"), // 'sent' | 'failed' | null
+  welcomeSmsStatus: text("welcome_sms_status"), // 'queued' | 'sent' | 'delivered' | 'undelivered' | 'failed' | null
   welcomeSmsError: text("welcome_sms_error"),
   welcomeSmsSentAt: timestamp("welcome_sms_sent_at"),
+  welcomeSmsSid: text("welcome_sms_sid"),
+  welcomeSmsDeliveredAt: timestamp("welcome_sms_delivered_at"),
   welcomeWhatsappStatus: text("welcome_whatsapp_status"),
   welcomeWhatsappError: text("welcome_whatsapp_error"),
   welcomeWhatsappSentAt: timestamp("welcome_whatsapp_sent_at"),
+  welcomeWhatsappSid: text("welcome_whatsapp_sid"),
+  welcomeWhatsappDeliveredAt: timestamp("welcome_whatsapp_delivered_at"),
   defaultWelcomeChannel: text("default_welcome_channel"), // 'sms' | 'whatsapp' | 'both' | null
   contactPreference: text("contact_preference"), // 'phone' | 'whatsapp' | 'email' | null
   contactPreferenceSetAt: timestamp("contact_preference_set_at"),

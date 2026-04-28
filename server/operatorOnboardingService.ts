@@ -18,6 +18,8 @@ export interface SendWelcomeOptions {
   baseUrl: string; // e.g. https://app.example.com (no trailing slash required)
   signOff?: string;
   rememberAsDefault?: boolean;
+  /** If set, Twilio will POST per-message delivery updates to this URL. */
+  statusCallbackUrl?: string;
 }
 
 export interface SendWelcomeResult {
@@ -37,7 +39,7 @@ export interface SendWelcomeResult {
 function detectLanguage(loc: Location): 'en' | 'he' {
   // We treat "has Hebrew name fields" as the strongest hint, since the seed
   // data fills nameHe for Israel locations only.
-  if ((loc as any).nameHe || (loc as any).addressHe || (loc as any).contactPersonHe) {
+  if (loc.nameHe || loc.addressHe || loc.contactPersonHe) {
     return 'he';
   }
   return 'en';
@@ -49,16 +51,6 @@ function generateClaimToken(): string {
 
 export function buildClaimUrl(baseUrl: string, token: string): string {
   return `${baseUrl.replace(/\/$/, '')}/welcome/${encodeURIComponent(token)}`;
-}
-
-// Welcome links expire to limit the blast radius of a leaked SMS/WhatsApp
-// and to force a fresh, intentional resend before any old link can be used.
-export const CLAIM_TOKEN_TTL_DAYS = 60;
-export function claimTokenIsExpired(loc: { claimTokenCreatedAt?: Date | string | null }): boolean {
-  const created = loc.claimTokenCreatedAt ? new Date(loc.claimTokenCreatedAt as any) : null;
-  if (!created || isNaN(created.getTime())) return false; // legacy rows without timestamp pass
-  const ageMs = Date.now() - created.getTime();
-  return ageMs > CLAIM_TOKEN_TTL_DAYS * 24 * 60 * 60 * 1000;
 }
 
 /**
@@ -90,7 +82,7 @@ export function buildWelcomePreview(loc: Location, baseUrl: string, signOff?: st
     signOff,
   });
   const heBody = buildOperatorWelcomeMessageBody({
-    locationName: (loc as any).nameHe || loc.name,
+    locationName: loc.nameHe || loc.name,
     locationCode: loc.locationCode,
     claimUrl: claimUrlPreview,
     language: 'he',
@@ -118,7 +110,7 @@ export async function sendWelcomeForLocation(
   if (!loc) {
     return { locationId, locationName: `#${locationId}`, channel: options.channel, ok: false, skipped: 'not found' };
   }
-  if ((loc as any).isActive === false) {
+  if (loc.isActive === false) {
     return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'inactive' };
   }
   if (!loc.phone) {
@@ -129,12 +121,12 @@ export async function sendWelcomeForLocation(
   }
 
   const language = detectLanguage(loc);
-  // Force regeneration when the existing token is past TTL so a resend never
-  // distributes a link that the public endpoints would reject as expired.
-  const tokenStale = !!loc.claimToken && claimTokenIsExpired(loc);
-  const ensured = await storage.ensureLocationClaimToken(loc.id, generateClaimToken, { regenerate: tokenStale });
+  // Tokens are durable forever — only regenerate if the row literally has no
+  // token yet. This is the spec: re-sends use the same link, and the public
+  // endpoints short-circuit "already onboarded" rather than expiring links.
+  const ensured = await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
   const claimUrl = buildClaimUrl(options.baseUrl, ensured.token);
-  const localizedName = language === 'he' ? ((loc as any).nameHe || loc.name) : loc.name;
+  const localizedName = language === 'he' ? (loc.nameHe || loc.name) : loc.name;
 
   const requested = {
     sms: options.channel === 'sms' || options.channel === 'both',
@@ -150,13 +142,14 @@ export async function sendWelcomeForLocation(
       language,
       defaultPin: loc.operatorPin || '1234',
       signOff: options.signOff,
+      statusCallbackUrl: options.statusCallbackUrl,
     },
     requested,
   );
 
   await storage.recordOperatorWelcomeAttempt(loc.id, {
-    sms: requested.sms ? { ok: !!results.sms?.ok, error: results.sms?.error } : undefined,
-    whatsapp: requested.whatsapp ? { ok: !!results.whatsapp?.ok, error: results.whatsapp?.error } : undefined,
+    sms: requested.sms ? { ok: !!results.sms?.ok, error: results.sms?.error, sid: results.sms?.sid } : undefined,
+    whatsapp: requested.whatsapp ? { ok: !!results.whatsapp?.ok, error: results.whatsapp?.error, sid: results.whatsapp?.sid } : undefined,
     defaultWelcomeChannel: options.rememberAsDefault ? options.channel : undefined,
   });
 
@@ -202,4 +195,31 @@ export function getOnboardingTwilioStatus() {
     sms: getTwilioConfigStatus(),
     whatsapp: getTwilioWhatsAppConfigStatus(),
   };
+}
+
+/**
+ * Ingest a Twilio status callback (form-encoded) and update the cached
+ * delivery state on whichever location row owns the matching SID. Returns
+ * a small summary for logging/route response.
+ */
+export async function ingestTwilioStatusCallback(body: Record<string, any>): Promise<{
+  matched: boolean;
+  channel?: 'sms' | 'whatsapp';
+  status?: string;
+}> {
+  const sid = String(body?.MessageSid || body?.SmsSid || '').trim();
+  const rawStatus = String(body?.MessageStatus || body?.SmsStatus || '').toLowerCase().trim();
+  if (!sid || !rawStatus) return { matched: false };
+  const errorMessage = body?.ErrorMessage ? String(body.ErrorMessage) : (body?.ErrorCode ? `Twilio error ${body.ErrorCode}` : undefined);
+  // Twilio sends `whatsapp:+...` in the From field for WhatsApp messages.
+  const channel: 'sms' | 'whatsapp' = String(body?.From || '').startsWith('whatsapp:') ? 'whatsapp' : 'sms';
+  // Try the inferred channel first; if no row matches, try the other channel
+  // (we only know it for sure once a row matches the sid).
+  let updated = await storage.updateWelcomeDeliveryStatus(sid, channel, rawStatus, errorMessage);
+  if (!updated) {
+    const other: 'sms' | 'whatsapp' = channel === 'sms' ? 'whatsapp' : 'sms';
+    updated = await storage.updateWelcomeDeliveryStatus(sid, other, rawStatus, errorMessage);
+    if (updated) return { matched: true, channel: other, status: rawStatus };
+  }
+  return { matched: !!updated, channel, status: rawStatus };
 }

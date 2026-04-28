@@ -109,6 +109,7 @@ export default function AdminLocations() {
     return "both";
   });
   const [welcomeChannel, setWelcomeChannel] = useState<OperatorWelcomeChannel>(defaultChannel);
+  const [rememberAsDefault, setRememberAsDefault] = useState(false);
 
   const setDefaultChannel = (c: OperatorWelcomeChannel) => {
     setDefaultChannelState(c);
@@ -139,8 +140,8 @@ export default function AdminLocations() {
   });
 
   const sendWelcomeOneMutation = useMutation({
-    mutationFn: async ({ id, channel }: { id: number; channel: OperatorWelcomeChannel }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/${id}/send-onboarding-welcome`, { channel });
+    mutationFn: async ({ id, channel, rememberAsDefault }: { id: number; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/${id}/send-onboarding-welcome`, { channel, rememberAsDefault });
       return res.json();
     },
     onSuccess: (data: any) => {
@@ -164,8 +165,8 @@ export default function AdminLocations() {
   });
 
   const sendBulkOnboardingMutation = useMutation({
-    mutationFn: async ({ locationIds, channel }: { locationIds: number[]; channel: OperatorWelcomeChannel }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, { locationIds, channel });
+    mutationFn: async ({ locationIds, channel, rememberAsDefault }: { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, { locationIds, channel, rememberAsDefault });
       return res.json();
     },
     onSuccess: (data: any) => {
@@ -183,8 +184,8 @@ export default function AdminLocations() {
   });
 
   const sendAllNotOnboardedMutation = useMutation({
-    mutationFn: async ({ channel }: { channel: OperatorWelcomeChannel }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, { channel });
+    mutationFn: async ({ channel, rememberAsDefault }: { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, { channel, rememberAsDefault });
       return res.json();
     },
     onSuccess: (data: any) => {
@@ -202,10 +203,13 @@ export default function AdminLocations() {
 
   const getOnboardingStatus = (loc: Location): "onboarded" | "sent" | "failed" | "not-sent" => {
     if ((loc as any).onboardedAt) return "onboarded";
-    const sms = (loc as any).welcomeSmsStatus as string | null | undefined;
-    const wa = (loc as any).welcomeWhatsappStatus as string | null | undefined;
-    if (sms === "sent" || wa === "sent") return "sent";
-    if (sms === "failed" || wa === "failed") return "failed";
+    const sms = ((loc as any).welcomeSmsStatus as string | null | undefined)?.toLowerCase();
+    const wa = ((loc as any).welcomeWhatsappStatus as string | null | undefined)?.toLowerCase();
+    // Twilio terminal statuses: queued/sending/sent/delivered = success; failed/undelivered = failure.
+    const sentLike = (s?: string) => s === "sent" || s === "delivered" || s === "queued" || s === "sending" || s === "accepted";
+    const failedLike = (s?: string) => s === "failed" || s === "undelivered";
+    if (sentLike(sms) || sentLike(wa)) return "sent";
+    if (failedLike(sms) || failedLike(wa)) return "failed";
     return "not-sent";
   };
 
@@ -213,6 +217,7 @@ export default function AdminLocations() {
     setWelcomeTarget({ kind: "single", id: loc.id, loc });
     const locDefault = (loc as any).defaultWelcomeChannel as OperatorWelcomeChannel | null;
     setWelcomeChannel(locDefault && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefault) ? locDefault : defaultChannel);
+    setRememberAsDefault(false);
     setWelcomeDialogOpen(true);
   };
 
@@ -220,23 +225,25 @@ export default function AdminLocations() {
     if (selectedOnboardingIds.size === 0) return;
     setWelcomeTarget({ kind: "selected" });
     setWelcomeChannel(defaultChannel);
+    setRememberAsDefault(false);
     setWelcomeDialogOpen(true);
   };
 
   const openAllNotOnboardedPicker = () => {
     setWelcomeTarget({ kind: "all-not-onboarded" });
     setWelcomeChannel(defaultChannel);
+    setRememberAsDefault(false);
     setWelcomeDialogOpen(true);
   };
 
   const sendFromDialog = () => {
     if (!welcomeTarget) return;
     if (welcomeTarget.kind === "single") {
-      sendWelcomeOneMutation.mutate({ id: welcomeTarget.id, channel: welcomeChannel });
+      sendWelcomeOneMutation.mutate({ id: welcomeTarget.id, channel: welcomeChannel, rememberAsDefault });
     } else if (welcomeTarget.kind === "selected") {
-      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedOnboardingIds), channel: welcomeChannel });
+      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedOnboardingIds), channel: welcomeChannel, rememberAsDefault });
     } else {
-      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel });
+      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel, rememberAsDefault });
     }
   };
 
@@ -894,6 +901,8 @@ export default function AdminLocations() {
                       const smsErr = (loc as any).welcomeSmsError as string | null;
                       const wa = (loc as any).welcomeWhatsappStatus as string | null;
                       const waErr = (loc as any).welcomeWhatsappError as string | null;
+                      const lastSentAt = (loc as any).welcomeSentAt as string | Date | null;
+                      const sentDaysAgo = lastSentAt ? Math.max(0, Math.floor((Date.now() - new Date(lastSentAt).getTime()) / 86400000)) : null;
                       return (
                         <TableRow key={loc.id} data-testid={`row-onboarding-${loc.id}`}>
                           <TableCell>
@@ -925,6 +934,11 @@ export default function AdminLocations() {
                           <TableCell>
                             <div className="flex flex-col gap-0.5">
                               <OnboardingStatusBadge status={status} />
+                              {status !== "onboarded" && sentDaysAgo !== null && (
+                                <div className="text-[10px] text-muted-foreground" data-testid={`sent-ago-${loc.id}`}>
+                                  Sent {sentDaysAgo === 0 ? "today" : sentDaysAgo === 1 ? "1 day ago" : `${sentDaysAgo} days ago`}
+                                </div>
+                              )}
                               {(sms || wa) && (
                                 <div className="text-[10px] text-muted-foreground space-y-0.5">
                                   {sms && (
@@ -1016,6 +1030,38 @@ export default function AdminLocations() {
               </DialogDescription>
             </DialogHeader>
 
+            {/* Recipient list — shown for bulk and send-all so admins can see exactly
+                who will receive a message before they hit Send. */}
+            {welcomeTarget && welcomeTarget.kind !== "single" && (() => {
+              const recipients = welcomeTarget.kind === "selected"
+                ? locations.filter((l) => selectedOnboardingIds.has(l.id))
+                : eligibleNotOnboarded;
+              return (
+                <div className="border rounded-md bg-muted/30 max-h-40 overflow-y-auto p-2" data-testid="recipient-list">
+                  <div className="text-xs font-medium mb-1 text-muted-foreground">
+                    Recipients ({recipients.length})
+                  </div>
+                  {recipients.length === 0 ? (
+                    <div className="text-xs text-muted-foreground italic">No recipients</div>
+                  ) : (
+                    <ul className="text-xs space-y-0.5">
+                      {recipients.slice(0, 50).map((r) => (
+                        <li key={r.id} className="flex justify-between gap-2">
+                          <span className="truncate">
+                            {r.name} <span className="text-muted-foreground">· {r.locationCode}</span>
+                          </span>
+                          <span className="text-muted-foreground shrink-0">{r.phone || "no phone"}</span>
+                        </li>
+                      ))}
+                      {recipients.length > 50 && (
+                        <li className="text-muted-foreground italic">…and {recipients.length - 50} more</li>
+                      )}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
+
             <div className="space-y-4 py-2">
               <div>
                 <Label className="text-sm font-medium">Channel</Label>
@@ -1050,6 +1096,16 @@ export default function AdminLocations() {
                     Save "{welcomeChannel}" as my default
                   </button>
                 )}
+                <label className="flex items-center gap-2 mt-3 text-xs cursor-pointer select-none" data-testid="checkbox-remember-default-wrap">
+                  <Checkbox
+                    checked={rememberAsDefault}
+                    onCheckedChange={(v) => setRememberAsDefault(!!v)}
+                    data-testid="checkbox-remember-default"
+                  />
+                  <span>
+                    Remember <strong>{welcomeChannel}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
+                  </span>
+                </label>
               </div>
 
               {twilioStatusQuery.data && (

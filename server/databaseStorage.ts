@@ -312,8 +312,11 @@ export class DatabaseStorage implements IStorage {
   /**
    * Atomic onboarding completion. The UPDATE is gated on the token still
    * matching AND the location not yet being onboarded, so concurrent /complete
-   * calls with the same token are safe — only one wins, and the loser sees
-   * `undefined` (which the route translates to 409 Already onboarded).
+   * calls with the same token cannot both succeed — the loser sees `undefined`
+   * (which the route translates to 409 Already onboarded). The claim token is
+   * intentionally NOT cleared: per spec the welcome link stays valid forever
+   * so that the operator can reopen it later (it short-circuits to the
+   * "already onboarded — go to dashboard" view).
    */
   async completeOperatorOnboardingByToken(
     token: string,
@@ -334,8 +337,6 @@ export class DatabaseStorage implements IStorage {
         contactPreference: data.contactPreference,
         contactPreferenceSetAt: now,
         onboardedAt: now,
-        // Burn the claim token so the link is one-time use.
-        claimToken: null,
       })
       .where(and(
         eq(locations.claimToken, token),
@@ -348,8 +349,8 @@ export class DatabaseStorage implements IStorage {
   async recordOperatorWelcomeAttempt(
     id: number,
     update: {
-      sms?: { ok: boolean; error?: string };
-      whatsapp?: { ok: boolean; error?: string };
+      sms?: { ok: boolean; error?: string; sid?: string };
+      whatsapp?: { ok: boolean; error?: string; sid?: string };
       defaultWelcomeChannel?: string | null;
     },
   ): Promise<Location> {
@@ -359,17 +360,50 @@ export class DatabaseStorage implements IStorage {
       patch.welcomeSmsStatus = update.sms.ok ? 'sent' : 'failed';
       patch.welcomeSmsError = update.sms.ok ? null : (update.sms.error || 'Unknown error');
       patch.welcomeSmsSentAt = now;
+      patch.welcomeSmsSid = update.sms.sid || null;
+      patch.welcomeSmsDeliveredAt = null;
     }
     if (update.whatsapp) {
       patch.welcomeWhatsappStatus = update.whatsapp.ok ? 'sent' : 'failed';
       patch.welcomeWhatsappError = update.whatsapp.ok ? null : (update.whatsapp.error || 'Unknown error');
       patch.welcomeWhatsappSentAt = now;
+      patch.welcomeWhatsappSid = update.whatsapp.sid || null;
+      patch.welcomeWhatsappDeliveredAt = null;
     }
     if (update.defaultWelcomeChannel !== undefined) {
       patch.defaultWelcomeChannel = update.defaultWelcomeChannel;
     }
     const result = await db.update(locations).set(patch).where(eq(locations.id, id)).returning();
     if (!result[0]) throw new Error(`Location with id ${id} not found`);
+    return result[0];
+  }
+
+  /**
+   * Updates the cached delivery state for an SMS or WhatsApp welcome message
+   * based on a Twilio status callback (e.g. delivered/undelivered/failed).
+   * The row is matched by SID since Twilio doesn't know our location id.
+   */
+  async updateWelcomeDeliveryStatus(
+    sid: string,
+    channel: 'sms' | 'whatsapp',
+    status: string,
+    errorMessage?: string,
+  ): Promise<Location | undefined> {
+    const now = new Date();
+    const patch: Record<string, any> = {};
+    if (channel === 'sms') {
+      patch.welcomeSmsStatus = status;
+      if (status === 'delivered') patch.welcomeSmsDeliveredAt = now;
+      if (errorMessage) patch.welcomeSmsError = errorMessage;
+      else if (status === 'delivered' || status === 'sent') patch.welcomeSmsError = null;
+      const result = await db.update(locations).set(patch).where(eq(locations.welcomeSmsSid, sid)).returning();
+      return result[0];
+    }
+    patch.welcomeWhatsappStatus = status;
+    if (status === 'delivered') patch.welcomeWhatsappDeliveredAt = now;
+    if (errorMessage) patch.welcomeWhatsappError = errorMessage;
+    else if (status === 'delivered' || status === 'sent') patch.welcomeWhatsappError = null;
+    const result = await db.update(locations).set(patch).where(eq(locations.welcomeWhatsappSid, sid)).returning();
     return result[0];
   }
 
@@ -1109,9 +1143,15 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_status TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_error TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_sent_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_sid TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_sms_delivered_at TIMESTAMP`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_status TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_error TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_sent_at TIMESTAMP`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_sid TEXT`);
+    await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS welcome_whatsapp_delivered_at TIMESTAMP`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS locations_welcome_sms_sid_idx ON locations (welcome_sms_sid)`);
+    await db.execute(sql`CREATE INDEX IF NOT EXISTS locations_welcome_whatsapp_sid_idx ON locations (welcome_whatsapp_sid)`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS default_welcome_channel TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS contact_preference TEXT`);
     await db.execute(sql`ALTER TABLE locations ADD COLUMN IF NOT EXISTS contact_preference_set_at TIMESTAMP`);

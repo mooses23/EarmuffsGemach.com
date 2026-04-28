@@ -20,7 +20,7 @@ import {
   sendWelcomeForLocation,
   sendWelcomeForLocations,
   summarizeResults,
-  claimTokenIsExpired,
+  ingestTwilioStatusCallback,
 } from "./operatorOnboardingService.js";
 import { OPERATOR_WELCOME_CHANNELS, OPERATOR_CONTACT_PREFERENCES } from "@shared/schema";
 import { scoreContactSpam } from "./spam-heuristic.js";
@@ -64,6 +64,7 @@ import {
   HEADBAND_COLORS,
   type InsertReplyExample,
   type Contact,
+  type Location as LocationRow,
 } from "../shared/schema.js";
 import { setupAuth, requireRole, requireOperatorForLocation, createTestUsers } from "./auth.js";
 
@@ -739,11 +740,29 @@ export async function registerRoutes(app: Express): Promise<Server> {
   function getOnboardingBaseUrl(req: any): string {
     return process.env.APP_URL || process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
   }
+  function getOnboardingStatusCallbackUrl(req: any): string {
+    return `${getOnboardingBaseUrl(req).replace(/\/$/, '')}/api/twilio/onboarding-status`;
+  }
 
   const onboardingChannelSchema = z.enum(OPERATOR_WELCOME_CHANNELS);
 
-  // (TTL helper `claimTokenIsExpired` is imported from operatorOnboardingService
-  // so the storage layer can reuse the same definition for atomic regen.)
+  // Twilio status callback (delivered / undelivered / failed). Twilio POSTs
+  // form-encoded bodies; we map them to the per-channel status fields. We
+  // always reply 200 so Twilio doesn't retry storms — failures are logged.
+  app.post('/api/twilio/onboarding-status', async (req, res) => {
+    try {
+      const result = await ingestTwilioStatusCallback(req.body || {});
+      if (!result.matched) {
+        // Could be a status callback for a non-onboarding message, or an
+        // SID we don't track yet. Still return 200 so Twilio is happy.
+        console.log('[twilio-status] no row matched for sid:', req.body?.MessageSid);
+      }
+      res.status(200).end();
+    } catch (e: any) {
+      console.error('[twilio-status] handler failed:', e);
+      res.status(200).end();
+    }
+  });
 
   // Twilio config status (admin), so the UI can disable channels and explain why.
   app.get('/api/admin/twilio-status', (req, res) => {
@@ -785,6 +804,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         channel: parsed.data.channel,
         baseUrl,
         rememberAsDefault: parsed.data.rememberAsDefault,
+        statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
       });
       // Response shape kept stable for the FE: results.{sms,whatsapp,anySuccess}.
       res.json({
@@ -825,6 +845,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         channel: parsed.data.channel,
         baseUrl,
         rememberAsDefault: parsed.data.rememberAsDefault,
+        statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
       });
       res.json({ success: true, summary: summarizeResults(results), results });
     } catch (e: any) {
@@ -860,6 +881,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         channel: parsed.data.channel,
         baseUrl,
         rememberAsDefault: parsed.data.rememberAsDefault,
+        statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
       });
       res.json({ success: true, eligible: candidateIds.length, summary: summarizeResults(results), results });
     } catch (e: any) {
@@ -875,10 +897,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!token) return res.status(400).json({ message: 'Missing token' });
       const loc = await storage.getLocationByClaimToken(token);
       if (!loc) return res.status(404).json({ message: 'This link is no longer valid.' });
-      if (claimTokenIsExpired(loc)) {
-        return res.status(410).json({ message: 'This welcome link has expired. Please ask the gemach to send a fresh one.' });
-      }
-      const { operatorPin, claimToken, claimTokenCreatedAt, welcomeSmsError, welcomeWhatsappError, ...safe } = loc as any;
+      // Per spec, welcome links don't expire and stay reusable. The page
+      // short-circuits to "already onboarded → go to dashboard" when the
+      // location is already onboarded.
+      const { operatorPin, claimToken, claimTokenCreatedAt, welcomeSmsError, welcomeWhatsappError, ...safe } = loc as LocationRow;
       res.json({
         location: {
           ...safe,
@@ -920,9 +942,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       // both succeed.
       const loc = await storage.getLocationByClaimToken(token);
       if (!loc) return res.status(404).json({ message: 'This link is no longer valid.' });
-      if (claimTokenIsExpired(loc)) {
-        return res.status(410).json({ message: 'This welcome link has expired. Please ask the gemach to send a fresh one.' });
-      }
       if (loc.onboardedAt) {
         return res.status(409).json({ message: 'This location has already been onboarded. Please log in with your code and PIN.' });
       }
