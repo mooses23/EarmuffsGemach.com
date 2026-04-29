@@ -4799,6 +4799,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // ============================================================
+  // TEST-ONLY SEEDING ENDPOINTS (disabled in production)
+  // ============================================================
+  // These endpoints exist solely to support e2e tests. They are
+  // never registered when NODE_ENV === 'production'.
+  if (process.env.NODE_ENV !== 'production') {
+    // Seed a return-reminder event for a freshly-created test transaction.
+    // Body: { locationId, borrowerName, twilioSid, deliveryStatus, channel?, deliveryErrorCode? }
+    // Returns: { transactionId, twilioSid }
+    app.post('/api/test/seed-reminder-event', async (req, res) => {
+      try {
+        const {
+          locationId,
+          borrowerName,
+          twilioSid,
+          deliveryStatus,
+          channel = 'sms',
+          deliveryErrorCode,
+        } = req.body as Record<string, string | number | undefined>;
+
+        if (!locationId || !borrowerName || !twilioSid || !deliveryStatus) {
+          return res.status(400).json({ message: 'locationId, borrowerName, twilioSid and deliveryStatus are required' });
+        }
+
+        const tx = await storage.createTransaction({
+          locationId: Number(locationId),
+          borrowerName: String(borrowerName),
+          borrowerEmail: `e2e-test-${Date.now()}@example.com`,
+          depositAmount: 20,
+          depositPaymentMethod: 'cash',
+        });
+
+        await storage.recordReturnReminderSent(tx.id, {
+          channel: String(channel),
+          language: 'en',
+          twilioSid: String(twilioSid),
+          deliveryStatus: String(deliveryStatus),
+          deliveryErrorCode: deliveryErrorCode ? String(deliveryErrorCode) : null,
+        });
+
+        res.status(201).json({ transactionId: tx.id, twilioSid });
+      } catch (err: any) {
+        console.error('[test-seed] error:', err);
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+    // Fetch a reminder event by twilioSid for webhook-update verification.
+    app.get('/api/test/reminder-event-by-sid/:sid', async (req, res) => {
+      try {
+        const event = await storage.getReturnReminderEventBySid(req.params.sid);
+        if (!event) return res.status(404).json({ message: 'Not found' });
+        res.json(event);
+      } catch (err: any) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+
+    // Clean up a test transaction (mark as returned so it disappears from dashboards).
+    app.delete('/api/test/transaction/:id', async (req, res) => {
+      try {
+        const id = parseInt(req.params.id, 10);
+        if (Number.isNaN(id)) return res.status(400).json({ message: 'Invalid id' });
+        await storage.markTransactionReturned(id);
+        res.sendStatus(204);
+      } catch (err: any) {
+        res.status(500).json({ message: err.message });
+      }
+    });
+  }
+
   const httpServer = createServer(app);
 
   return httpServer;

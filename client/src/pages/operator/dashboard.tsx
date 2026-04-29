@@ -1721,6 +1721,7 @@ function ReturnWizard({
               placeholder={t('searchByPhoneOrName')}
               value={searchPhone}
               onChange={(e) => setSearchPhone(e.target.value)}
+              data-testid="return-wizard-search"
             />
           </div>
           
