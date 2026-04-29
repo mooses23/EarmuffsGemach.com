@@ -4,7 +4,7 @@ import { useQuery, useMutation } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
-import { Plus, Edit, Trash2, Save, X, CreditCard, ArrowLeft, Home, Key } from "lucide-react";
+import { Plus, Edit, Trash2, Save, X, CreditCard, Key } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -216,27 +216,6 @@ export default function PaymentMethodsAdmin() {
 
   return (
     <>
-      {/* Navigation Breadcrumbs */}
-      <div className="flex items-center gap-2 mb-6">
-        <Button 
-          variant="ghost" 
-          onClick={() => window.location.href = '/admin'}
-          className="flex items-center gap-2"
-        >
-          <ArrowLeft className="h-4 w-4" />
-          {t('backToDashboard')}
-        </Button>
-        <Button 
-          variant="outline" 
-          size="sm"
-          onClick={() => window.location.href = '/'}
-          className="flex items-center gap-2"
-        >
-          <Home className="h-4 w-4" />
-          {t('home')}
-        </Button>
-      </div>
-
       <div className="flex justify-between items-center mb-6">
         <h1 className="text-3xl font-bold">{t('paymentMethodsManagement')}</h1>
         <Button

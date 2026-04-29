@@ -67,7 +67,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Link } from "wouter";
 import DOMPurify from "dompurify";
 import type { Contact, Location } from "@shared/schema";
 import { groupFormContacts } from "@shared/form-thread-grouping";
@@ -1831,19 +1830,12 @@ export default function AdminInbox() {
   return (
     <>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
-          <div className="flex items-center gap-3">
-            <Link href="/admin">
-              <Button variant="ghost" size="icon" data-testid="button-back-admin">
-                <ArrowLeft className="h-4 w-4" />
-              </Button>
-            </Link>
-            <div>
-              <h1 className="text-3xl font-bold flex items-center gap-3">
-                <InboxIcon className="h-8 w-8" />
-                {t("inboxTitle")}
-              </h1>
-              <p className="text-muted-foreground">{t("inboxSubtitle")}</p>
-            </div>
+          <div>
+            <h1 className="text-3xl font-bold flex items-center gap-3">
+              <InboxIcon className="h-8 w-8" />
+              {t("inboxTitle")}
+            </h1>
+            <p className="text-muted-foreground">{t("inboxSubtitle")}</p>
           </div>
           <div className="flex items-center gap-2">
             {unreadCount > 0 && (
