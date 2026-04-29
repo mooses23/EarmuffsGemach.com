@@ -840,6 +840,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         channel: onboardingChannelSchema,
         rememberAsDefault: z.boolean().optional(),
         messageBody: z.string().optional(),
+        customMessage: z.boolean().optional(),
       }).safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
@@ -852,6 +853,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
         signOff: getOperatorWelcomeSigner(),
         messageBody: parsed.data.messageBody,
+        customMessage: parsed.data.customMessage,
       });
       res.json({
         success: result.ok,
@@ -880,6 +882,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         channel: onboardingChannelSchema,
         rememberAsDefault: z.boolean().optional(),
         messageBody: z.string().optional(),
+        customMessage: z.boolean().optional(),
       }).safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
@@ -896,6 +899,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
         signOff: getOperatorWelcomeSigner(),
         messageBody: parsed.data.messageBody,
+        customMessage: parsed.data.customMessage,
       });
       res.json({ success: true, summary: summarizeResults(results), results });
     } catch (e: any) {
@@ -912,6 +916,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         channel: onboardingChannelSchema,
         rememberAsDefault: z.boolean().optional(),
         messageBody: z.string().optional(),
+        customMessage: z.boolean().optional(),
       }).safeParse(req.body || {});
       if (!parsed.success) {
         return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
@@ -941,6 +946,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
         signOff: getOperatorWelcomeSigner(),
         messageBody: parsed.data.messageBody,
+        customMessage: parsed.data.customMessage,
       });
       res.json({ success: true, eligible: candidateIds.length, summary: summarizeResults(results), results });
     } catch (e: any) {

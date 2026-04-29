@@ -425,6 +425,16 @@ export default function AdminLocations() {
   const [rememberAsDefault, setRememberAsDefault] = useState(false);
   const [messageBody, setMessageBody] = useState("");
   const [messageBodyInitialized, setMessageBodyInitialized] = useState(false);
+  // Tracks whether admin has manually edited the message body.
+  // When false → server uses its own built-in template. When true → server uses messageBody with token substitution.
+  const [isCustomMessage, setIsCustomMessage] = useState(false);
+
+  // Wraps all ADMIN-initiated edits to the message body (textarea onChanges).
+  // Programmatic updates (preview load, channel change, template reset) call setMessageBody directly.
+  const handleMessageBodyChange = (val: string) => {
+    setMessageBody(val);
+    setIsCustomMessage(true);
+  };
 
   // Template strings used for bulk sends (placeholder tokens are substituted per-location on the server)
   const BULK_TEMPLATE_EN =
@@ -467,24 +477,26 @@ export default function AdminLocations() {
     enabled: welcomeDialogOpen && welcomeTarget?.kind === "single",
   });
 
-  // Initialize message body from preview when it loads
+  // Initialize message body from preview when it loads (not a custom edit)
   useEffect(() => {
     if (previewQuery.data && !messageBodyInitialized) {
       const lang = previewQuery.data.message.resolvedLanguage;
       const msg = previewQuery.data.message[lang];
       const body = (welcomeChannel === "email") ? msg.emailBody : msg.body;
       setMessageBody(body);
+      setIsCustomMessage(false);
       setMessageBodyInitialized(true);
     }
   }, [previewQuery.data, messageBodyInitialized, welcomeChannel]);
 
-  // When channel changes, update message body from preview
+  // When channel changes, update message body from preview (not a custom edit)
   useEffect(() => {
     if (previewQuery.data && messageBodyInitialized) {
       const lang = previewQuery.data.message.resolvedLanguage;
       const msg = previewQuery.data.message[lang];
       const body = (welcomeChannel === "email") ? msg.emailBody : msg.body;
       setMessageBody(body);
+      setIsCustomMessage(false);
     }
   }, [welcomeChannel]);
 
@@ -506,12 +518,12 @@ export default function AdminLocations() {
   const errorMessage = (err: unknown, fallback: string) =>
     err instanceof Error ? err.message : fallback;
 
-  const sendWelcomeOneMutation = useMutation<SendOneResponse, Error, { id: number; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string }>({
-    mutationFn: async ({ id, channel, rememberAsDefault, messageBody }) => {
+  const sendWelcomeOneMutation = useMutation<SendOneResponse, Error, { id: number; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }>({
+    mutationFn: async ({ id, channel, rememberAsDefault, messageBody, customMessage }) => {
       const res = await apiRequest("POST", `/api/admin/locations/${id}/send-onboarding-welcome`, {
         channel,
         rememberAsDefault,
-        ...(messageBody ? { messageBody } : {}),
+        ...(customMessage && messageBody ? { messageBody, customMessage: true } : {}),
       });
       return res.json() as Promise<SendOneResponse>;
     },
@@ -537,14 +549,17 @@ export default function AdminLocations() {
     onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed to send"), variant: "destructive" }),
   });
 
-  const sendBulkOnboardingMutation = useMutation<SendBulkResponse, Error, { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string }>({
-    mutationFn: async ({ locationIds, channel, rememberAsDefault, messageBody }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, { locationIds, channel, rememberAsDefault, messageBody });
+  const sendBulkOnboardingMutation = useMutation<SendBulkResponse, Error, { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }>({
+    mutationFn: async ({ locationIds, channel, rememberAsDefault, messageBody, customMessage }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, {
+        locationIds, channel, rememberAsDefault,
+        ...(customMessage && messageBody ? { messageBody, customMessage: true } : {}),
+      });
       return res.json() as Promise<SendBulkResponse>;
     },
     onSuccess: (data) => {
       toast({
-        title: "Bulk welcome complete",
+        title: "Bulk messages sent",
         description: `Sent: ${data.summary?.sent ?? 0} · Skipped: ${data.summary?.skipped ?? 0} · Failed: ${data.summary?.failed ?? 0}`,
         variant: (data.summary?.failed ?? 0) > 0 ? "destructive" : "default",
       });
@@ -556,14 +571,17 @@ export default function AdminLocations() {
     onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed"), variant: "destructive" }),
   });
 
-  const sendAllNotOnboardedMutation = useMutation<SendAllResponse, Error, { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string }>({
-    mutationFn: async ({ channel, rememberAsDefault, messageBody }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, { channel, rememberAsDefault, messageBody });
+  const sendAllNotOnboardedMutation = useMutation<SendAllResponse, Error, { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }>({
+    mutationFn: async ({ channel, rememberAsDefault, messageBody, customMessage }) => {
+      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, {
+        channel, rememberAsDefault,
+        ...(customMessage && messageBody ? { messageBody, customMessage: true } : {}),
+      });
       return res.json() as Promise<SendAllResponse>;
     },
     onSuccess: (data) => {
       toast({
-        title: "All-not-yet-onboarded complete",
+        title: "Messages sent to all contacts",
         description: `Eligible: ${data.eligible ?? 0} · Sent: ${data.summary?.sent ?? 0} · Failed: ${data.summary?.failed ?? 0}`,
         variant: (data.summary?.failed ?? 0) > 0 ? "destructive" : "default",
       });
@@ -596,6 +614,7 @@ export default function AdminLocations() {
     setRememberAsDefault(false);
     setMessageBody("");
     setMessageBodyInitialized(false);
+    setIsCustomMessage(false);
     setWelcomeDialogOpen(true);
   };
 
@@ -606,6 +625,7 @@ export default function AdminLocations() {
     setRememberAsDefault(false);
     setMessageBody(BULK_TEMPLATE_EN);
     setMessageBodyInitialized(true);
+    setIsCustomMessage(false);
     setWelcomeDialogOpen(true);
   };
 
@@ -615,6 +635,7 @@ export default function AdminLocations() {
     setRememberAsDefault(false);
     setMessageBody(BULK_TEMPLATE_EN);
     setMessageBodyInitialized(true);
+    setIsCustomMessage(false);
     setWelcomeDialogOpen(true);
   };
 
@@ -626,11 +647,12 @@ export default function AdminLocations() {
         channel: welcomeChannel,
         rememberAsDefault,
         messageBody: messageBody.trim() || undefined,
+        customMessage: isCustomMessage,
       });
     } else if (welcomeTarget.kind === "selected") {
-      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedIds), channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined });
+      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedIds), channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
     } else {
-      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined });
+      sendAllNotOnboardedMutation.mutate({ channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
     }
   };
 
@@ -1575,9 +1597,16 @@ export default function AdminLocations() {
               {/* Message body — editable for single sends, read-only preview for bulk */}
               {welcomeTarget?.kind === "single" && (
                 <div>
-                  <Label className="text-sm font-medium">
-                    {welcomeChannel === "both" ? "SMS Message" : "Message"}
-                  </Label>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-sm font-medium">
+                      {welcomeChannel === "both" ? "SMS Message" : "Message"}
+                    </Label>
+                    {isCustomMessage && (
+                      <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-medium" data-testid="custom-message-badge">
+                        Custom message
+                      </span>
+                    )}
+                  </div>
                   {welcomeChannel === "both" && (
                     <p className="text-[10px] text-muted-foreground mt-0.5 mb-1 flex items-start gap-1">
                       <MessageSquare className="h-3 w-3 mt-0.5 shrink-0" />
@@ -1597,6 +1626,7 @@ export default function AdminLocations() {
                           const msg = previewQuery.data!.message[lang as "en" | "he"];
                           const body = (welcomeChannel === "email") ? msg.emailBody : msg.body;
                           setMessageBody(body);
+                          setIsCustomMessage(false);
                         }}
                         className="mt-2"
                       >
@@ -1608,7 +1638,7 @@ export default function AdminLocations() {
                           <Textarea
                             className="mt-1 text-xs font-mono min-h-[120px] resize-y"
                             value={messageBody}
-                            onChange={(e) => setMessageBody(e.target.value)}
+                            onChange={(e) => handleMessageBodyChange(e.target.value)}
                             dir="ltr"
                             data-testid="preview-body-en"
                             placeholder="Message body…"
@@ -1618,14 +1648,31 @@ export default function AdminLocations() {
                           <Textarea
                             className="mt-1 text-xs font-mono min-h-[120px] resize-y"
                             value={messageBody}
-                            onChange={(e) => setMessageBody(e.target.value)}
+                            onChange={(e) => handleMessageBodyChange(e.target.value)}
                             dir="rtl"
                             data-testid="preview-body-he"
                             placeholder="גוף ההודעה…"
                           />
                         </TabsContent>
                       </Tabs>
-                      <p className="text-[10px] text-muted-foreground mt-1">You can freely edit the message above before sending.</p>
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-[10px] text-muted-foreground">You can freely edit the message above before sending.</p>
+                        {isCustomMessage && (
+                          <button
+                            type="button"
+                            className="text-[10px] text-primary hover:underline shrink-0"
+                            onClick={() => {
+                              const lang = previewQuery.data!.message.resolvedLanguage;
+                              const msg = previewQuery.data!.message[lang];
+                              const body = welcomeChannel === "email" ? msg.emailBody : msg.body;
+                              setMessageBody(body);
+                              setIsCustomMessage(false);
+                            }}
+                          >
+                            Reset to template
+                          </button>
+                        )}
+                      </div>
                       {previewQuery.data.welcomeUrl && (
                         <a
                           href={previewQuery.data.welcomeUrl}
@@ -1641,7 +1688,7 @@ export default function AdminLocations() {
                 </div>
               )}
 
-              {/* Bulk message body — editable template + read-only sample preview */}
+              {/* Bulk message body — editable template + live sample preview */}
               {welcomeTarget && welcomeTarget.kind !== "single" && (
                 <div className="space-y-3">
                   <div>
@@ -1649,9 +1696,22 @@ export default function AdminLocations() {
                       <Label className="text-sm font-medium">
                         {welcomeChannel === "both" ? "SMS Message template" : "Message template"}
                       </Label>
-                      <div className="flex gap-1">
-                        <button type="button" className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50" onClick={() => setMessageBody(BULK_TEMPLATE_EN)}>EN template</button>
-                        <button type="button" className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50" onClick={() => setMessageBody(BULK_TEMPLATE_HE)}>עב template</button>
+                      <div className="flex items-center gap-1">
+                        {isCustomMessage && (
+                          <span className="inline-flex items-center text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-medium" data-testid="custom-message-badge">
+                            Custom
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50"
+                          onClick={() => { setMessageBody(BULK_TEMPLATE_EN); setIsCustomMessage(false); }}
+                        >EN template</button>
+                        <button
+                          type="button"
+                          className="text-[10px] px-1.5 py-0.5 rounded border border-input text-muted-foreground hover:text-foreground hover:border-foreground/50"
+                          onClick={() => { setMessageBody(BULK_TEMPLATE_HE); setIsCustomMessage(false); }}
+                        >עב template</button>
                       </div>
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 mb-1">
@@ -1660,7 +1720,7 @@ export default function AdminLocations() {
                     <Textarea
                       className="mt-1 text-xs font-mono min-h-[120px] resize-y"
                       value={messageBody}
-                      onChange={(e) => setMessageBody(e.target.value)}
+                      onChange={(e) => handleMessageBodyChange(e.target.value)}
                       dir="auto"
                       data-testid="bulk-message-body"
                       placeholder="Message template…"
@@ -1674,47 +1734,64 @@ export default function AdminLocations() {
                     )}
                   </div>
 
-                  {/* Read-only per-location sample for reference */}
-                  {(bulkPreviewSamples.en || bulkPreviewSamples.he) && (
-                    <details className="text-xs">
-                      <summary className="cursor-pointer text-muted-foreground hover:text-foreground select-none">
-                        Sample preview (how it looks for a specific location{welcomeChannel === "both" ? " — SMS format" : ""})
-                      </summary>
-                      {(() => {
-                        const hasEn = !!bulkPreviewSamples.en;
-                        const hasHe = !!bulkPreviewSamples.he;
-                        const defaultTab = hasEn ? "en" : "he";
-                        return (
-                          <Tabs defaultValue={defaultTab} className="mt-1">
-                            <TabsList className={`grid w-full ${hasEn && hasHe ? "grid-cols-2" : "grid-cols-1"}`}>
-                              {hasEn && <TabsTrigger value="en" data-testid="bulk-preview-tab-en">English · {bulkPreviewSamples.en?.locationCode}</TabsTrigger>}
-                              {hasHe && <TabsTrigger value="he" data-testid="bulk-preview-tab-he">עברית · {bulkPreviewSamples.he?.locationCode}</TabsTrigger>}
-                            </TabsList>
-                            {hasEn && (
+                  {/* Live preview — first selected recipient with "and N more" context */}
+                  {(bulkPreviewSamples.en || bulkPreviewSamples.he) && (() => {
+                    const primarySample = bulkPreviewSamples.en || bulkPreviewSamples.he;
+                    const primaryQuery = bulkPreviewSamples.en ? bulkPreviewEnQuery : bulkPreviewHeQuery;
+                    const primaryLang = bulkPreviewSamples.en ? "en" : "he";
+                    const hasHe = !!bulkPreviewSamples.he && !!bulkPreviewSamples.en;
+                    // Count total eligible candidates
+                    const totalCandidates = welcomeTarget.kind === "selected"
+                      ? selectedIds.size
+                      : locations.filter((l) => l.isActive !== false && !l.onboardedAt).length;
+                    const moreCount = totalCandidates > 1 ? totalCandidates - 1 : 0;
+                    return (
+                      <div className="space-y-1">
+                        <p className="text-xs font-medium text-muted-foreground">
+                          Preview for <span className="text-foreground font-semibold">{primarySample?.name}</span>
+                          {moreCount > 0 && <span className="text-muted-foreground"> and {moreCount} more</span>}
+                          {welcomeChannel === "both" ? " (SMS format)" : ""}
+                        </p>
+                        {primaryQuery.isLoading && (
+                          <div className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /><span className="text-xs text-muted-foreground">Loading…</span></div>
+                        )}
+                        {primaryQuery.data && (
+                          hasHe ? (
+                            <Tabs defaultValue={primaryLang} className="text-xs">
+                              <TabsList className="grid grid-cols-2 w-full">
+                                <TabsTrigger value="en" data-testid="bulk-preview-tab-en">English · {bulkPreviewSamples.en?.locationCode}</TabsTrigger>
+                                <TabsTrigger value="he" data-testid="bulk-preview-tab-he">עברית · {bulkPreviewSamples.he?.locationCode}</TabsTrigger>
+                              </TabsList>
                               <TabsContent value="en">
-                                {bulkPreviewEnQuery.isLoading && <div className="flex items-center gap-2 mt-2"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</div>}
                                 {bulkPreviewEnQuery.data && (
                                   <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-en">
                                     {welcomeChannel === "email" ? bulkPreviewEnQuery.data.message.en.emailBody : bulkPreviewEnQuery.data.message.en.body}
                                   </pre>
                                 )}
                               </TabsContent>
-                            )}
-                            {hasHe && (
                               <TabsContent value="he">
-                                {bulkPreviewHeQuery.isLoading && <div className="flex items-center gap-2 mt-2"><Loader2 className="h-3 w-3 animate-spin" /> Loading…</div>}
                                 {bulkPreviewHeQuery.data && (
                                   <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-he">
                                     {welcomeChannel === "email" ? bulkPreviewHeQuery.data.message.he.emailBody : bulkPreviewHeQuery.data.message.he.body}
                                   </pre>
                                 )}
                               </TabsContent>
-                            )}
-                          </Tabs>
-                        );
-                      })()}
-                    </details>
-                  )}
+                            </Tabs>
+                          ) : (
+                            <pre
+                              dir={primaryLang === "he" ? "rtl" : "ltr"}
+                              className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono"
+                              data-testid={`bulk-preview-body-${primaryLang}`}
+                            >
+                              {welcomeChannel === "email"
+                                ? primaryQuery.data.message[primaryLang].emailBody
+                                : primaryQuery.data.message[primaryLang].body}
+                            </pre>
+                          )
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>

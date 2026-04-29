@@ -17,14 +17,22 @@ import { getGmailConfigStatus } from './gmail-client.js';
 import type { Location, OperatorWelcomeChannel } from '../shared/schema.js';
 
 export interface SendWelcomeOptions {
-  channel: OperatorWelcomeChannel; // 'sms' | 'email' | 'both'
+  channel: OperatorWelcomeChannel; // 'sms' | 'email' | 'both' | 'whatsapp'
   baseUrl: string; // e.g. https://app.example.com (no trailing slash required)
   signOff?: string;
   rememberAsDefault?: boolean;
   /** If set, Twilio will POST per-message delivery updates to this URL. */
   statusCallbackUrl?: string;
-  /** Optional admin-edited message body. If provided, overrides the template for single sends. */
+  /**
+   * Optional admin-edited message body (template string with {{name}}, {{code}}, {{pin}}, {{url}} tokens).
+   * Only used when customMessage === true. Ignored otherwise — the service builds the body from its own template.
+   */
   messageBody?: string;
+  /**
+   * When true, use messageBody (with per-recipient token substitution) instead of the built-in template.
+   * When false or omitted, the service generates the message body from its own template.
+   */
+  customMessage?: boolean;
 }
 
 export interface SendWelcomeResult {
@@ -198,6 +206,13 @@ export async function sendWelcomeForLocation(
     url: claimUrl,
   };
 
+  // Only use the admin-supplied body when it was explicitly marked as custom.
+  // For template (unedited) sends the service builds the body itself.
+  const resolvedCustomBody =
+    options.customMessage && options.messageBody
+      ? applyMessageTemplate(options.messageBody, templateValues)
+      : undefined;
+
   const sharedCtx = {
     toPhone: loc.phone!,
     locationName: localizedName,
@@ -207,9 +222,7 @@ export async function sendWelcomeForLocation(
     defaultPin: loc.operatorPin || '1234',
     signOff: options.signOff,
     statusCallbackUrl: options.statusCallbackUrl,
-    customBody: options.messageBody
-      ? applyMessageTemplate(options.messageBody, templateValues)
-      : undefined,
+    customBody: resolvedCustomBody,
   };
 
   if (wantsSms && loc.phone) {
