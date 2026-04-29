@@ -21,8 +21,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart3, TrendingUp, DollarSign, MapPin, Package, RotateCcw, Users } from "lucide-react";
 import { useLanguage } from "@/hooks/use-language";
 import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
-import type { Transaction } from "@shared/schema";
-import type { Location } from "@shared/schema";
+import type { Transaction, Location } from "@shared/schema";
 
 const CHART_COLORS = ["hsl(var(--primary))", "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6"];
 const PIE_COLORS = ["hsl(var(--primary))", "#94a3b8"];
@@ -98,9 +97,10 @@ export default function AdminAnalytics() {
 
   // KPIs
   const totalTransactions = transactions.length;
-  const activeBorrows = transactions.filter((t) => !t.isReturned).length;
+  const returnedCount = transactions.filter((t) => t.isReturned).length;
+  const activeBorrows = totalTransactions - returnedCount;
   const returnRate = totalTransactions > 0
-    ? Math.round((transactions.filter((t) => t.isReturned).length / totalTransactions) * 100)
+    ? Math.round((returnedCount / totalTransactions) * 100)
     : 0;
   const totalDeposits = transactions.reduce((sum, t) => sum + (t.depositAmount ?? 0), 0);
 
@@ -133,20 +133,16 @@ export default function AdminAnalytics() {
   }, [transactions]);
 
   // Active vs returned pie
-  const statusPieData = useMemo(() => {
-    const returned = transactions.filter((t) => t.isReturned).length;
-    const active = transactions.length - returned;
-    return [
-      { name: "Active", value: active },
-      { name: "Returned", value: returned },
-    ];
-  }, [transactions]);
+  const statusPieData = useMemo(() => [
+    { name: "Active", value: activeBorrows },
+    { name: "Returned", value: returnedCount },
+  ], [activeBorrows, returnedCount]);
 
   // Top 8 locations by borrow count
   const locationBarData = useMemo(() => {
     const counts: Record<number, number> = {};
-    transactions.forEach((t) => {
-      counts[t.locationId] = (counts[t.locationId] ?? 0) + 1;
+    transactions.forEach((tx) => {
+      counts[tx.locationId] = (counts[tx.locationId] ?? 0) + 1;
     });
     return Object.entries(counts)
       .map(([id, count]) => ({
@@ -160,8 +156,8 @@ export default function AdminAnalytics() {
   // Deposit payment method breakdown
   const paymentMethodData = useMemo(() => {
     const counts: Record<string, number> = {};
-    transactions.forEach((t) => {
-      const method = t.depositPaymentMethod ?? "cash";
+    transactions.forEach((tx) => {
+      const method = tx.depositPaymentMethod ?? "cash";
       counts[method] = (counts[method] ?? 0) + 1;
     });
     return Object.entries(counts).map(([name, value]) => ({
@@ -201,29 +197,29 @@ export default function AdminAnalytics() {
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
           <StatCard
             icon={Package}
-            title="Total Borrows"
+            title={t("analyticsTotalBorrows")}
             value={totalTransactions}
             loading={isLoading}
           />
           <StatCard
             icon={TrendingUp}
-            title="Active Loans"
+            title={t("analyticsActiveLoans")}
             value={activeBorrows}
-            sub={`${100 - returnRate}% of all borrows`}
+            sub={totalTransactions > 0 ? `${Math.round((activeBorrows / totalTransactions) * 100)}% ${t("analyticsOfAllBorrows")}` : undefined}
             loading={isLoading}
           />
           <StatCard
             icon={RotateCcw}
-            title="Return Rate"
-            value={`${returnRate}%`}
-            sub={`${transactions.filter((t) => t.isReturned).length} returned`}
+            title={t("analyticsReturnRate")}
+            value={totalTransactions > 0 ? `${returnRate}%` : "—"}
+            sub={totalTransactions > 0 ? `${returnedCount} ${t("analyticsReturned")}` : undefined}
             loading={isLoading}
           />
           <StatCard
             icon={DollarSign}
-            title="Deposits Collected"
+            title={t("analyticsDepositsCollected")}
             value={`$${totalDeposits.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-            sub={`across ${totalTransactions} transactions`}
+            sub={totalTransactions > 0 ? `${t("analyticsAcrossTransactions")} ${totalTransactions}` : undefined}
             loading={isLoading}
           />
         </div>
@@ -234,9 +230,9 @@ export default function AdminAnalytics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <BarChart3 className="h-4 w-4 text-muted-foreground" />
-                Monthly Borrow &amp; Return Volume
+                {t("analyticsMonthlyVolume")}
               </CardTitle>
-              <CardDescription>Last 12 months</CardDescription>
+              <CardDescription>{t("analyticsLast12Months")}</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
@@ -264,15 +260,15 @@ export default function AdminAnalytics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <TrendingUp className="h-4 w-4 text-muted-foreground" />
-                Loan Status Split
+                {t("analyticsLoanStatusSplit")}
               </CardTitle>
-              <CardDescription>Active vs returned</CardDescription>
+              <CardDescription>{t("analyticsActiveVsReturned")}</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <ChartSkeleton />
               ) : totalTransactions === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-16">No data yet</p>
+                <p className="text-sm text-muted-foreground text-center py-16">{t("analyticsNoData")}</p>
               ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
@@ -304,15 +300,15 @@ export default function AdminAnalytics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <MapPin className="h-4 w-4 text-muted-foreground" />
-                Top Locations by Volume
+                {t("analyticsTopLocations")}
               </CardTitle>
-              <CardDescription>All-time borrow count</CardDescription>
+              <CardDescription>{t("analyticsAllTimeBorrows")}</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <ChartSkeleton />
               ) : locationBarData.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-16">No data yet</p>
+                <p className="text-sm text-muted-foreground text-center py-16">{t("analyticsNoData")}</p>
               ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <BarChart
@@ -342,15 +338,15 @@ export default function AdminAnalytics() {
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-base">
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
-                Deposit Methods
+                {t("analyticsDepositMethods")}
               </CardTitle>
-              <CardDescription>Cash vs card vs other</CardDescription>
+              <CardDescription>{t("analyticsCashVsCard")}</CardDescription>
             </CardHeader>
             <CardContent>
               {isLoading ? (
                 <ChartSkeleton />
               ) : paymentMethodData.length === 0 ? (
-                <p className="text-sm text-muted-foreground text-center py-16">No data yet</p>
+                <p className="text-sm text-muted-foreground text-center py-16">{t("analyticsNoData")}</p>
               ) : (
                 <ResponsiveContainer width="100%" height={260}>
                   <PieChart>
@@ -381,9 +377,9 @@ export default function AdminAnalytics() {
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Users className="h-4 w-4 text-muted-foreground" />
-              New Location Applications
+              {t("analyticsNewApplications")}
             </CardTitle>
-            <CardDescription>Monthly application submissions over the last 12 months</CardDescription>
+            <CardDescription>{t("analyticsMonthlyApplications")}</CardDescription>
           </CardHeader>
           <CardContent>
             {appLoading ? (
