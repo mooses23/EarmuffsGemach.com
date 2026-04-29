@@ -6,7 +6,6 @@ import { getGemachApplications, updateGemachApplicationStatus, approveApplicatio
 import { GemachApplication, Region, InsertLocation, insertLocationSchema, CityCategory } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import {
   Card,
   CardContent,
@@ -297,10 +296,7 @@ export default function AdminApplications() {
   });
 
   return (
-    <div className="py-10">
-      <div className="container mx-auto px-4">
-        <AdminNavTabs />
-
+    <>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold">{t('gemachApplications')}</h1>
@@ -904,6 +900,6 @@ export default function AdminApplications() {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
+    </>
   );
 }

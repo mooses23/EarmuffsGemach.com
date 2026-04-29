@@ -19,7 +19,6 @@ import {
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 
 interface PaymentDetectionAnalytics {
   totalPayments: number;
@@ -107,8 +106,7 @@ export default function PaymentStatusMonitor() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-10 space-y-6">
-      <AdminNavTabs />
+    <div className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-2xl font-bold">{t('paymentStatusMonitor')}</h1>

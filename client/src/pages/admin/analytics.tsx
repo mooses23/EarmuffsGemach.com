@@ -20,7 +20,6 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart3, TrendingUp, DollarSign, MapPin, Package, RotateCcw, Users } from "lucide-react";
 import { useLanguage } from "@/hooks/use-language";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import type { Transaction, Location } from "@shared/schema";
 
 const CHART_COLORS = ["hsl(var(--primary))", "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6"];
@@ -184,10 +183,7 @@ export default function AdminAnalytics() {
   }, [applications]);
 
   return (
-    <div className="py-10">
-      <div className="container mx-auto px-4">
-        <AdminNavTabs />
-
+    <>
         <div className="mb-8">
           <h1 className="text-3xl font-bold">{t("analyticsReports")}</h1>
           <p className="text-muted-foreground mt-2">{t("comprehensiveAnalytics")}</p>
@@ -405,6 +401,6 @@ export default function AdminAnalytics() {
           </CardContent>
         </Card>
       </div>
-    </div>
+    </>
   );
 }

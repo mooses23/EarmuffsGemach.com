@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLocations, getTransactions, markTransactionReturned } from "@/lib/api";
 import { Location, Transaction } from "@shared/schema";
 import { TransactionForm } from "@/components/admin/transaction-form";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 import {
@@ -186,10 +185,7 @@ export default function AdminTransactions() {
   });
 
   return (
-    <div className="py-10">
-      <div className="container mx-auto px-4">
-        <AdminNavTabs />
-
+    <>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div>
             <h1 className="text-3xl font-bold">{t('transactionManagement')}</h1>
@@ -589,6 +585,6 @@ export default function AdminTransactions() {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
+    </>
   );
 }

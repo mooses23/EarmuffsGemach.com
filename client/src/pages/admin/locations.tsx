@@ -14,7 +14,6 @@ import {
 } from "@/components/ui/tooltip";
 import { LocationForm } from "@/components/admin/location-form";
 import { RegionForm } from "@/components/admin/region-form";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 import { apiRequest } from "@/lib/queryClient";
@@ -1097,10 +1096,6 @@ export default function AdminLocations() {
 
   return (
     <TooltipProvider>
-    <div className="py-6 md:py-10">
-      <div className="container mx-auto px-4">
-        <AdminNavTabs />
-
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div>
             <h1 className="text-2xl md:text-3xl font-bold">{t('locationManagementTitle')}</h1>
@@ -2242,7 +2237,6 @@ export default function AdminLocations() {
           </DialogContent>
         </Dialog>
       </div>
-    </div>
     </TooltipProvider>
   );
 }

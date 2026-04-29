@@ -6,9 +6,20 @@ import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ProtectedRoute } from "@/components/auth/protected-route";
 import { Layout } from "@/components/layout/layout";
+import { AdminLayout } from "@/components/admin/admin-layout";
 import { AuthProvider } from "@/hooks/use-auth";
 import { LanguageProvider } from "@/hooks/use-language";
 import { OperatorAuthProvider } from "@/hooks/use-operator-auth";
+
+function withAdminLayout(Component: (props: any) => JSX.Element | null) {
+  return function AdminLayoutWrapper(props: any) {
+    return (
+      <AdminLayout>
+        <Component {...props} />
+      </AdminLayout>
+    );
+  };
+}
 
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
@@ -74,18 +85,18 @@ function LayoutRouter() {
         <Route path="/rules" component={Rules} />
         <Route path="/status/:transactionId" component={StatusPage} />
         
-        {/* Protected Admin Routes */}
-        <ProtectedRoute path="/admin" component={AdminDashboard} requiredRole="admin" />
-        <ProtectedRoute path="/admin/dashboard" component={AdminDashboard} requiredRole="admin" />
-        <ProtectedRoute path="/admin/locations" component={AdminLocations} requiredRole="admin" />
-        <ProtectedRoute path="/admin/transactions" component={AdminTransactions} requiredRole="admin" />
-        <ProtectedRoute path="/admin/applications" component={AdminApplications} requiredRole="admin" />
-        <ProtectedRoute path="/admin/payment-methods" component={AdminPaymentMethods} requiredRole="admin" />
-        <ProtectedRoute path="/admin/payment-confirmations" component={PaymentConfirmations} requiredRole="admin" />
-        <ProtectedRoute path="/admin/payment-status" component={PaymentStatusMonitor} requiredRole="admin" />
-        <ProtectedRoute path="/admin/inbox" component={AdminInbox} requiredRole="admin" />
-        <ProtectedRoute path="/admin/glossary" component={AdminGlossary} requiredRole="admin" />
-        <ProtectedRoute path="/admin/analytics" component={AdminAnalytics} requiredRole="admin" />
+        {/* Protected Admin Routes — all wrapped in AdminLayout via withAdminLayout HOC */}
+        <ProtectedRoute path="/admin" component={withAdminLayout(AdminDashboard)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/dashboard" component={withAdminLayout(AdminDashboard)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/locations" component={withAdminLayout(AdminLocations)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/transactions" component={withAdminLayout(AdminTransactions)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/applications" component={withAdminLayout(AdminApplications)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/payment-methods" component={withAdminLayout(AdminPaymentMethods)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/payment-confirmations" component={withAdminLayout(PaymentConfirmations)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/payment-status" component={withAdminLayout(PaymentStatusMonitor)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/inbox" component={withAdminLayout(AdminInbox)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/glossary" component={withAdminLayout(AdminGlossary)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/analytics" component={withAdminLayout(AdminAnalytics)} requiredRole="admin" />
         <Route path="/admin/emails">{() => <Redirect to="/admin/inbox" />}</Route>
         <Route path="/admin/messages">{() => <Redirect to="/admin/inbox" />}</Route>
         

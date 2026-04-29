@@ -12,7 +12,6 @@ import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { apiRequest, queryClient } from "@/lib/queryClient";
 import { Trash2, Plus, BookOpen, Save, Sparkles, MessageSquareText } from "lucide-react";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import type { PlaybookFact, FaqEntry, KnowledgeDoc, ReplyExample } from "@shared/schema";
 
 const FACT_KEY = ["/api/admin/playbook-facts"] as const;
@@ -717,8 +716,7 @@ export function GlossaryContent() {
 
 export default function AdminGlossaryPage() {
   return (
-    <div className="container max-w-5xl mx-auto py-8 space-y-6">
-      <AdminNavTabs />
+    <div className="max-w-5xl mx-auto space-y-6">
       <div className="flex items-center gap-3">
         <BookOpen className="h-6 w-6" />
         <div>

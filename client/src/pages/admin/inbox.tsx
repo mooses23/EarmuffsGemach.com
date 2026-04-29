@@ -68,7 +68,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Link } from "wouter";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import DOMPurify from "dompurify";
 import type { Contact, Location } from "@shared/schema";
 import { groupFormContacts } from "@shared/form-thread-grouping";
@@ -1830,9 +1829,7 @@ export default function AdminInbox() {
   const showGmailIssue = gmailNotConfigured || gmailInvalidGrant;
 
   return (
-    <div className="py-10">
-      <div className="container mx-auto px-4">
-        <AdminNavTabs />
+    <>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div className="flex items-center gap-3">
             <Link href="/admin">
@@ -2427,8 +2424,7 @@ export default function AdminInbox() {
             </div>
           </>
         )}
-      </div>
-    </div>
+    </>
   );
 }
 

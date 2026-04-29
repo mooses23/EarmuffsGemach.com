@@ -4,7 +4,6 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { Plus, Edit, Trash2, Save, X, CreditCard, ArrowLeft, Home } from "lucide-react";
-import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -198,8 +197,7 @@ export default function PaymentMethodsAdmin() {
   }
 
   return (
-    <div className="container mx-auto px-4 py-8">
-      <AdminNavTabs />
+    <>
       {/* Navigation Breadcrumbs */}
       <div className="flex items-center gap-2 mb-6">
         <Button 
@@ -579,6 +577,6 @@ export default function PaymentMethodsAdmin() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </>
   );
 }
