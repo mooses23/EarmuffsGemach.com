@@ -100,6 +100,24 @@ function OnboardingStatusBadge({ status }: { status: "onboarded" | "sent" | "fai
   return <Badge variant="outline" className="text-xs text-muted-foreground">Not sent</Badge>;
 }
 
+function NoPhoneBadge() {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Badge variant="outline" className="text-xs border-orange-400 text-orange-700 bg-orange-50 cursor-help">
+            <Phone className="h-3 w-3 mr-1" />
+            No phone
+          </Badge>
+        </TooltipTrigger>
+        <TooltipContent className="max-w-xs text-xs">
+          This location has no phone number. SMS and WhatsApp messages cannot be sent until a phone number is added.
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
+
 interface StripeAdminSettings {
   maxCardAgeDays: number;
   requirePreChargeNotification: boolean;
@@ -785,11 +803,15 @@ export default function AdminLocations() {
     if (statusFilter === "active" && !location.isActive) return false;
     if (statusFilter === "inactive" && location.isActive) return false;
     if (onboardingFilter !== "all") {
-      const obStatus = getOnboardingStatus(location);
-      if (onboardingFilter === "not-sent" && obStatus !== "not-sent") return false;
-      if (onboardingFilter === "sent" && obStatus !== "sent") return false;
-      if (onboardingFilter === "failed" && obStatus !== "failed") return false;
-      if (onboardingFilter === "onboarded" && obStatus !== "onboarded") return false;
+      if (onboardingFilter === "no-phone") {
+        if (!!location.phone) return false;
+      } else {
+        const obStatus = getOnboardingStatus(location);
+        if (onboardingFilter === "not-sent" && obStatus !== "not-sent") return false;
+        if (onboardingFilter === "sent" && obStatus !== "sent") return false;
+        if (onboardingFilter === "failed" && obStatus !== "failed") return false;
+        if (onboardingFilter === "onboarded" && obStatus !== "onboarded") return false;
+      }
     }
     return true;
   }), [locations, searchTerm, statusFilter, onboardingFilter, regions, language]);
@@ -993,6 +1015,7 @@ export default function AdminLocations() {
                     <SelectItem value="sent">Sent (awaiting)</SelectItem>
                     <SelectItem value="failed">Failed delivery</SelectItem>
                     <SelectItem value="onboarded">Onboarded</SelectItem>
+                    <SelectItem value="no-phone">No phone (cannot send)</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -1014,7 +1037,7 @@ export default function AdminLocations() {
                   )}
                   {onboardingFilter !== "all" && (
                     <Badge variant="secondary" className="flex items-center gap-1">
-                      Onboarding: {onboardingFilter === "not-sent" ? "Not sent" : onboardingFilter === "sent" ? "Sent (awaiting)" : onboardingFilter === "failed" ? "Failed" : "Onboarded"}
+                      Onboarding: {onboardingFilter === "not-sent" ? "Not sent" : onboardingFilter === "sent" ? "Sent (awaiting)" : onboardingFilter === "failed" ? "Failed" : onboardingFilter === "no-phone" ? "No phone" : "Onboarded"}
                       <button onClick={() => setOnboardingFilter("all")} className="ml-1 hover:text-destructive">×</button>
                     </Badge>
                   )}
@@ -1189,6 +1212,7 @@ export default function AdminLocations() {
                                     <TableCell>
                                       <div className="flex flex-col gap-0.5">
                                         <OnboardingStatusBadge status={onboardingStatus} />
+                                        {!location.phone && onboardingStatus !== "onboarded" && <NoPhoneBadge />}
                                         {onboardingStatus !== "onboarded" && sentDaysAgo !== null && (
                                           <div className="text-[10px] text-muted-foreground" data-testid={`sent-ago-${location.id}`}>
                                             Sent {sentDaysAgo === 0 ? "today" : sentDaysAgo === 1 ? "1 day ago" : `${sentDaysAgo} days ago`}
@@ -1362,20 +1386,38 @@ export default function AdminLocations() {
                       </ul>
                     )}
                   </div>
-                  {skipped.length > 0 && (
-                    <div className="border border-amber-300 bg-amber-50 rounded-md max-h-24 overflow-y-auto p-2" data-testid="recipient-skipped-list">
-                      <div className="text-xs font-medium mb-1 text-amber-800">
-                        Will be skipped — missing contact info for this channel ({skipped.length})
+                  {skipped.length > 0 && (() => {
+                    const channelNeedsPhone = ch === "sms" || ch === "both";
+                    const noPhoneSkipped = channelNeedsPhone ? skipped.filter(r => !r.phone) : [];
+                    return (
+                      <div className="border border-amber-300 bg-amber-50 rounded-md max-h-36 overflow-y-auto p-2" data-testid="recipient-skipped-list">
+                        <div className="text-xs font-medium mb-1 text-amber-800">
+                          Will be skipped ({skipped.length})
+                          {noPhoneSkipped.length > 0 && (
+                            <span className="ml-1 text-orange-700">· {noPhoneSkipped.length} have no phone number</span>
+                          )}
+                        </div>
+                        <ul className="text-xs space-y-0.5">
+                          {skipped.map((r) => (
+                            <li key={r.id} className="truncate text-amber-900 flex items-center gap-1">
+                              {channelNeedsPhone && !r.phone && (
+                                <Phone className="h-3 w-3 text-orange-500 shrink-0" aria-label="No phone" />
+                              )}
+                              {r.name} <span className="opacity-70">· {r.locationCode}</span>
+                              {channelNeedsPhone && !r.phone && (
+                                <span className="text-orange-600 text-[10px] shrink-0">no phone</span>
+                              )}
+                            </li>
+                          ))}
+                        </ul>
+                        {noPhoneSkipped.length > 0 && (
+                          <p className="text-[10px] text-orange-700 mt-1.5 border-t border-amber-200 pt-1">
+                            Add phone numbers to these locations to enable SMS/WhatsApp outreach.
+                          </p>
+                        )}
                       </div>
-                      <ul className="text-xs space-y-0.5">
-                        {skipped.map((r) => (
-                          <li key={r.id} className="truncate text-amber-900">
-                            {r.name} <span className="opacity-70">· {r.locationCode}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  )}
+                    );
+                  })()}
                 </div>
               );
             })()}
