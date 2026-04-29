@@ -177,7 +177,7 @@ export const locations = pgTable("locations", {
   onboardedAt: timestamp("onboarded_at"),
 });
 
-export const OPERATOR_WELCOME_CHANNELS = ["sms", "email", "both"] as const;
+export const OPERATOR_WELCOME_CHANNELS = ["sms", "email", "both", "whatsapp"] as const;
 export type OperatorWelcomeChannel = (typeof OPERATOR_WELCOME_CHANNELS)[number];
 
 export const OPERATOR_CONTACT_PREFERENCES = ["phone", "whatsapp", "email"] as const;

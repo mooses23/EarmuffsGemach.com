@@ -7,7 +7,9 @@ import { storage } from './storage.js';
 import {
   buildOperatorWelcomeMessageBody,
   getTwilioConfigStatus,
+  getTwilioWhatsAppConfigStatus,
   sendOperatorWelcome,
+  sendOperatorWelcomeWhatsApp,
   type OperatorWelcomeChannelResult,
 } from './twilio-client.js';
 import { sendOperatorWelcomeEmail, buildWelcomeEmailBody } from './email-notifications.js';
@@ -30,6 +32,7 @@ export interface SendWelcomeResult {
   locationName: string;
   channel: OperatorWelcomeChannel;
   sms?: OperatorWelcomeChannelResult;
+  whatsapp?: OperatorWelcomeChannelResult;
   email?: OperatorWelcomeChannelResult;
   /** True iff every requested channel succeeded. */
   ok: boolean;
@@ -162,6 +165,7 @@ export async function sendWelcomeForLocation(
 
   const wantsSms = options.channel === 'sms' || options.channel === 'both';
   const wantsEmail = options.channel === 'email' || options.channel === 'both';
+  const wantsWhatsapp = options.channel === 'whatsapp';
 
   // For 'both', skip if neither channel has the required contact info.
   if (options.channel === 'both' && !loc.phone && !loc.email) {
@@ -173,6 +177,9 @@ export async function sendWelcomeForLocation(
   if (options.channel === 'email' && !loc.email) {
     return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no email on file' };
   }
+  if (options.channel === 'whatsapp' && !loc.phone) {
+    return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no phone on file' };
+  }
 
   const language = detectLanguage(loc);
   const ensured = await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
@@ -180,6 +187,7 @@ export async function sendWelcomeForLocation(
   const localizedName = language === 'he' ? (loc.nameHe || loc.name) : loc.name;
 
   let smsResult: OperatorWelcomeChannelResult | undefined;
+  let whatsappResult: OperatorWelcomeChannelResult | undefined;
   let emailResult: OperatorWelcomeChannelResult | undefined;
 
   // Per-location substitution values — used when admin provides a {{placeholder}} template
@@ -190,24 +198,27 @@ export async function sendWelcomeForLocation(
     url: claimUrl,
   };
 
+  const sharedCtx = {
+    toPhone: loc.phone!,
+    locationName: localizedName,
+    locationCode: loc.locationCode,
+    claimUrl,
+    language,
+    defaultPin: loc.operatorPin || '1234',
+    signOff: options.signOff,
+    statusCallbackUrl: options.statusCallbackUrl,
+    customBody: options.messageBody
+      ? applyMessageTemplate(options.messageBody, templateValues)
+      : undefined,
+  };
+
   if (wantsSms && loc.phone) {
-    const smsResults = await sendOperatorWelcome(
-      {
-        toPhone: loc.phone,
-        locationName: localizedName,
-        locationCode: loc.locationCode,
-        claimUrl,
-        language,
-        defaultPin: loc.operatorPin || '1234',
-        signOff: options.signOff,
-        statusCallbackUrl: options.statusCallbackUrl,
-        customBody: options.messageBody
-          ? applyMessageTemplate(options.messageBody, templateValues)
-          : undefined,
-      },
-      { sms: true },
-    );
+    const smsResults = await sendOperatorWelcome(sharedCtx, { sms: true });
     smsResult = smsResults.sms;
+  }
+
+  if (wantsWhatsapp && loc.phone) {
+    whatsappResult = await sendOperatorWelcomeWhatsApp(sharedCtx);
   }
 
   if (wantsEmail && loc.email) {
@@ -237,16 +248,17 @@ export async function sendWelcomeForLocation(
     }
   }
 
-  // Record the attempt in storage (email status + SMS if applicable)
+  // Record the attempt in storage
   await storage.recordOperatorWelcomeAttempt(loc.id, {
     sms: wantsSms && !!smsResult ? { ok: !!smsResult.ok, error: smsResult.error, sid: smsResult.sid } : undefined,
-    whatsapp: undefined,
+    whatsapp: wantsWhatsapp && !!whatsappResult ? { ok: !!whatsappResult.ok, error: whatsappResult.error, sid: whatsappResult.sid } : undefined,
     email: wantsEmail && !!emailResult ? { ok: !!emailResult.ok, error: emailResult.error } : undefined,
     defaultWelcomeChannel: options.rememberAsDefault ? options.channel : undefined,
   });
 
   const ok =
     (!wantsSms || !loc.phone || !!smsResult?.ok) &&
+    (!wantsWhatsapp || !loc.phone || !!whatsappResult?.ok) &&
     (!wantsEmail || !loc.email || !!emailResult?.ok);
 
   return {
@@ -254,6 +266,7 @@ export async function sendWelcomeForLocation(
     locationName: loc.name,
     channel: options.channel,
     sms: smsResult,
+    whatsapp: whatsappResult,
     email: emailResult,
     ok,
     claimUrl,
@@ -288,10 +301,11 @@ export function summarizeResults(results: SendWelcomeResult[]) {
 
 export function getOnboardingTwilioStatus() {
   const gmailStatus = getGmailConfigStatus();
+  const waStatus = getTwilioWhatsAppConfigStatus();
   return {
     sms: getTwilioConfigStatus(),
     email: { configured: gmailStatus.configured, reason: gmailStatus.configured ? undefined : gmailStatus.message },
-    whatsapp: { configured: false, reason: 'WhatsApp Business setup required — coming soon.' },
+    whatsapp: { configured: waStatus.configured, reason: waStatus.configured ? undefined : waStatus.reason },
   };
 }
 

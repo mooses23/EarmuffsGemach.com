@@ -93,12 +93,6 @@ import { Badge } from "@/components/ui/badge";
 
 // ---- Helper sub-components ----
 
-function OnboardingStatusBadge({ status }: { status: "onboarded" | "sent" | "failed" | "not-sent" }) {
-  if (status === "onboarded") return <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700">Onboarded</Badge>;
-  if (status === "sent") return <Badge variant="secondary" className="text-xs">Sent</Badge>;
-  if (status === "failed") return <Badge variant="destructive" className="text-xs">Failed</Badge>;
-  return <Badge variant="outline" className="text-xs text-muted-foreground">Not sent</Badge>;
-}
 
 function NoPhoneBadge() {
   return (
@@ -342,30 +336,23 @@ function ServiceStatusBar({
       label: "Twilio SMS",
       configured: status?.sms?.configured ?? false,
       reason: status?.sms?.reason,
-      comingSoon: false,
     },
     {
       label: "Email",
       configured: status?.email?.configured ?? false,
       reason: status?.email?.reason,
-      comingSoon: false,
     },
     {
       label: "WhatsApp",
-      configured: false,
-      reason: "Coming soon — WhatsApp Business setup required.",
-      comingSoon: true,
+      configured: status?.whatsapp?.configured ?? false,
+      reason: status?.whatsapp?.reason,
     },
   ];
   return (
     <div className="flex flex-wrap items-center gap-3 px-1 py-2">
       {items.map((item) => (
         <div key={item.label} className="flex items-center gap-1.5 text-xs">
-          {item.comingSoon ? (
-            <Badge variant="secondary" className="text-xs font-normal text-muted-foreground">
-              {item.label}: Not configured
-            </Badge>
-          ) : item.configured ? (
+          {item.configured ? (
             <Badge variant="outline" className="text-xs font-normal border-green-500 text-green-700 bg-green-50">
               <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
               {item.label}: Ready
@@ -430,8 +417,6 @@ export default function AdminLocations() {
   const [defaultChannel, setDefaultChannelState] = useState<OperatorWelcomeChannel>(() => {
     try {
       const stored = localStorage.getItem("adminDefaultWelcomeChannel");
-      // Migrate old 'whatsapp' value to 'sms' since WhatsApp is now disabled
-      if (stored === "whatsapp") return "sms";
       if (stored && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(stored)) return stored as OperatorWelcomeChannel;
     } catch {}
     return "sms";
@@ -508,6 +493,7 @@ export default function AdminLocations() {
     success: boolean;
     results: {
       sms?: ChannelResult;
+      whatsapp?: ChannelResult;
       email?: ChannelResult;
       anySuccess: boolean;
     };
@@ -531,12 +517,14 @@ export default function AdminLocations() {
     },
     onSuccess: (data) => {
       const sms = data.results?.sms;
+      const whatsapp = data.results?.whatsapp;
       const email = data.results?.email;
       const parts: string[] = [];
       if (sms) parts.push(`SMS: ${sms.ok ? "✓" : "✗ " + (sms.error || "failed")}`);
+      if (whatsapp) parts.push(`WhatsApp: ${whatsapp.ok ? "✓" : "✗ " + (whatsapp.error || "failed")}`);
       if (email) parts.push(`Email: ${email.ok ? "✓" : "✗ " + (email.error || "failed")}`);
       toast({
-        title: data.results?.anySuccess ? "Welcome sent" : "Welcome failed",
+        title: data.results?.anySuccess ? "Message sent" : "Message failed",
         description: parts.join(" · ") || "No channels selected",
         variant: data.results?.anySuccess ? "default" : "destructive",
       });
@@ -601,7 +589,7 @@ export default function AdminLocations() {
   const openSinglePicker = (loc: Location) => {
     setWelcomeTarget({ kind: "single", id: loc.id, loc });
     const locDefaultRaw = loc.defaultWelcomeChannel as string | null;
-    const ch = locDefaultRaw && locDefaultRaw !== "whatsapp" && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefaultRaw)
+    const ch = locDefaultRaw && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefaultRaw)
       ? locDefaultRaw as OperatorWelcomeChannel
       : defaultChannel;
     setWelcomeChannel(ch);
@@ -673,7 +661,7 @@ export default function AdminLocations() {
   const bulkPreviewSamples = useMemo(() => {
     if (!welcomeTarget || welcomeTarget.kind === "single") return { en: null as Location | null, he: null as Location | null };
     const ch = welcomeChannel;
-    const needsPhone = ch === "sms" || ch === "both";
+    const needsPhone = ch === "sms" || ch === "both" || ch === "whatsapp";
     const needsEmail = ch === "email" || ch === "both";
     const candidates = welcomeTarget.kind === "selected"
       ? locations.filter((l) => selectedIds.has(l.id) && (needsPhone ? !!l.phone : true) && (needsEmail ? !!l.email : true))
@@ -992,7 +980,7 @@ export default function AdminLocations() {
                     data-testid="button-onboarding-all-not-onboarded"
                   >
                     <Send className="h-4 w-4 mr-1" />
-                    Send Welcome ({eligibleNotOnboarded.length})
+                    Message Locations ({eligibleNotOnboarded.length})
                   </Button>
                   {selectedCount > 0 && (
                     <Button
@@ -1003,7 +991,7 @@ export default function AdminLocations() {
                       data-testid="button-onboarding-bulk-selected"
                     >
                       <Send className="h-4 w-4 mr-1" />
-                      Send to Selected ({selectedCount})
+                      Message Selected ({selectedCount})
                     </Button>
                   )}
                 </div>
@@ -1035,12 +1023,12 @@ export default function AdminLocations() {
                 </Select>
                 <Select value={onboardingFilter} onValueChange={v => { try { localStorage.setItem("adminOnboardingFilter", v); } catch {} setOnboardingFilter(v); }}>
                   <SelectTrigger>
-                    <SelectValue placeholder="Onboarding status" />
+                    <SelectValue placeholder="Contact status" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="all">All onboarding</SelectItem>
-                    <SelectItem value="not-sent">Not sent</SelectItem>
-                    <SelectItem value="sent">Sent (awaiting)</SelectItem>
+                    <SelectItem value="all">All contacts</SelectItem>
+                    <SelectItem value="not-sent">Not messaged</SelectItem>
+                    <SelectItem value="sent">Messaged (awaiting)</SelectItem>
                     <SelectItem value="failed">Failed delivery</SelectItem>
                     <SelectItem value="onboarded">Onboarded</SelectItem>
                     <SelectItem value="no-phone">No phone (cannot send)</SelectItem>
@@ -1065,7 +1053,7 @@ export default function AdminLocations() {
                   )}
                   {onboardingFilter !== "all" && (
                     <Badge variant="secondary" className="flex items-center gap-1">
-                      Onboarding: {onboardingFilter === "not-sent" ? "Not sent" : onboardingFilter === "sent" ? "Sent (awaiting)" : onboardingFilter === "failed" ? "Failed" : onboardingFilter === "no-phone" ? "No phone" : "Onboarded"}
+                      Contact: {onboardingFilter === "not-sent" ? "Not messaged" : onboardingFilter === "sent" ? "Messaged (awaiting)" : onboardingFilter === "failed" ? "Failed" : onboardingFilter === "no-phone" ? "No phone" : "Onboarded"}
                       <button onClick={() => setOnboardingFilter("all")} className="ml-1 hover:text-destructive">×</button>
                     </Badge>
                   )}
@@ -1183,20 +1171,15 @@ export default function AdminLocations() {
                                 <TableHead className="min-w-[200px]">{t('name')}</TableHead>
                                 <TableHead className="min-w-[180px] hidden md:table-cell">{t('coordinatorName')}</TableHead>
                                 <TableHead className="min-w-[80px] hidden lg:table-cell">PIN</TableHead>
-                                <TableHead className="min-w-[100px]">Onboarding</TableHead>
+                                <TableHead className="min-w-[120px]">Contacts</TableHead>
                                 <TableHead className="min-w-[80px]">{t('status')}</TableHead>
                                 <TableHead className="min-w-[80px]">{t('actions')}</TableHead>
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {regionLocs.map((location) => {
-                                const onboardingStatus = getOnboardingStatus(location);
                                 const sms = location.welcomeSmsStatus;
-                                const smsErr = location.welcomeSmsError;
                                 const em = location.welcomeEmailStatus;
-                                const emErr = location.welcomeEmailError;
-                                const lastSentAt = location.welcomeSentAt as string | Date | null;
-                                const sentDaysAgo = lastSentAt ? Math.max(0, Math.floor((Date.now() - new Date(lastSentAt).getTime()) / 86400000)) : null;
                                 return (
                                   <TableRow key={location.id} data-testid={`row-location-${location.id}`}>
                                     <TableCell>
@@ -1238,25 +1221,47 @@ export default function AdminLocations() {
                                       )}
                                     </TableCell>
                                     <TableCell>
-                                      <div className="flex flex-col gap-0.5">
-                                        <OnboardingStatusBadge status={onboardingStatus} />
-                                        {!location.phone && onboardingStatus !== "onboarded" && <NoPhoneBadge />}
-                                        {onboardingStatus !== "onboarded" && sentDaysAgo !== null && (
-                                          <div className="text-[10px] text-muted-foreground" data-testid={`sent-ago-${location.id}`}>
-                                            Sent {sentDaysAgo === 0 ? "today" : sentDaysAgo === 1 ? "1 day ago" : `${sentDaysAgo} days ago`}
+                                      {(() => {
+                                        if (location.onboardedAt) {
+                                          return (
+                                            <div className="flex flex-col gap-0.5">
+                                              <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700 w-fit">Onboarded</Badge>
+                                            </div>
+                                          );
+                                        }
+                                        // Find the most recently messaged channel
+                                        type ChannelTs = { channel: "sms" | "whatsapp" | "email"; at: Date };
+                                        const candidates: ChannelTs[] = [];
+                                        if (location.welcomeSmsSentAt) candidates.push({ channel: "sms", at: new Date(location.welcomeSmsSentAt as string) });
+                                        if (location.welcomeWhatsappSentAt) candidates.push({ channel: "whatsapp", at: new Date(location.welcomeWhatsappSentAt as string) });
+                                        if (location.welcomeEmailSentAt) candidates.push({ channel: "email", at: new Date(location.welcomeEmailSentAt as string) });
+                                        const latest = candidates.sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null;
+                                        const daysAgo = latest ? Math.max(0, Math.floor((Date.now() - latest.at.getTime()) / 86400000)) : null;
+                                        const channelIcon = latest?.channel === "sms"
+                                          ? <MessageSquare className="h-3 w-3 shrink-0" />
+                                          : latest?.channel === "whatsapp"
+                                          ? <MessageCircle className="h-3 w-3 shrink-0 text-green-600" />
+                                          : latest?.channel === "email"
+                                          ? <Mail className="h-3 w-3 shrink-0" />
+                                          : null;
+                                        const hasFailure = sms === "failed" || em === "failed" || location.welcomeWhatsappStatus === "failed";
+                                        return (
+                                          <div className="flex flex-col gap-0.5" data-testid={`contacts-cell-${location.id}`}>
+                                            {latest ? (
+                                              <div className="flex items-center gap-1 text-[11px] text-muted-foreground" data-testid={`last-messaged-${location.id}`}>
+                                                {channelIcon}
+                                                <span>{daysAgo === 0 ? "Today" : daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`}</span>
+                                              </div>
+                                            ) : (
+                                              <Badge variant="outline" className="text-xs text-muted-foreground w-fit">Not sent</Badge>
+                                            )}
+                                            {hasFailure && (
+                                              <Badge variant="destructive" className="text-xs w-fit">Failed</Badge>
+                                            )}
+                                            {!location.phone && <NoPhoneBadge />}
                                           </div>
-                                        )}
-                                        {sms && (
-                                          <div className={`text-[10px] ${sms === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
-                                            SMS: {sms}{sms === "failed" && smsErr ? ` — ${smsErr}` : ""}
-                                          </div>
-                                        )}
-                                        {em && (
-                                          <div className={`text-[10px] ${em === "failed" ? "text-destructive" : "text-muted-foreground"}`}>
-                                            Email: {em}{em === "failed" && emErr ? ` — ${emErr}` : ""}
-                                          </div>
-                                        )}
-                                      </div>
+                                        );
+                                      })()}
                                     </TableCell>
                                     <TableCell>
                                       <Switch
@@ -1277,7 +1282,7 @@ export default function AdminLocations() {
                                           <DropdownMenuSeparator />
                                           <DropdownMenuItem onClick={() => openSinglePicker(location)}>
                                             <Send className="mr-2 h-4 w-4" />
-                                            Send Welcome
+                                            Send Message
                                           </DropdownMenuItem>
                                           <DropdownMenuItem onClick={() => handleEditLocation(location)}>
                                             <Edit className="mr-2 h-4 w-4" />
@@ -1368,7 +1373,7 @@ export default function AdminLocations() {
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
                 <Send className="h-5 w-5 text-primary" />
-                Send Welcome Message
+                Send Message
               </DialogTitle>
               <DialogDescription>
                 {welcomeTarget?.kind === "single" && welcomeTarget.loc && (
@@ -1379,7 +1384,7 @@ export default function AdminLocations() {
                   <>To <strong>{selectedIds.size} selected location(s)</strong></>
                 )}
                 {welcomeTarget?.kind === "all-not-onboarded" && (
-                  <>To <strong>{eligibleNotOnboarded.length} location(s) not yet onboarded</strong></>
+                  <>To <strong>{eligibleNotOnboarded.length} location(s) not yet messaged</strong></>
                 )}
               </DialogDescription>
             </DialogHeader>
@@ -1387,13 +1392,12 @@ export default function AdminLocations() {
             {/* Recipient list for bulk / send-all */}
             {welcomeTarget && welcomeTarget.kind !== "single" && (() => {
               const ch = welcomeChannel;
-              const needsPhone = ch === "sms" || ch === "both";
-              const needsEmail = ch === "email" || ch === "both";
               const candidates = welcomeTarget.kind === "selected"
                 ? locations.filter((l) => selectedIds.has(l.id))
                 : locations.filter((l) => l.isActive !== false && !l.onboardedAt);
               const sendable = candidates.filter((l) => {
                 if (ch === "sms") return !!l.phone;
+                if (ch === "whatsapp") return !!l.phone;
                 if (ch === "email") return !!l.email;
                 // 'both': server sends via whichever channel(s) are available, so either phone or email qualifies
                 return !!l.phone || !!l.email;
@@ -1419,7 +1423,7 @@ export default function AdminLocations() {
                     )}
                   </div>
                   {skipped.length > 0 && (() => {
-                    const channelNeedsPhone = ch === "sms" || ch === "both";
+                    const channelNeedsPhone = ch === "sms" || ch === "whatsapp" || ch === "both";
                     const noPhoneSkipped = channelNeedsPhone ? skipped.filter(r => !r.phone) : [];
                     return (
                       <div className="border border-amber-300 bg-amber-50 rounded-md max-h-36 overflow-y-auto p-2" data-testid="recipient-skipped-list">
@@ -1510,22 +1514,19 @@ export default function AdminLocations() {
                     );
                   })()}
 
-                  {/* WhatsApp — disabled, coming soon */}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <div
-                        className="flex flex-col items-center gap-1 border rounded-md p-2 text-sm opacity-40 cursor-not-allowed select-none border-input"
-                        data-testid="channel-option-whatsapp"
-                      >
-                        <MessageCircle className="h-4 w-4" />
-                        WhatsApp
-                        <span className="text-[10px] text-muted-foreground">Coming soon</span>
-                      </div>
-                    </TooltipTrigger>
-                    <TooltipContent className="max-w-xs text-xs">
-                      WhatsApp requires WhatsApp Business API approval — coming soon.
-                    </TooltipContent>
-                  </Tooltip>
+                  {/* WhatsApp */}
+                  <Label
+                    htmlFor="channel-whatsapp"
+                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "whatsapp" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.whatsapp?.configured ? "opacity-50" : ""}`}
+                    data-testid="channel-option-whatsapp"
+                  >
+                    <RadioGroupItem id="channel-whatsapp" value="whatsapp" disabled={!serviceStatusQuery.data?.whatsapp?.configured} className="sr-only" />
+                    <MessageCircle className="h-4 w-4 text-green-600" />
+                    WhatsApp
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.whatsapp?.configured && (
+                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    )}
+                  </Label>
                 </RadioGroup>
                 {welcomeChannel !== defaultChannel && (
                   <button
@@ -1533,7 +1534,7 @@ export default function AdminLocations() {
                     onClick={() => setDefaultChannel(welcomeChannel)}
                     className="text-xs text-muted-foreground hover:text-primary mt-1"
                   >
-                    Save "{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel}" as my default
+                    Save "{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel === "whatsapp" ? "WhatsApp" : welcomeChannel}" as my default
                   </button>
                 )}
                 <label className="flex items-center gap-2 mt-3 text-xs cursor-pointer select-none" data-testid="checkbox-remember-default-wrap">
@@ -1543,7 +1544,7 @@ export default function AdminLocations() {
                     data-testid="checkbox-remember-default"
                   />
                   <span>
-                    Remember <strong>{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
+                    Remember <strong>{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel === "whatsapp" ? "WhatsApp" : welcomeChannel.toUpperCase()}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
                   </span>
                 </label>
               </div>
@@ -1554,6 +1555,12 @@ export default function AdminLocations() {
                     <p className="text-xs text-destructive flex items-start gap-1">
                       <AlertTriangle className="h-3 w-3 mt-0.5" />
                       SMS unavailable: {serviceStatusQuery.data.sms.reason}
+                    </p>
+                  )}
+                  {welcomeChannel === "whatsapp" && !serviceStatusQuery.data.whatsapp?.configured && (
+                    <p className="text-xs text-destructive flex items-start gap-1">
+                      <AlertTriangle className="h-3 w-3 mt-0.5" />
+                      WhatsApp unavailable: {serviceStatusQuery.data.whatsapp?.reason}
                     </p>
                   )}
                   {(welcomeChannel === "email" || welcomeChannel === "both") && !serviceStatusQuery.data.email?.configured && (
@@ -1717,7 +1724,7 @@ export default function AdminLocations() {
               <Button onClick={sendFromDialog} disabled={dialogIsPending} data-testid="button-send-welcome-confirm">
                 {dialogIsPending
                   ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</>
-                  : <><Send className="h-4 w-4 mr-2" />Send Welcome</>
+                  : <><Send className="h-4 w-4 mr-2" />Send Message</>
                 }
               </Button>
             </DialogFooter>

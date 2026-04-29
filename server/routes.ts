@@ -857,8 +857,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         success: result.ok,
         results: {
           sms: result.sms,
+          whatsapp: result.whatsapp,
           email: result.email,
-          anySuccess: !!(result.sms?.ok || result.email?.ok),
+          anySuccess: !!(result.sms?.ok || result.whatsapp?.ok || result.email?.ok),
         },
         location: { id: result.locationId, name: result.locationName },
       });
@@ -923,6 +924,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .filter((loc) => {
           if (loc.isActive === false || loc.onboardedAt) return false;
           if (ch === 'sms') return !!loc.phone;
+          if (ch === 'whatsapp') return !!loc.phone;
           if (ch === 'email') return !!loc.email;
           // 'both': at least one channel must be available
           return !!loc.phone || !!loc.email;
