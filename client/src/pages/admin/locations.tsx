@@ -13,6 +13,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { LocationForm } from "@/components/admin/location-form";
+import { RegionForm } from "@/components/admin/region-form";
 import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
@@ -90,6 +91,7 @@ import {
   Save,
   Settings,
   Bell,
+  Globe,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -531,6 +533,9 @@ export default function AdminLocations() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   // ===== Onboarding (SMS / Email welcome) =====
+  const [isRegionDialogOpen, setIsRegionDialogOpen] = useState(false);
+  const [editingRegion, setEditingRegion] = useState<Region | null>(null);
+
   const [welcomeDialogOpen, setWelcomeDialogOpen] = useState(false);
   const [welcomeTarget, setWelcomeTarget] = useState<{ kind: "single"; id: number; loc: Location } | { kind: "selected" } | { kind: "all-not-onboarded" } | null>(null);
   const [defaultChannel, setDefaultChannelState] = useState<OperatorWelcomeChannel>(() => {
@@ -1065,7 +1070,14 @@ export default function AdminLocations() {
             <h1 className="text-2xl md:text-3xl font-bold">{t('locationManagementTitle')}</h1>
             <p className="text-muted-foreground text-sm md:text-base">{t('manageAllGemachLocations')}</p>
           </div>
-          <div className="mt-4 md:mt-0">
+          <div className="mt-4 md:mt-0 flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={() => { setEditingRegion(null); setIsRegionDialogOpen(true); }}
+            >
+              <Globe className="mr-2 h-4 w-4" />
+              Manage Regions
+            </Button>
             <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
               <Button onClick={() => setIsCreateDialogOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
@@ -1080,6 +1092,61 @@ export default function AdminLocations() {
               </DialogContent>
             </Dialog>
           </div>
+
+          <Dialog open={isRegionDialogOpen} onOpenChange={(open) => { setIsRegionDialogOpen(open); if (!open) setEditingRegion(null); }}>
+            <DialogContent className="sm:max-w-[500px] max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{editingRegion ? "Edit Region" : "Manage Regions"}</DialogTitle>
+                <DialogDescription>
+                  {editingRegion
+                    ? "Update the details for this region."
+                    : "Create a new region or select one below to edit it."}
+                </DialogDescription>
+              </DialogHeader>
+
+              {!editingRegion && (
+                <div className="mb-4 space-y-1">
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Existing Regions</p>
+                  {regions && regions.length > 0 ? (
+                    <div className="rounded-lg border border-border/60 divide-y divide-border/40 overflow-hidden">
+                      {regions.map((r: Region) => (
+                        <div key={r.id} className="flex items-center justify-between px-3 py-2 bg-background hover:bg-muted/30 transition-colors">
+                          <div>
+                            <span className="text-sm font-medium">{r.name}</span>
+                            {r.nameHe && <span className="ml-2 text-xs text-muted-foreground" dir="rtl">{r.nameHe}</span>}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => setEditingRegion(r)}
+                          >
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">No regions yet.</p>
+                  )}
+                  <div className="pt-3">
+                    <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-3">New Region</p>
+                    <RegionForm onSuccess={() => setIsRegionDialogOpen(false)} />
+                  </div>
+                </div>
+              )}
+
+              {editingRegion && (
+                <div>
+                  <Button variant="ghost" size="sm" className="mb-3 -ml-1 text-xs" onClick={() => setEditingRegion(null)}>
+                    <ArrowLeft className="h-3.5 w-3.5 mr-1" />
+                    Back to list
+                  </Button>
+                  <RegionForm region={editingRegion} onSuccess={() => { setEditingRegion(null); setIsRegionDialogOpen(false); }} />
+                </div>
+              )}
+            </DialogContent>
+          </Dialog>
         </div>
 
         <GlobalStripeSettingsPanel />

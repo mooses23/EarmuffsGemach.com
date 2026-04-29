@@ -52,6 +52,14 @@ export const getRegions = async () => {
   return response.json();
 };
 
+export const createRegion = async (data: { name: string; nameHe?: string; slug: string; displayOrder?: number }) => {
+  return apiRequest("POST", "/api/regions", data);
+};
+
+export const updateRegion = async (id: number, data: { name?: string; nameHe?: string; slug?: string; displayOrder?: number }) => {
+  return apiRequest("PATCH", `/api/regions/${id}`, data);
+};
+
 // Gemach Applications API
 export const submitGemachApplication = async (data: InsertGemachApplication) => {
   return apiRequest("POST", "/api/applications", data);

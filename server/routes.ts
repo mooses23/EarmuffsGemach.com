@@ -156,6 +156,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.patch("/api/regions/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid region id" });
+      const region = await storage.updateRegion(id, req.body);
+      res.json(region);
+    } catch (error) {
+      console.error("Error updating region:", error);
+      res.status(500).json({ message: "Failed to update region" });
+    }
+  });
+
   // CITY CATEGORIES ROUTES
   app.get("/api/city-categories", async (req, res) => {
     try {
