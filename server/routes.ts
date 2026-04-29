@@ -1096,22 +1096,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         community: application.community,
       }).catch((e) => console.error("Application confirmation email failed:", e));
 
-      const adminEmail = await getAdminNotificationEmail();
-      if (adminEmail) {
-        sendAdminNewApplicationAlert({
-          adminEmail,
-          applicantFirstName: application.firstName,
-          applicantLastName: application.lastName,
-          applicantEmail: application.email,
-          applicantPhone: application.phone,
-          city: application.city,
-          state: application.state,
-          country: application.country,
-          community: application.community,
-          message: application.message,
-          applicationsUrl: `${baseUrl}/admin/applications`,
-        }).catch((e) => console.error("Admin new-application alert failed:", e));
-      }
+      getAdminNotificationEmail()
+        .then((adminEmail) => {
+          if (!adminEmail) return;
+          return sendAdminNewApplicationAlert({
+            adminEmail,
+            applicantFirstName: application.firstName,
+            applicantLastName: application.lastName,
+            applicantEmail: application.email,
+            applicantPhone: application.phone,
+            city: application.city,
+            state: application.state,
+            country: application.country,
+            community: application.community,
+            message: application.message,
+            applicationsUrl: `${baseUrl}/admin/applications`,
+          });
+        })
+        .catch((e) => console.error("Admin new-application alert failed:", e));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid application data", errors: error.errors });
