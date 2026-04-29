@@ -256,6 +256,56 @@ function SetupIntentFormInner({
     }
   };
 
+  // While the fee-quote (and therefore consent text) is still loading,
+  // show a skeleton placeholder so the borrower sees a proper loading state
+  // instead of an abrupt form with placeholder text.
+  if (!feeQuote) {
+    return (
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            Card Setup for Pay Later
+          </CardTitle>
+          <CardDescription>
+            Enter your details and card information to set up your card for
+            payment
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-5">
+          {/* Name field skeleton */}
+          <div className="space-y-2">
+            <div className="h-4 w-24 rounded bg-muted animate-pulse" />
+            <div className="h-10 w-full rounded-md bg-muted animate-pulse" />
+          </div>
+          {/* Email field skeleton */}
+          <div className="space-y-2">
+            <div className="h-4 w-36 rounded bg-muted animate-pulse" />
+            <div className="h-10 w-full rounded-md bg-muted animate-pulse" />
+            <div className="h-3 w-56 rounded bg-muted animate-pulse" />
+          </div>
+          {/* Phone field skeleton */}
+          <div className="space-y-2">
+            <div className="h-4 w-40 rounded bg-muted animate-pulse" />
+            <div className="h-10 w-full rounded-md bg-muted animate-pulse" />
+            <div className="h-3 w-64 rounded bg-muted animate-pulse" />
+          </div>
+          {/* Card element skeleton */}
+          <div className="space-y-2">
+            <div className="h-4 w-28 rounded bg-muted animate-pulse" />
+            <div className="h-12 w-full rounded-md bg-muted animate-pulse" />
+          </div>
+          {/* Alert skeleton */}
+          <div className="h-16 w-full rounded-md bg-muted animate-pulse" />
+          {/* Consent block skeleton */}
+          <div className="h-28 w-full rounded-md bg-muted animate-pulse" />
+          {/* Submit button skeleton */}
+          <div className="h-11 w-full rounded-md bg-muted animate-pulse" />
+        </CardContent>
+      </Card>
+    );
+  }
+
   if (showSuccess) {
     return (
       <Card className="w-full max-w-md border-green-200 bg-green-50">
