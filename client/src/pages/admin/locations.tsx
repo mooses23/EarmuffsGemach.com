@@ -250,9 +250,19 @@ function LocationStripeFeeSection({ locationId }: { locationId: number }) {
   );
 }
 
+const STRIPE_PANEL_KEY = "gemachhub:stripeSettingsPanelOpen";
+
 function GlobalStripeSettingsPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const [panelOpen, setPanelOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(STRIPE_PANEL_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   const { data, isLoading } = useQuery<StripeAdminSettings>({
     queryKey: ["/api/admin/settings/stripe"],
@@ -292,7 +302,15 @@ function GlobalStripeSettingsPanel() {
   });
 
   return (
-    <details className="mb-6 group">
+    <details
+      className="mb-6 group"
+      open={panelOpen}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open;
+        setPanelOpen(next);
+        try { localStorage.setItem(STRIPE_PANEL_KEY, String(next)); } catch {}
+      }}
+    >
       <summary className="flex items-center gap-2 cursor-pointer list-none rounded-lg border bg-card px-4 py-3 text-sm font-medium select-none hover:bg-muted/50 transition-colors">
         <Settings className="h-4 w-4 text-muted-foreground" />
         <span>Global Stripe charge settings</span>
@@ -337,9 +355,19 @@ function GlobalStripeSettingsPanel() {
   );
 }
 
+const NOTIFICATION_PANEL_KEY = "gemachhub:notificationSettingsPanelOpen";
+
 function NotificationSettingsPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
+
+  const [panelOpen, setPanelOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(NOTIFICATION_PANEL_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
 
   const { data, isLoading } = useQuery<{ adminEmail: string; effectiveEmail: string; source: "db" | "env" | "none" }>({
     queryKey: ["/api/admin/settings/notifications"],
@@ -375,7 +403,15 @@ function NotificationSettingsPanel() {
   });
 
   return (
-    <details className="mb-6 group">
+    <details
+      className="mb-6 group"
+      open={panelOpen}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open;
+        setPanelOpen(next);
+        try { localStorage.setItem(NOTIFICATION_PANEL_KEY, String(next)); } catch {}
+      }}
+    >
       <summary className="flex items-center gap-2 cursor-pointer list-none rounded-lg border bg-card px-4 py-3 text-sm font-medium select-none hover:bg-muted/50 transition-colors">
         <Bell className="h-4 w-4 text-muted-foreground" />
         <span>Notification settings</span>
