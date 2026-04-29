@@ -134,6 +134,12 @@ export interface IStorage {
   getReturnReminderEventBySid(sid: string): Promise<ReturnReminderEvent | undefined>;
   updateReturnReminderDeliveryStatus(sid: string, status: string, errorCode?: string | null): Promise<void>;
   markPhoneOptedOut(borrowerPhone: string): Promise<void>;
+  /**
+   * Returns true if any SMS reminder to the given phone number was ever marked
+   * opted_out (STOP), scoped to transactions at the given location so operator
+   * data stays within their own location boundary.
+   */
+  isPhoneOptedOutForSms(borrowerPhone: string, locationId: number): Promise<boolean>;
 
   // Contact operations
   getAllContacts(): Promise<Contact[]>;
@@ -2880,6 +2886,25 @@ export class MemStorage implements IStorage {
         });
       }
     }
+  }
+
+  async isPhoneOptedOutForSms(borrowerPhone: string, locationId: number): Promise<boolean> {
+    const normalizedInput = borrowerPhone.replace(/\D/g, '');
+    if (!normalizedInput) return false;
+    const txIds = new Set<number>();
+    for (const tx of this.transactions.values()) {
+      if (tx.locationId !== locationId || !tx.borrowerPhone) continue;
+      const storedDigits = tx.borrowerPhone.replace(/\D/g, '');
+      if (storedDigits && (storedDigits.includes(normalizedInput) || normalizedInput.includes(storedDigits))) {
+        txIds.add(tx.id);
+      }
+    }
+    for (const event of this.returnReminderEventsMap.values()) {
+      if (event.channel === 'sms' && event.deliveryStatus === 'opted_out' && txIds.has(event.transactionId)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Contact methods

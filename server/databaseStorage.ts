@@ -766,6 +766,41 @@ export class DatabaseStorage implements IStorage {
       );
   }
 
+  async isPhoneOptedOutForSms(borrowerPhone: string, locationId: number): Promise<boolean> {
+    const normalizedInput = borrowerPhone.replace(/\D/g, '');
+    if (!normalizedInput) return false;
+
+    // Scope to the operator's location so no cross-location data leaks.
+    const locationTx = await db.select({ id: transactions.id, borrowerPhone: transactions.borrowerPhone })
+      .from(transactions)
+      .where(and(eq(transactions.locationId, locationId), sql`borrower_phone IS NOT NULL`));
+
+    const txIds = locationTx
+      .filter(r => {
+        if (!r.borrowerPhone) return false;
+        const storedDigits = r.borrowerPhone.replace(/\D/g, '');
+        return storedDigits && (
+          storedDigits.includes(normalizedInput) || normalizedInput.includes(storedDigits)
+        );
+      })
+      .map(r => r.id);
+
+    if (txIds.length === 0) return false;
+
+    const rows = await db.select({ id: returnReminderEvents.id })
+      .from(returnReminderEvents)
+      .where(
+        and(
+          inArray(returnReminderEvents.transactionId, txIds),
+          eq(returnReminderEvents.channel, 'sms'),
+          eq(returnReminderEvents.deliveryStatus, 'opted_out'),
+        ),
+      )
+      .limit(1);
+
+    return rows.length > 0;
+  }
+
   // Contact operations
   async getAllContacts(): Promise<Contact[]> {
     return db.select().from(contacts);

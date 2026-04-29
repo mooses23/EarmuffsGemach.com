@@ -424,6 +424,22 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [confirmOpen, smsAvailable, hasPhone, hasEmail]);
 
+  // Phone-level opt-out check: fetch when the dialog opens and the borrower has a phone.
+  // Uses the transaction-scoped endpoint so the server resolves the phone and
+  // scopes the search to this location — no arbitrary phone probing possible.
+  const { data: optOutData } = useQuery<{ optedOut: boolean }>({
+    queryKey: ['/api/locations', locationId, 'transactions', tx.id, 'sms-opt-out-check'],
+    queryFn: async () => {
+      const res = await apiRequest(
+        'GET',
+        `/api/locations/${locationId}/transactions/${tx.id}/sms-opt-out-check`,
+      );
+      return res.json();
+    },
+    enabled: confirmOpen && hasPhone,
+  });
+  const hasOptedOut = optOutData?.optedOut === true;
+
   const mutation = useMutation({
     mutationFn: async (chosenChannel: 'email' | 'sms') => {
       return apiRequest('POST', `/api/locations/${locationId}/transactions/${tx.id}/return-reminder`, { channel: chosenChannel });
@@ -561,6 +577,16 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
               ) : null}
             </RadioGroup>
           </div>
+
+          {hasOptedOut && channel === 'sms' && (
+            <div
+              className="flex items-start gap-2 rounded-md border border-orange-500/40 bg-orange-500/10 px-3 py-2 text-sm text-orange-300"
+              data-testid={`reminder-opted-out-warning-${tx.id}`}
+            >
+              <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+              <span>{t('reminderDeliveryOptedOutWarning')}</span>
+            </div>
+          )}
 
           {lastSent && (
             <div className="text-xs text-muted-foreground">

@@ -3129,6 +3129,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Transaction-scoped SMS opt-out check (operator-scoped).
+  // Fetches the borrower's phone from the transaction and returns { optedOut: boolean }
+  // indicating whether any prior SMS to that phone (within this location) was opted_out.
+  // Using the transaction ID prevents operators from probing arbitrary phone numbers.
+  app.get("/api/locations/:locationId/transactions/:id/sms-opt-out-check", async (req, res) => {
+    try {
+      const locationId = parseInt(req.params.locationId, 10);
+      const transactionId = parseInt(req.params.id, 10);
+      if (Number.isNaN(locationId) || Number.isNaN(transactionId)) {
+        return res.status(400).json({ message: "Invalid location or transaction id" });
+      }
+      const operatorLocationId = getOperatorLocationId(req);
+      if (!operatorLocationId) {
+        return res.status(401).json({ message: "Operator authentication required" });
+      }
+      if (operatorLocationId !== -1 && operatorLocationId !== locationId) {
+        return res.status(403).json({ message: "Not authorized for this location" });
+      }
+      const transaction = await storage.getTransaction(transactionId);
+      if (!transaction || transaction.locationId !== locationId) {
+        return res.status(404).json({ message: "Transaction not found for this location" });
+      }
+      const phone = (transaction.borrowerPhone || '').trim();
+      if (!phone) {
+        return res.json({ optedOut: false });
+      }
+      const optedOut = await storage.isPhoneOptedOutForSms(phone, locationId);
+      res.json({ optedOut });
+    } catch (error: any) {
+      console.error("Error checking SMS opt-out status:", error);
+      res.status(500).json({ message: error?.message || "Failed to check opt-out status" });
+    }
+  });
+
   // ============================================
   // TWILIO STATUS CALLBACK WEBHOOK
   // ============================================
