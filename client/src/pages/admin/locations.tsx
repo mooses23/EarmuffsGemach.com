@@ -1541,12 +1541,20 @@ export default function AdminLocations() {
                                         const waIconColor = waStatus === "delivered" ? "text-green-600"
                                           : (waStatus === "failed" || waStatus === "undelivered") ? "text-red-500"
                                           : "text-muted-foreground";
+                                        const smsStatus = location.welcomeSmsStatus?.toLowerCase();
+                                        const smsIconColor = smsStatus === "delivered" ? "text-green-600"
+                                          : (smsStatus === "failed" || smsStatus === "undelivered") ? "text-red-500"
+                                          : "text-muted-foreground";
+                                        const emailStatus = location.welcomeEmailStatus?.toLowerCase();
+                                        const emailIconColor = (emailStatus === "delivered" || emailStatus === "sent") ? "text-green-600"
+                                          : emailStatus === "failed" ? "text-red-500"
+                                          : "text-muted-foreground";
                                         const channelIcon = latest?.channel === "sms"
-                                          ? <MessageSquare className="h-3 w-3 shrink-0" />
+                                          ? <MessageSquare className={`h-3 w-3 shrink-0 ${smsIconColor}`} />
                                           : latest?.channel === "whatsapp"
                                           ? <MessageCircle className={`h-3 w-3 shrink-0 ${waIconColor}`} />
                                           : latest?.channel === "email"
-                                          ? <Mail className="h-3 w-3 shrink-0" />
+                                          ? <Mail className={`h-3 w-3 shrink-0 ${emailIconColor}`} />
                                           : null;
                                         const hasFailure = sms === "failed" || em === "failed" || waStatus === "failed" || waStatus === "undelivered";
                                         // Per-channel tooltip rows
@@ -1569,9 +1577,9 @@ export default function AdminLocations() {
                                           return "text-muted-foreground";
                                         };
                                         const channelRowIcon = (key: "sms" | "whatsapp" | "email") =>
-                                          key === "sms" ? <MessageSquare className="h-3 w-3 shrink-0" />
+                                          key === "sms" ? <MessageSquare className={`h-3 w-3 shrink-0 ${smsIconColor}`} />
                                           : key === "whatsapp" ? <MessageCircle className={`h-3 w-3 shrink-0 ${waIconColor}`} />
-                                          : <Mail className="h-3 w-3 shrink-0" />;
+                                          : <Mail className={`h-3 w-3 shrink-0 ${emailIconColor}`} />;
 
                                         const mainContent = (
                                           <div className="flex flex-col gap-0.5" data-testid={`contacts-cell-${location.id}`}>
