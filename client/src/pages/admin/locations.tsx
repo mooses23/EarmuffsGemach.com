@@ -407,6 +407,15 @@ function NotificationSettingsPanel() {
                     </span>
                   </p>
                 )}
+                {data && data.source === "none" && (
+                  <div
+                    className="flex items-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 mt-1"
+                    data-testid="no-notification-email-warning"
+                  >
+                    <AlertTriangle className="h-4 w-4 shrink-0 text-amber-500" />
+                    No notification address configured — alerts are not being delivered.
+                  </div>
+                )}
               </div>
               <Button
                 size="sm"
