@@ -2758,15 +2758,22 @@ export default function OperatorDashboard() {
 
     const isHe = language === "he";
 
+    let skipped = false;
+
     const driverObj = driver({
       showProgress: true,
+      showButtons: ["next", "previous", "close"],
       progressText: isHe ? "{{current}} מתוך {{total}}" : "{{current}} of {{total}}",
       nextBtnText: isHe ? "הבא ›" : "Next ›",
       prevBtnText: isHe ? "‹ הקודם" : "‹ Back",
       doneBtnText: isHe ? "שנה PIN ←" : "Change PIN →",
+      onPopoverRender: (popover) => {
+        popover.closeButton.textContent = isHe ? "דלג בינתיים" : "Skip for now";
+        popover.closeButton.onclick = () => { skipped = true; driverObj.destroy(); };
+      },
       onDestroyStarted: () => {
         driverObj.destroy();
-        setActiveTab("security");
+        if (!skipped) setActiveTab("security");
       },
       steps: [
         {

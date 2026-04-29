@@ -189,8 +189,10 @@ export interface OperatorWelcomeMessageContext {
   locationName: string;
   locationCode: string;
   locationId?: number;
+  /** Contact person's name — used for the greeting line in SMS/WhatsApp. */
+  operatorName?: string;
   claimUrl: string;
-  /** Direct login URL (e.g. https://app.example.com/login). Used in SMS instead of the claim URL. */
+  /** Direct login URL (e.g. https://app.example.com/auth). Used in SMS instead of the claim URL. */
   loginUrl?: string;
   language: 'en' | 'he';
   defaultPin?: string;
@@ -205,10 +207,13 @@ export function buildOperatorWelcomeMessageBody(ctx: OperatorWelcomeMessageConte
   const pin = (ctx.defaultPin || '1234').trim();
   const loginUrl = ctx.loginUrl || ctx.claimUrl;
   const numberTag = ctx.locationId != null ? ` #${ctx.locationId}` : '';
+  const greeting = (ctx.operatorName || '').trim();
   if (ctx.language === 'he') {
-    return `תודה שאתה מנהל גמ"ח${numberTag}! קוד הכניסה שלך: ${pin}. התחבר כאן:\n${loginUrl}\n— ${signOff}`;
+    const hi = greeting ? `שלום ${greeting}, ` : '';
+    return `${hi}תודה שאתה מנהל את ${ctx.locationName}${numberTag}! קוד הכניסה שלך: ${pin}. התחבר כאן:\n${loginUrl}\n— ${signOff}`;
   }
-  return `Thank you for running gemach${numberTag}! Your PIN is ${pin}. Log in at:\n${loginUrl}\n— ${signOff}`;
+  const hi = greeting ? `Hi ${greeting}, ` : '';
+  return `${hi}thank you for running ${ctx.locationName}${numberTag}! Your PIN is ${pin}. Log in at:\n${loginUrl}\n— ${signOff}`;
 }
 
 // WhatsApp welcome body — more conversational, uses line breaks for readability.

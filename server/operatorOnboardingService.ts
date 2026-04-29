@@ -108,6 +108,7 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     locationName: loc.name,
     locationCode: loc.locationCode,
     locationId: loc.id,
+    operatorName: loc.contactPerson || '',
     claimUrl: claimUrlPreview,
     loginUrl: loginUrlPreview,
     language: 'en',
@@ -118,6 +119,7 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     locationName: loc.nameHe || loc.name,
     locationCode: loc.locationCode,
     locationId: loc.id,
+    operatorName: loc.contactPersonHe || loc.contactPerson || '',
     claimUrl: claimUrlPreview,
     loginUrl: loginUrlPreview,
     language: 'he',
@@ -220,11 +222,16 @@ export async function sendWelcomeForLocation(
 
   const loginUrl = `${options.baseUrl.replace(/\/$/, '')}/auth`;
 
+  const operatorName = language === 'he'
+    ? (loc.contactPersonHe || loc.contactPerson || '')
+    : (loc.contactPerson || '');
+
   const sharedCtx = {
     toPhone: loc.phone!,
     locationName: localizedName,
     locationCode: loc.locationCode,
     locationId: loc.id,
+    operatorName,
     claimUrl,
     loginUrl,
     language,
