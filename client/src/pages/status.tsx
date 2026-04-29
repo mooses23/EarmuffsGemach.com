@@ -592,12 +592,13 @@ function StatusPageContent({
               stripePromise &&
               data.setupIntentClientSecret &&
               data.setupIntentId &&
-              data.publishableKey && (
+              data.publishableKey &&
+              data.consentText && (
                 <Elements stripe={stripePromise}>
                   <StripeSetupIntentForm
                     clientSecret={data.setupIntentClientSecret}
                     setupIntentId={data.setupIntentId}
-                    consentText={data.consentText ?? `By saving this card, I authorize ${data.locationName || "this gemach"} to charge up to $${((data.consentMaxChargeCents ?? data.amountCents) / 100).toFixed(2)} if I do not return the borrowed item.`}
+                    consentText={data.consentText}
                     consentMaxChargeCents={data.consentMaxChargeCents ?? data.amountCents}
                     borrowerName={data.borrowerName}
                     onSuccess={() => {

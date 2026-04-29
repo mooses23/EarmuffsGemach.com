@@ -78,11 +78,6 @@ interface FeeQuote {
   consentText?: string;
 }
 
-function buildConsentText(gemachName: string, totalCents: number): string {
-  const dollars = (totalCents / 100).toFixed(2);
-  return `By saving this card, I authorize ${gemachName} to charge up to $${dollars} (deposit + processing fee) if I do not return the borrowed item.`;
-}
-
 type SetupIntentFormValues = z.infer<typeof setupIntentFormSchema>;
 
 interface SetupIntentFormProps {
@@ -139,10 +134,10 @@ function SetupIntentFormInner({
 
   const depositCents = (locationInfo?.depositAmount ?? 20) * 100;
   const maxChargeCents = feeQuote?.totalCents ?? (depositCents + 90); // fallback: 3% + $0.30 on $20
-  const gemachName = locationInfo?.name ?? "this gemach";
-  // Prefer the server-canonical consent text from the fee-quote so what the
-  // borrower reads is byte-identical to what is stored (Task #53).
-  const consentText = feeQuote?.consentText ?? buildConsentText(gemachName, maxChargeCents);
+  // The server always returns consentText in the fee-quote response (Task #53).
+  // If it is unexpectedly absent while the quote is still loading, show a
+  // generic placeholder so the submit button stays disabled until the real text arrives.
+  const consentText = feeQuote?.consentText ?? "Loading authorization text…";
 
   const form = useForm<SetupIntentFormValues>({
     resolver: zodResolver(setupIntentFormSchema),
@@ -443,7 +438,7 @@ function SetupIntentFormInner({
             {/* Submit Button */}
             <Button
               type="submit"
-              disabled={!stripe || isProcessing || !form.watch("consentAgreed")}
+              disabled={!stripe || isProcessing || !form.watch("consentAgreed") || !feeQuote?.consentText}
               className="w-full"
               size="lg"
               data-testid="button-submit-card"
