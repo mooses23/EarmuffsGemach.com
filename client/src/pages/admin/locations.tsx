@@ -1380,10 +1380,14 @@ export default function AdminLocations() {
                                         if (location.welcomeEmailSentAt) candidates.push({ channel: "email", at: new Date(location.welcomeEmailSentAt as string) });
                                         const latest = candidates.sort((a, b) => b.at.getTime() - a.at.getTime())[0] ?? null;
                                         const daysAgo = latest ? Math.max(0, Math.floor((Date.now() - latest.at.getTime()) / 86400000)) : null;
+                                        const waStatus = location.welcomeWhatsappStatus?.toLowerCase();
+                                        const waIconColor = waStatus === "delivered" ? "text-green-600"
+                                          : (waStatus === "failed" || waStatus === "undelivered") ? "text-red-500"
+                                          : "text-muted-foreground";
                                         const channelIcon = latest?.channel === "sms"
                                           ? <MessageSquare className="h-3 w-3 shrink-0" />
                                           : latest?.channel === "whatsapp"
-                                          ? <MessageCircle className="h-3 w-3 shrink-0 text-green-600" />
+                                          ? <MessageCircle className={`h-3 w-3 shrink-0 ${waIconColor}`} />
                                           : latest?.channel === "email"
                                           ? <Mail className="h-3 w-3 shrink-0" />
                                           : null;
