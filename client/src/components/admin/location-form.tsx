@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { LoaderCircle, Phone, Mail, DollarSign, MapPin, User, Globe } from "lucide-react";
+import { LoaderCircle, Phone, Mail, DollarSign, MapPin, User, Globe, AlertTriangle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -179,9 +179,36 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
     square: t("squareLabel"),
   };
 
+  const fieldLabels: Record<string, string> = {
+    name: `${t("gemachName")} (English)`,
+    nameHe: `${t("gemachName")} (עברית)`,
+    contactPerson: `${t("contactPersonLabel")} (English)`,
+    contactPersonHe: `${t("contactPersonLabel")} (עברית)`,
+    address: `${t("addressLabel")} (English)`,
+    addressHe: `${t("addressLabel")} (עברית)`,
+    phone: t("phoneLabel"),
+    email: t("emailLabel2"),
+    regionId: t("region"),
+    depositAmount: t("depositAmountDollar"),
+  };
+
   return (
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+
+        {form.formState.isSubmitted && Object.keys(form.formState.errors).length > 0 && (
+          <div className="rounded-lg border border-amber-300/70 bg-amber-50 dark:bg-amber-950/30 p-3 space-y-1.5" data-testid="validation-banner">
+            <div className="flex items-center gap-2 text-sm font-medium text-amber-900 dark:text-amber-100">
+              <AlertTriangle className="h-4 w-4 shrink-0" />
+              <span>{t("validationBannerTitle")}</span>
+            </div>
+            <ul className="list-disc list-inside text-xs text-amber-800/80 dark:text-amber-100/80 space-y-0.5 pl-1">
+              {Object.keys(form.formState.errors).map((key) => (
+                <li key={key}>{fieldLabels[key] ?? key}</li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="space-y-3">
           <SectionHeading icon={Globe} label={t("gemachName")} />
