@@ -10,6 +10,7 @@ import {
 } from "@stripe/react-stripe-js";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
+import { useLanguage } from "@/hooks/use-language";
 import { apiRequest } from "@/lib/queryClient";
 import {
   Form,
@@ -98,6 +99,7 @@ function SetupIntentFormInner({
   const stripe = useStripe();
   const elements = useElements();
   const { toast } = useToast();
+  const { language } = useLanguage();
   const [isProcessing, setIsProcessing] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [successUrl, setSuccessUrl] = useState("");
@@ -106,6 +108,7 @@ function SetupIntentFormInner({
   const [feeQuote, setFeeQuote] = useState<FeeQuote | null>(null);
 
   // Fetch location info and server-authoritative fee quote together.
+  // Re-fetch when language changes so the consent text is in the right language.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -121,7 +124,9 @@ function SetupIntentFormInner({
         };
         setLocationInfo(locInfo);
         const depositCentsLocal = (locInfo.depositAmount) * 100;
-        const qr = await fetch(`/api/deposits/fee-quote?locationId=${locationId}&depositCents=${depositCentsLocal}`);
+        const qr = await fetch(
+          `/api/deposits/fee-quote?locationId=${locationId}&depositCents=${depositCentsLocal}&locale=${language}`
+        );
         if (!qr.ok || cancelled) return;
         const quote: FeeQuote = await qr.json();
         if (!cancelled) setFeeQuote(quote);
@@ -130,7 +135,7 @@ function SetupIntentFormInner({
       }
     })();
     return () => { cancelled = true; };
-  }, [locationId]);
+  }, [locationId, language]);
 
   const depositCents = (locationInfo?.depositAmount ?? 20) * 100;
   const maxChargeCents = feeQuote?.totalCents ?? (depositCents + 90); // fallback: 3% + $0.30 on $20

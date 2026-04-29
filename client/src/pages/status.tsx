@@ -384,10 +384,10 @@ function StatusPageContent({
   const [stripePromise, setStripePromise] = useState<Promise<Stripe | null> | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery<StatusPageData>({
-    queryKey: [`/api/status/${transactionId}`, token],
+    queryKey: [`/api/status/${transactionId}`, token, language],
     queryFn: async () => {
       const response = await fetch(
-        `/api/status/${transactionId}?token=${encodeURIComponent(token)}`,
+        `/api/status/${transactionId}?token=${encodeURIComponent(token)}&locale=${language}`,
         { credentials: "include" }
       );
 

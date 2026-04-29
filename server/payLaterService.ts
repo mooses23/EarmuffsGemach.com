@@ -3,7 +3,7 @@ import { storage } from './storage.js';
 import { randomBytes, createHash } from 'crypto';
 import type { Transaction, PayLaterStatus } from '../shared/schema.js';
 import { computeFeeForPaymentMethod } from './depositFees.js';
-import { buildCanonicalConsentText } from './consentHelper.js';
+import { buildCanonicalConsentText, resolveConsentLocale } from './consentHelper.js';
 import { notifyBorrowerBeforeCharge, notifyBorrowerAfterCharge } from './chargeNotifications.js';
 
 // Stale-card guardrail: refuse off-session charges on cards older than this.

@@ -12,7 +12,7 @@ import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
 import { PayLaterService, prepareBorrowerStatusToken, commitBorrowerStatusToken, getMaxCardAgeDays, setMaxCardAgeDays, getRequirePreChargeNotification, setRequirePreChargeNotification } from "./payLaterService.js";
 import { computeFeeForPaymentMethod } from "./depositFees.js";
-import { buildCanonicalConsentText } from "./consentHelper.js";
+import { buildCanonicalConsentText, resolveConsentLocale } from "./consentHelper.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
 import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, sendReply, sendNewEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
 import { getTwilioConfigStatus, sendReturnReminderSMS, normalizePhoneForSms, validateTwilioSignature } from "./twilio-client.js";
@@ -3797,6 +3797,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const allPMs = await storage.getAllPaymentMethods();
       const stripePM = allPMs.find(pm => pm.provider === 'stripe' && pm.isActive);
       const { feeCents, totalCents } = computeFeeForPaymentMethod(depositCents, stripePM, location);
+      const feeQuoteLocale = resolveConsentLocale(req.query.locale as string | undefined);
       return res.json({
         depositCents,
         feeCents,
@@ -3804,7 +3805,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         percentBp: stripePM?.processingFeePercent ?? location?.processingFeePercent ?? 300,
         fixedCents: stripePM?.fixedFee ?? location?.processingFeeFixed ?? 30,
         locationName: location.name,
-        consentText: buildCanonicalConsentText(location.name, totalCents),
+        consentText: buildCanonicalConsentText(location.name, totalCents, feeQuoteLocale),
       });
     } catch (err) {
       console.error("fee-quote error:", err);
@@ -4007,6 +4008,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         consentText: buildCanonicalConsentText(
           location?.name ?? 'this gemach',
           transaction.consentMaxChargeCents ?? transaction.amountPlannedCents ?? 0,
+          resolveConsentLocale(
+            (req.query.locale as string | undefined) ?? req.get('accept-language')
+          ),
         ),
         publishableKey: needsStripe ? getStripePublishableKey() : undefined,
       });
