@@ -236,16 +236,7 @@ export async function sendWelcomeForLocation(
 
   if (wantsEmail && loc.email) {
     try {
-      const emailBody = options.messageBody
-        ? applyMessageTemplate(options.messageBody, templateValues)
-        : buildWelcomeEmailBody({
-            locationName: localizedName,
-            locationCode: loc.locationCode,
-            operatorName: language === 'he' ? (loc.contactPersonHe || loc.contactPerson || '') : (loc.contactPerson || ''),
-            operatorEmail: loc.email,
-            dashboardUrl: claimUrl,
-            defaultPin: loc.operatorPin || '1234',
-          });
+      // resolvedCustomBody is set only when customMessage === true (honors the same flag as SMS/WhatsApp)
       await sendOperatorWelcomeEmail({
         locationName: localizedName,
         locationCode: loc.locationCode,
@@ -253,7 +244,7 @@ export async function sendWelcomeForLocation(
         operatorEmail: loc.email,
         dashboardUrl: claimUrl,
         defaultPin: loc.operatorPin || '1234',
-        customBody: emailBody,
+        customBody: resolvedCustomBody,
       });
       emailResult = { ok: true };
     } catch (e: any) {

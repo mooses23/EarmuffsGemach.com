@@ -442,6 +442,15 @@ export default function AdminLocations() {
   const BULK_TEMPLATE_HE =
     'שלום {{name}}, הוזמנת לנהל את דשבורד הגמ"ח שלך ({{code}}). קוד הכניסה החד-פעמי שלך: {{pin}}. לחץ כאן להתחלה:\n{{url}}\n— גמ"ח אטמי';
 
+  // Client-side substitution for live preview of admin-edited templates
+  const applyBulkPreviewTemplate = (template: string, sample: Location, welcomeUrl?: string): string => {
+    return template
+      .replace(/\{\{name\}\}/g, sample.name)
+      .replace(/\{\{code\}\}/g, sample.locationCode)
+      .replace(/\{\{pin\}\}/g, sample.operatorPin || "1234")
+      .replace(/\{\{url\}\}/g, welcomeUrl || "{{url}}");
+  };
+
   const setDefaultChannel = (c: OperatorWelcomeChannel) => {
     setDefaultChannelState(c);
     try { localStorage.setItem("adminDefaultWelcomeChannel", c); } catch {}
@@ -1406,7 +1415,7 @@ export default function AdminLocations() {
                   <>To <strong>{selectedIds.size} selected location(s)</strong></>
                 )}
                 {welcomeTarget?.kind === "all-not-onboarded" && (
-                  <>To <strong>{eligibleNotOnboarded.length} location(s) not yet messaged</strong></>
+                  <>To <strong>{eligibleNotOnboarded.length} location(s) not yet set up</strong></>
                 )}
               </DialogDescription>
             </DialogHeader>
@@ -1755,40 +1764,54 @@ export default function AdminLocations() {
                         {primaryQuery.isLoading && (
                           <div className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /><span className="text-xs text-muted-foreground">Loading…</span></div>
                         )}
-                        {primaryQuery.data && (
-                          hasHe ? (
+                        {(primaryQuery.data || isCustomMessage) && (() => {
+                          // Compute the text to show: custom preview uses client-side substitution, default uses server-rendered text
+                          const enText = isCustomMessage && bulkPreviewSamples.en
+                            ? applyBulkPreviewTemplate(messageBody, bulkPreviewSamples.en, bulkPreviewEnQuery.data?.welcomeUrl)
+                            : bulkPreviewEnQuery.data
+                              ? (welcomeChannel === "email" ? bulkPreviewEnQuery.data.message.en.emailBody : bulkPreviewEnQuery.data.message.en.body)
+                              : null;
+                          const heText = isCustomMessage && bulkPreviewSamples.he
+                            ? applyBulkPreviewTemplate(messageBody, bulkPreviewSamples.he, bulkPreviewHeQuery.data?.welcomeUrl)
+                            : bulkPreviewHeQuery.data
+                              ? (welcomeChannel === "email" ? bulkPreviewHeQuery.data.message.he.emailBody : bulkPreviewHeQuery.data.message.he.body)
+                              : null;
+                          const singleText = isCustomMessage && primarySample
+                            ? applyBulkPreviewTemplate(messageBody, primarySample, primaryQuery.data?.welcomeUrl)
+                            : primaryQuery.data
+                              ? (welcomeChannel === "email" ? primaryQuery.data.message[primaryLang].emailBody : primaryQuery.data.message[primaryLang].body)
+                              : null;
+                          return hasHe ? (
                             <Tabs defaultValue={primaryLang} className="text-xs">
                               <TabsList className="grid grid-cols-2 w-full">
                                 <TabsTrigger value="en" data-testid="bulk-preview-tab-en">English · {bulkPreviewSamples.en?.locationCode}</TabsTrigger>
                                 <TabsTrigger value="he" data-testid="bulk-preview-tab-he">עברית · {bulkPreviewSamples.he?.locationCode}</TabsTrigger>
                               </TabsList>
                               <TabsContent value="en">
-                                {bulkPreviewEnQuery.data && (
+                                {enText != null && (
                                   <pre className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-en">
-                                    {welcomeChannel === "email" ? bulkPreviewEnQuery.data.message.en.emailBody : bulkPreviewEnQuery.data.message.en.body}
+                                    {enText}
                                   </pre>
                                 )}
                               </TabsContent>
                               <TabsContent value="he">
-                                {bulkPreviewHeQuery.data && (
+                                {heText != null && (
                                   <pre dir="rtl" className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono mt-2" data-testid="bulk-preview-body-he">
-                                    {welcomeChannel === "email" ? bulkPreviewHeQuery.data.message.he.emailBody : bulkPreviewHeQuery.data.message.he.body}
+                                    {heText}
                                   </pre>
                                 )}
                               </TabsContent>
                             </Tabs>
-                          ) : (
+                          ) : singleText != null ? (
                             <pre
                               dir={primaryLang === "he" ? "rtl" : "ltr"}
                               className="bg-muted/30 border rounded p-3 text-xs whitespace-pre-wrap font-mono"
                               data-testid={`bulk-preview-body-${primaryLang}`}
                             >
-                              {welcomeChannel === "email"
-                                ? primaryQuery.data.message[primaryLang].emailBody
-                                : primaryQuery.data.message[primaryLang].body}
+                              {singleText}
                             </pre>
-                          )
-                        )}
+                          ) : null;
+                        })()}
                       </div>
                     );
                   })()}
