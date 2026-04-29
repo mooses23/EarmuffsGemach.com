@@ -303,8 +303,8 @@ export function summarizeResults(results: SendWelcomeResult[]) {
   return { sent, failed, skipped, total: results.length };
 }
 
-export function getOnboardingTwilioStatus() {
-  const gmailStatus = getGmailConfigStatus();
+export async function getOnboardingTwilioStatus() {
+  const gmailStatus = await getGmailConfigStatus();
   const waStatus = getTwilioWhatsAppConfigStatus();
   return {
     sms: getTwilioConfigStatus(),

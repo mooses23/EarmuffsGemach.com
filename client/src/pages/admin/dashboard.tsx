@@ -34,6 +34,45 @@ interface DisputeSummary {
   rows: DisputeSummaryRow[];
 }
 
+function GmailDisconnectedWarning() {
+  const [showInstructions, setShowInstructions] = useState(false);
+  return (
+    <div className="mb-4" data-testid="card-gmail-disconnected">
+      <Card className="border-yellow-300 bg-yellow-50">
+        <CardContent className="pt-5">
+          <div className="flex items-start gap-3">
+            <Mail className="h-5 w-5 text-yellow-600 mt-0.5 shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-yellow-900">Gmail is not connected</p>
+              <p className="text-sm text-yellow-800 mt-0.5">
+                Email delivery is currently disabled. Confirmation emails, admin alerts, and welcome messages will not be sent.
+              </p>
+              {showInstructions && (
+                <div className="mt-3 rounded-md border border-yellow-300 bg-yellow-100 p-3 text-sm text-yellow-900 space-y-1">
+                  <p className="font-medium">How to reconnect Gmail:</p>
+                  <ol className="list-decimal list-inside space-y-1 text-yellow-800">
+                    <li>Open Replit and click the <strong>puzzle piece</strong> icon in the left sidebar.</li>
+                    <li>Find the <strong>Google Mail</strong> integration.</li>
+                    <li>Click <strong>Connect</strong> and complete the OAuth authorization flow.</li>
+                    <li>Return to this dashboard — the warning will disappear once Gmail is connected.</li>
+                  </ol>
+                </div>
+              )}
+            </div>
+            <button
+              className="text-sm font-medium text-yellow-700 hover:text-yellow-900 hover:underline whitespace-nowrap"
+              data-testid="link-gmail-reconnect"
+              onClick={() => setShowInstructions(v => !v)}
+            >
+              {showInstructions ? "Hide instructions" : "How to reconnect →"}
+            </button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function StripeRiskCard() {
   const { data: summary, isLoading } = useQuery<DisputeSummary>({
     queryKey: ["/api/admin/disputes/summary"],
@@ -139,6 +178,11 @@ export default function Dashboard() {
 
   const { data: contacts = [] } = useQuery<Contact[]>({
     queryKey: ["/api/contact"],
+  });
+
+  const { data: gmailStatus } = useQuery<{ configured: boolean; environment: string; message: string }>({
+    queryKey: ["/api/admin/emails/status"],
+    staleTime: 60_000,
   });
 
   const pendingApplications = applications.filter(app => app.status === "pending").length;
@@ -251,6 +295,11 @@ export default function Dashboard() {
                 icon={AlarmClock}
               />
             </div>
+
+            {/* Gmail disconnected warning */}
+            {gmailStatus && !gmailStatus.configured && (
+              <GmailDisconnectedWarning />
+            )}
 
             {/* Phone-less locations warning */}
             {phonelessCount > 0 && (

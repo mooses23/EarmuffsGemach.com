@@ -93,13 +93,51 @@ export async function getUncachableGmailClient() {
   }
 }
 
-export function getGmailConfigStatus(): { configured: boolean; environment: string; message: string } {
+async function checkReplitGmailConnection(): Promise<boolean> {
+  try {
+    const hostname = process.env.REPLIT_CONNECTORS_HOSTNAME;
+    const xReplitToken = process.env.REPL_IDENTITY
+      ? 'repl ' + process.env.REPL_IDENTITY
+      : process.env.WEB_REPL_RENEWAL
+      ? 'depl ' + process.env.WEB_REPL_RENEWAL
+      : null;
+
+    if (!hostname || !xReplitToken) return false;
+
+    const response = await fetch(
+      'https://' + hostname + '/api/v2/connection?include_secrets=true&connector_names=google-mail',
+      {
+        headers: {
+          'Accept': 'application/json',
+          'X_REPLIT_TOKEN': xReplitToken
+        }
+      }
+    );
+
+    const data = await response.json();
+    const item = data.items?.[0];
+    return !!(item?.settings?.access_token || item?.settings?.oauth?.credentials?.access_token);
+  } catch {
+    return false;
+  }
+}
+
+export async function getGmailConfigStatus(): Promise<{ configured: boolean; environment: string; message: string }> {
   if (isReplitEnvironment()) {
-    return { 
-      configured: true, 
-      environment: 'replit', 
-      message: 'Using Replit Gmail connector' 
-    };
+    const connected = await checkReplitGmailConnection();
+    if (connected) {
+      return { 
+        configured: true, 
+        environment: 'replit', 
+        message: 'Using Replit Gmail connector' 
+      };
+    } else {
+      return {
+        configured: false,
+        environment: 'replit',
+        message: 'Gmail is not connected. Please connect Gmail in the Integrations panel (puzzle piece icon) on the left sidebar.'
+      };
+    }
   } else if (hasVercelGmailCredentials()) {
     return { 
       configured: true, 

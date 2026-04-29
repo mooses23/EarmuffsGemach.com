@@ -835,9 +835,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Twilio config status (admin), so the UI can disable channels and explain why.
-  app.get('/api/admin/twilio-status', (req, res) => {
+  app.get('/api/admin/twilio-status', async (req, res) => {
     if (!requireOnboardingAdmin(req, res)) return;
-    res.json(getOnboardingTwilioStatus());
+    res.json(await getOnboardingTwilioStatus());
   });
 
   // Live message preview (EN + HE) before sending. GET is intentional —
@@ -2589,7 +2589,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(403).json({ message: "Admin access required" });
       }
 
-      const status = getGmailConfigStatus();
+      const status = await getGmailConfigStatus();
       res.json(status);
     } catch (error: unknown) {
       console.error("Error checking Gmail status:", error);
@@ -3501,7 +3501,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const seen = new Set(saved.map((r) => `${r.sourceType}:${r.sourceRef}`));
       const merged = [...saved];
       try {
-        const gmailConfigured = getGmailConfigStatus();
+        const gmailConfigured = await getGmailConfigStatus();
         if (gmailConfigured.configured) {
           const sentThreadIds = await listSentThreadIds(500);
           for (const tid of sentThreadIds) {
