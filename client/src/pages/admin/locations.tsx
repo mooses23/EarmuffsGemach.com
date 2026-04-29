@@ -417,6 +417,8 @@ export default function AdminLocations() {
   const [defaultChannel, setDefaultChannelState] = useState<OperatorWelcomeChannel>(() => {
     try {
       const stored = localStorage.getItem("adminDefaultWelcomeChannel");
+      // "both" was removed from the UI picker; normalize any legacy stored value to "sms"
+      if (stored === "both") return "sms";
       if (stored && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(stored)) return stored as OperatorWelcomeChannel;
     } catch {}
     return "sms";
@@ -498,7 +500,7 @@ export default function AdminLocations() {
     }
   }, [previewQuery.data, messageBodyInitialized, welcomeChannel]);
 
-  // When channel changes, update message body from preview (not a custom edit)
+  // When channel changes, update message body from preview (not a custom edit) — single mode
   useEffect(() => {
     if (previewQuery.data && messageBodyInitialized) {
       const lang = previewQuery.data.message.resolvedLanguage;
@@ -507,6 +509,14 @@ export default function AdminLocations() {
       setMessageBody(body);
       setIsCustomMessage(false);
     }
+  }, [welcomeChannel]);
+
+  // When channel changes in bulk mode (and message is NOT customized), reset to the default template.
+  useEffect(() => {
+    if (welcomeTarget && welcomeTarget.kind !== "single" && !isCustomMessage) {
+      setMessageBody(BULK_TEMPLATE_EN);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [welcomeChannel]);
 
   type ChannelResult = { ok: boolean; sid?: string; error?: string; hint?: string };
@@ -616,8 +626,10 @@ export default function AdminLocations() {
   const openSinglePicker = (loc: Location) => {
     setWelcomeTarget({ kind: "single", id: loc.id, loc });
     const locDefaultRaw = loc.defaultWelcomeChannel as string | null;
-    const ch = locDefaultRaw && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(locDefaultRaw)
-      ? locDefaultRaw as OperatorWelcomeChannel
+    // "both" was removed from the UI picker; normalize any stored "both" → "sms"
+    const resolvedLocDefault = locDefaultRaw === "both" ? "sms" : locDefaultRaw;
+    const ch = resolvedLocDefault && (OPERATOR_WELCOME_CHANNELS as readonly string[]).includes(resolvedLocDefault)
+      ? resolvedLocDefault as OperatorWelcomeChannel
       : defaultChannel;
     setWelcomeChannel(ch);
     setRememberAsDefault(false);
@@ -1253,14 +1265,7 @@ export default function AdminLocations() {
                                     </TableCell>
                                     <TableCell>
                                       {(() => {
-                                        if (location.onboardedAt) {
-                                          return (
-                                            <div className="flex flex-col gap-0.5">
-                                              <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700 w-fit">Onboarded</Badge>
-                                            </div>
-                                          );
-                                        }
-                                        // Find the most recently messaged channel
+                                        // Build message history for ALL rows (including onboarded)
                                         type ChannelTs = { channel: "sms" | "whatsapp" | "email"; at: Date };
                                         const candidates: ChannelTs[] = [];
                                         if (location.welcomeSmsSentAt) candidates.push({ channel: "sms", at: new Date(location.welcomeSmsSentAt as string) });
@@ -1278,14 +1283,17 @@ export default function AdminLocations() {
                                         const hasFailure = sms === "failed" || em === "failed" || location.welcomeWhatsappStatus === "failed";
                                         return (
                                           <div className="flex flex-col gap-0.5" data-testid={`contacts-cell-${location.id}`}>
+                                            {location.onboardedAt && (
+                                              <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700 w-fit">Onboarded</Badge>
+                                            )}
                                             {latest ? (
                                               <div className="flex items-center gap-1 text-[11px] text-muted-foreground" data-testid={`last-messaged-${location.id}`}>
                                                 {channelIcon}
                                                 <span>{daysAgo === 0 ? "Today" : daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`}</span>
                                               </div>
-                                            ) : (
+                                            ) : !location.onboardedAt ? (
                                               <Badge variant="outline" className="text-xs text-muted-foreground w-fit">Not sent</Badge>
-                                            )}
+                                            ) : null}
                                             {hasFailure && (
                                               <Badge variant="destructive" className="text-xs w-fit">Failed</Badge>
                                             )}
@@ -1496,7 +1504,7 @@ export default function AdminLocations() {
                 <RadioGroup
                   value={welcomeChannel}
                   onValueChange={(v) => setWelcomeChannel(v as OperatorWelcomeChannel)}
-                  className="grid grid-cols-2 gap-2 mt-2"
+                  className="grid grid-cols-3 gap-2 mt-2"
                 >
                   {/* SMS */}
                   <Label
@@ -1508,6 +1516,20 @@ export default function AdminLocations() {
                     <MessageSquare className="h-4 w-4" />
                     SMS
                     {serviceStatusQuery.data && !serviceStatusQuery.data.sms.configured && (
+                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    )}
+                  </Label>
+
+                  {/* WhatsApp */}
+                  <Label
+                    htmlFor="channel-whatsapp"
+                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "whatsapp" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.whatsapp?.configured ? "opacity-50" : ""}`}
+                    data-testid="channel-option-whatsapp"
+                  >
+                    <RadioGroupItem id="channel-whatsapp" value="whatsapp" disabled={!serviceStatusQuery.data?.whatsapp?.configured} className="sr-only" />
+                    <MessageCircle className="h-4 w-4 text-green-600" />
+                    WhatsApp
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.whatsapp?.configured && (
                       <span className="text-[10px] text-muted-foreground">Not configured</span>
                     )}
                   </Label>
@@ -1525,39 +1547,6 @@ export default function AdminLocations() {
                       <span className="text-[10px] text-muted-foreground">Not configured</span>
                     )}
                   </Label>
-
-                  {/* Both (SMS + Email) */}
-                  {(() => {
-                    const bothEnabled = !!serviceStatusQuery.data?.sms.configured && !!serviceStatusQuery.data?.email?.configured;
-                    return (
-                      <Label
-                        htmlFor="channel-both"
-                        className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "both" ? "border-primary bg-primary/5" : "border-input"} ${!bothEnabled ? "opacity-50" : ""}`}
-                        data-testid="channel-option-both"
-                      >
-                        <RadioGroupItem id="channel-both" value="both" disabled={!bothEnabled} className="sr-only" />
-                        <span className="flex gap-0.5"><MessageSquare className="h-4 w-4" /><Mail className="h-4 w-4" /></span>
-                        Both (SMS + Email)
-                        {serviceStatusQuery.data && !bothEnabled && (
-                          <span className="text-[10px] text-muted-foreground">Needs both configured</span>
-                        )}
-                      </Label>
-                    );
-                  })()}
-
-                  {/* WhatsApp */}
-                  <Label
-                    htmlFor="channel-whatsapp"
-                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "whatsapp" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.whatsapp?.configured ? "opacity-50" : ""}`}
-                    data-testid="channel-option-whatsapp"
-                  >
-                    <RadioGroupItem id="channel-whatsapp" value="whatsapp" disabled={!serviceStatusQuery.data?.whatsapp?.configured} className="sr-only" />
-                    <MessageCircle className="h-4 w-4 text-green-600" />
-                    WhatsApp
-                    {serviceStatusQuery.data && !serviceStatusQuery.data.whatsapp?.configured && (
-                      <span className="text-[10px] text-muted-foreground">Not configured</span>
-                    )}
-                  </Label>
                 </RadioGroup>
                 {welcomeChannel !== defaultChannel && (
                   <button
@@ -1565,7 +1554,7 @@ export default function AdminLocations() {
                     onClick={() => setDefaultChannel(welcomeChannel)}
                     className="text-xs text-muted-foreground hover:text-primary mt-1"
                   >
-                    Save "{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel === "whatsapp" ? "WhatsApp" : welcomeChannel}" as my default
+                    Save "{welcomeChannel === "whatsapp" ? "WhatsApp" : welcomeChannel.toUpperCase()}" as my default
                   </button>
                 )}
                 <label className="flex items-center gap-2 mt-3 text-xs cursor-pointer select-none" data-testid="checkbox-remember-default-wrap">
@@ -1575,14 +1564,14 @@ export default function AdminLocations() {
                     data-testid="checkbox-remember-default"
                   />
                   <span>
-                    Remember <strong>{welcomeChannel === "both" ? "Both (SMS + Email)" : welcomeChannel === "whatsapp" ? "WhatsApp" : welcomeChannel.toUpperCase()}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
+                    Remember <strong>{welcomeChannel === "whatsapp" ? "WhatsApp" : welcomeChannel.toUpperCase()}</strong> as the default channel for {welcomeTarget?.kind === "single" ? "this location" : "these locations"}
                   </span>
                 </label>
               </div>
 
               {serviceStatusQuery.data && (
                 <>
-                  {(welcomeChannel === "sms" || welcomeChannel === "both") && !serviceStatusQuery.data.sms.configured && (
+                  {welcomeChannel === "sms" && !serviceStatusQuery.data.sms.configured && (
                     <p className="text-xs text-destructive flex items-start gap-1">
                       <AlertTriangle className="h-3 w-3 mt-0.5" />
                       SMS unavailable: {serviceStatusQuery.data.sms.reason}
@@ -1594,7 +1583,7 @@ export default function AdminLocations() {
                       WhatsApp unavailable: {serviceStatusQuery.data.whatsapp?.reason}
                     </p>
                   )}
-                  {(welcomeChannel === "email" || welcomeChannel === "both") && !serviceStatusQuery.data.email?.configured && (
+                  {welcomeChannel === "email" && !serviceStatusQuery.data.email?.configured && (
                     <p className="text-xs text-destructive flex items-start gap-1">
                       <AlertTriangle className="h-3 w-3 mt-0.5" />
                       Email unavailable: {serviceStatusQuery.data.email?.reason}
@@ -1607,21 +1596,13 @@ export default function AdminLocations() {
               {welcomeTarget?.kind === "single" && (
                 <div>
                   <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">
-                      {welcomeChannel === "both" ? "SMS Message" : "Message"}
-                    </Label>
+                    <Label className="text-sm font-medium">Message</Label>
                     {isCustomMessage && (
                       <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-medium" data-testid="custom-message-badge">
                         Custom message
                       </span>
                     )}
                   </div>
-                  {welcomeChannel === "both" && (
-                    <p className="text-[10px] text-muted-foreground mt-0.5 mb-1 flex items-start gap-1">
-                      <MessageSquare className="h-3 w-3 mt-0.5 shrink-0" />
-                      This text is sent as SMS. The email is auto-formatted using the same content and delivered separately.
-                    </p>
-                  )}
                   {previewQuery.isLoading && (
                     <div className="text-sm text-muted-foreground mt-2 flex items-center gap-2">
                       <Loader2 className="h-3 w-3 animate-spin" /> Loading preview…
@@ -1703,7 +1684,7 @@ export default function AdminLocations() {
                   <div>
                     <div className="flex items-center justify-between">
                       <Label className="text-sm font-medium">
-                        {welcomeChannel === "both" ? "SMS Message template" : "Message template"}
+                        Message template
                       </Label>
                       <div className="flex items-center gap-1">
                         {isCustomMessage && (
@@ -1735,12 +1716,6 @@ export default function AdminLocations() {
                       placeholder="Message template…"
                     />
                     <p className="text-[10px] text-muted-foreground mt-1">You can freely edit the template above before sending.</p>
-                    {welcomeChannel === "both" && (
-                      <p className="text-[10px] text-muted-foreground mt-1 flex items-start gap-1">
-                        <MessageSquare className="h-3 w-3 mt-0.5 shrink-0" />
-                        This template is sent as SMS. Each location will also receive a separately auto-formatted email.
-                      </p>
-                    )}
                   </div>
 
                   {/* Live preview — first selected recipient with "and N more" context */}
@@ -1759,7 +1734,6 @@ export default function AdminLocations() {
                         <p className="text-xs font-medium text-muted-foreground">
                           Preview for <span className="text-foreground font-semibold">{primarySample?.name}</span>
                           {moreCount > 0 && <span className="text-muted-foreground"> and {moreCount} more</span>}
-                          {welcomeChannel === "both" ? " (SMS format)" : ""}
                         </p>
                         {primaryQuery.isLoading && (
                           <div className="flex items-center gap-2"><Loader2 className="h-3 w-3 animate-spin" /><span className="text-xs text-muted-foreground">Loading…</span></div>
