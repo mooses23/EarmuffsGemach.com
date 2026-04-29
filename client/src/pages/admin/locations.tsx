@@ -338,7 +338,7 @@ function NotificationSettingsPanel() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
-  const { data, isLoading } = useQuery<{ adminEmail: string }>({
+  const { data, isLoading } = useQuery<{ adminEmail: string; effectiveEmail: string; source: "db" | "env" | "none" }>({
     queryKey: ["/api/admin/settings/notifications"],
   });
 
@@ -397,6 +397,16 @@ function NotificationSettingsPanel() {
                   New application alerts and system notifications are sent to this address.
                   Falls back to the <code className="bg-muted px-0.5 rounded">ADMIN_EMAIL</code> environment variable if left empty.
                 </p>
+                {data && data.source !== "none" && (
+                  <p className="text-xs mt-1 text-muted-foreground" data-testid="effective-email-note">
+                    Currently sending to:{" "}
+                    <span className="font-medium text-foreground">{data.effectiveEmail}</span>
+                    {" "}
+                    <span className="text-muted-foreground">
+                      ({data.source === "db" ? "saved" : "from environment"})
+                    </span>
+                  </p>
+                )}
               </div>
               <Button
                 size="sm"

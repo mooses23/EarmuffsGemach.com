@@ -4553,8 +4553,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
     if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
       return res.status(403).json({ message: "Admin access required" });
     }
-    const adminEmail = await getAdminNotificationEmail();
-    res.json({ adminEmail });
+    const row = await storage.getGlobalSetting(ADMIN_NOTIFICATION_EMAIL_KEY);
+    const dbValue = row?.value?.trim() || "";
+    const envValue = (process.env.ADMIN_EMAIL || process.env.GMAIL_USER || "").trim();
+    const source: "db" | "env" | "none" = dbValue ? "db" : envValue ? "env" : "none";
+    const effectiveEmail = dbValue || envValue || "";
+    res.json({ adminEmail: dbValue, effectiveEmail, source });
   });
 
   app.patch("/api/admin/settings/notifications", async (req, res) => {
