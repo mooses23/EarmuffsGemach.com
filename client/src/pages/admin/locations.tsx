@@ -738,28 +738,6 @@ export default function AdminLocations() {
     onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed to send"), variant: "destructive" }),
   });
 
-  const sendBulkOnboardingMutation = useMutation<SendBulkResponse, Error, { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }>({
-    mutationFn: async ({ locationIds, channel, rememberAsDefault, messageBody, customMessage }) => {
-      const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-bulk`, {
-        locationIds, channel, rememberAsDefault,
-        ...(customMessage && messageBody ? { messageBody, customMessage: true } : {}),
-      });
-      return res.json() as Promise<SendBulkResponse>;
-    },
-    onSuccess: (data) => {
-      toast({
-        title: "Bulk messages sent",
-        description: `Sent: ${data.summary?.sent ?? 0} · Skipped: ${data.summary?.skipped ?? 0} · Failed: ${data.summary?.failed ?? 0}`,
-        variant: (data.summary?.failed ?? 0) > 0 ? "destructive" : "default",
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
-      setWelcomeDialogOpen(false);
-      setWelcomeTarget(null);
-      setSelectedIds(new Set());
-    },
-    onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed"), variant: "destructive" }),
-  });
-
   const sendAllNotOnboardedMutation = useMutation<SendAllResponse, Error, { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }>({
     mutationFn: async ({ channel, rememberAsDefault, messageBody, customMessage }) => {
       const res = await apiRequest("POST", `/api/admin/locations/onboarding/send-all`, {
@@ -780,6 +758,72 @@ export default function AdminLocations() {
     },
     onError: (err) => toast({ title: "Error", description: errorMessage(err, "Failed"), variant: "destructive" }),
   });
+
+  const sendBulkStream = async (payload: { locationIds: number[]; channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }) => {
+    setStreamState({ log: "Starting…", n: 0, total: 0 });
+    try {
+      const res = await fetch("/api/admin/locations/onboarding/send-bulk-stream", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+        credentials: "include",
+      });
+      if (!res.ok || !res.body) throw new Error("Failed to start send");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let doneSummary: { sent: number; failed: number; skipped: number; total: number } | null = null;
+      let streamError: string | null = null;
+
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const line = chunk.split("\n").find((l) => l.startsWith("data: "));
+          if (!line) continue;
+          let data: Record<string, any>;
+          try {
+            data = JSON.parse(line.slice(6));
+          } catch {
+            continue;
+          }
+          if (data.type === "start") {
+            setStreamState({ log: `Preparing to send to ${data.total} location(s)…`, n: 0, total: data.total });
+          } else if (data.type === "progress") {
+            const icon = data.skipped ? "↩" : data.ok ? "✓" : "✗";
+            setStreamState({ log: `${icon} ${data.name}`, n: data.n, total: data.total });
+          } else if (data.type === "done") {
+            doneSummary = data.summary;
+          } else if (data.type === "error") {
+            streamError = data.message || "Send failed";
+            break outer;
+          }
+        }
+      }
+
+      if (streamError) throw new Error(streamError);
+
+      if (doneSummary) {
+        toast({
+          title: "Bulk messages sent",
+          description: `Sent: ${doneSummary.sent} · Skipped: ${doneSummary.skipped} · Failed: ${doneSummary.failed}`,
+          variant: doneSummary.failed > 0 ? "destructive" : "default",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      setWelcomeDialogOpen(false);
+      setWelcomeTarget(null);
+      setSelectedIds(new Set());
+    } catch (e: any) {
+      toast({ title: "Error", description: e?.message || "Send failed", variant: "destructive" });
+    } finally {
+      setStreamState(null);
+    }
+  };
 
   const sendAllStream = async (payload: { channel: OperatorWelcomeChannel; rememberAsDefault?: boolean; messageBody?: string; customMessage?: boolean }) => {
     setStreamState({ log: "Starting…", n: 0, total: 0 });
@@ -908,13 +952,13 @@ export default function AdminLocations() {
         customMessage: isCustomMessage,
       });
     } else if (welcomeTarget.kind === "selected") {
-      sendBulkOnboardingMutation.mutate({ locationIds: Array.from(selectedIds), channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
+      sendBulkStream({ locationIds: Array.from(selectedIds), channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
     } else {
       sendAllStream({ channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
     }
   };
 
-  const dialogIsPending = sendWelcomeOneMutation.isPending || sendBulkOnboardingMutation.isPending || sendAllNotOnboardedMutation.isPending || !!streamState;
+  const dialogIsPending = sendWelcomeOneMutation.isPending || sendAllNotOnboardedMutation.isPending || !!streamState;
 
   const toggleSelectAll = (checked: boolean, visibleIds: number[]) => {
     if (checked) setSelectedIds(new Set(visibleIds));

@@ -935,6 +935,70 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // SSE streaming variant of send-bulk — emits one progress event per location.
+  app.post('/api/admin/locations/onboarding/send-bulk-stream', async (req, res) => {
+    if (!requireOnboardingAdmin(req, res)) return;
+
+    const parsed = z.object({
+      locationIds: z.array(z.number().int().positive()).min(1).max(200).optional(),
+      ids: z.array(z.number().int().positive()).min(1).max(200).optional(),
+      channel: onboardingChannelSchema,
+      rememberAsDefault: z.boolean().optional(),
+      messageBody: z.string().optional(),
+      customMessage: z.boolean().optional(),
+    }).safeParse(req.body || {});
+    if (!parsed.success) {
+      return res.status(400).json({ message: 'Invalid request', errors: parsed.error.errors });
+    }
+    const ids = parsed.data.locationIds ?? parsed.data.ids;
+    if (!ids || ids.length === 0) {
+      return res.status(400).json({ message: 'locationIds is required' });
+    }
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders();
+
+    const emit = (data: object) => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+      if (typeof (res as any).flush === 'function') (res as any).flush();
+    };
+
+    try {
+      const total = ids.length;
+      emit({ type: 'start', total });
+
+      const options = {
+        channel: parsed.data.channel,
+        baseUrl: getOnboardingBaseUrl(req),
+        rememberAsDefault: parsed.data.rememberAsDefault,
+        statusCallbackUrl: getOnboardingStatusCallbackUrl(req),
+        signOff: getOperatorWelcomeSigner(),
+        messageBody: parsed.data.messageBody,
+        customMessage: parsed.data.customMessage,
+      };
+
+      const results: Awaited<ReturnType<typeof sendWelcomeForLocation>>[] = [];
+      for (let i = 0; i < ids.length; i++) {
+        const locId = ids[i];
+        const r = await sendWelcomeForLocation(locId, options);
+        results.push(r);
+        const locName = r.locationName ?? `Location ${locId}`;
+        emit({ type: 'progress', n: i + 1, total, name: locName, ok: r.ok, skipped: !!r.skipped });
+        if (i < ids.length - 1) await new Promise((resolve) => setTimeout(resolve, 200));
+      }
+
+      emit({ type: 'done', summary: summarizeResults(results), results });
+      res.end();
+    } catch (e: any) {
+      console.error('[onboarding] send-bulk-stream failed:', e);
+      emit({ type: 'error', message: e?.message || 'Bulk send failed' });
+      res.end();
+    }
+  });
+
   // Send to every active, not-yet-onboarded location.
   app.post('/api/admin/locations/onboarding/send-all', async (req, res) => {
     if (!requireOnboardingAdmin(req, res)) return;
