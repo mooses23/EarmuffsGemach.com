@@ -74,6 +74,10 @@ export const approveApplicationWithLocation = async (id: number, locationData: I
   return response.json();
 };
 
+export const resendApplicationConfirmationEmail = async (id: number) => {
+  return apiRequest("POST", `/api/applications/${id}/resend-confirmation`, {});
+};
+
 // Transactions API
 export const getTransactions = async () => {
   const response = await fetch("/api/transactions", { credentials: "include" });

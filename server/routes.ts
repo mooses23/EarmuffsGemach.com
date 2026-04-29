@@ -1140,6 +1140,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Resend application confirmation email (admin only)
+  app.post("/api/applications/:id/resend-confirmation", requireRole("admin"), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      const application = await storage.getApplication(id);
+
+      if (!application) {
+        return res.status(404).json({ message: "Application not found" });
+      }
+
+      await sendApplicationConfirmationEmail({
+        firstName: application.firstName,
+        lastName: application.lastName,
+        email: application.email,
+        city: application.city,
+        state: application.state,
+        country: application.country,
+        community: application.community,
+      });
+
+      res.json({ message: "Confirmation email resent successfully" });
+    } catch (error) {
+      console.error("Error resending application confirmation email:", error);
+      res.status(500).json({ message: "Failed to resend confirmation email" });
+    }
+  });
+
   // Approve application and create location
   app.post("/api/applications/:id/approve-with-location", async (req, res) => {
     try {

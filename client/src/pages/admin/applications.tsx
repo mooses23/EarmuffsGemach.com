@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { getGemachApplications, updateGemachApplicationStatus, approveApplicationWithLocation } from "@/lib/api";
+import { getGemachApplications, updateGemachApplicationStatus, approveApplicationWithLocation, resendApplicationConfirmationEmail } from "@/lib/api";
 import { GemachApplication, Region, InsertLocation, insertLocationSchema, CityCategory } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
@@ -183,6 +183,23 @@ export default function AdminApplications() {
       toast({
         title: t('error'),
         description: `${t('failedToApprove')} ${error.message}`,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const resendConfirmationMutation = useMutation({
+    mutationFn: (id: number) => resendApplicationConfirmationEmail(id),
+    onSuccess: () => {
+      toast({
+        title: t('emailResent'),
+        description: t('emailResentSuccess'),
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: t('error'),
+        description: `${t('failedToResendEmail')} ${error.message}`,
         variant: "destructive",
       });
     },
@@ -420,6 +437,17 @@ export default function AdminApplications() {
                               <DropdownMenuItem onClick={() => handleViewApplication(application)}>
                                 <Eye className="mr-2 h-4 w-4" />
                                 {t('viewDetails')}
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                onClick={() => resendConfirmationMutation.mutate(application.id)}
+                                disabled={resendConfirmationMutation.isPending}
+                              >
+                                {resendConfirmationMutation.isPending ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Mail className="mr-2 h-4 w-4" />
+                                )}
+                                {t('resendConfirmationEmail')}
                               </DropdownMenuItem>
                               {application.status === "pending" && (
                                 <>
