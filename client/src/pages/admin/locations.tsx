@@ -395,7 +395,7 @@ function NotificationSettingsPanel() {
                 />
                 <p className="text-xs text-muted-foreground mt-1">
                   New application alerts and system notifications are sent to this address.
-                  Falls back to the <code className="bg-muted px-0.5 rounded">ADMIN_EMAIL</code> environment variable if left empty.
+                  Falls back to the <code className="bg-muted px-0.5 rounded">ADMIN_EMAIL</code> or <code className="bg-muted px-0.5 rounded">GMAIL_USER</code> environment variable if left empty.
                 </p>
                 {data && data.source !== "none" && (
                   <p className="text-xs mt-1 text-muted-foreground" data-testid="effective-email-note">
