@@ -1,6 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BarChart3, TrendingUp, DollarSign, MapPin } from "lucide-react";
 import { useLanguage } from "@/hooks/use-language";
+import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 
 export default function AdminAnalytics() {
   const { t } = useLanguage();
@@ -8,6 +9,7 @@ export default function AdminAnalytics() {
   return (
     <div className="py-10">
       <div className="container mx-auto px-4">
+        <AdminNavTabs />
         <div className="mb-8">
           <h1 className="text-3xl font-bold">{t('analyticsReports')}</h1>
           <p className="text-muted-foreground mt-2">{t('comprehensiveAnalytics')}</p>

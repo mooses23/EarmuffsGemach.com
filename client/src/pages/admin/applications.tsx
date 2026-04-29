@@ -6,6 +6,7 @@ import { getGemachApplications, updateGemachApplicationStatus, approveApplicatio
 import { GemachApplication, Region, InsertLocation, insertLocationSchema, CityCategory } from "@shared/schema";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
+import { AdminNavTabs } from "@/components/admin/admin-nav-tabs";
 import {
   Card,
   CardContent,
@@ -295,25 +296,7 @@ export default function AdminApplications() {
   return (
     <div className="py-10">
       <div className="container mx-auto px-4">
-        <div className="flex items-center gap-2 mb-6">
-          <Button 
-            variant="ghost" 
-            onClick={() => window.location.href = '/admin'}
-            className="flex items-center gap-2"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            {t('backToDashboard')}
-          </Button>
-          <Button 
-            variant="outline" 
-            size="sm"
-            onClick={() => window.location.href = '/'}
-            className="flex items-center gap-2"
-          >
-            <Home className="h-4 w-4" />
-            {t('home')}
-          </Button>
-        </div>
+        <AdminNavTabs />
 
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div>

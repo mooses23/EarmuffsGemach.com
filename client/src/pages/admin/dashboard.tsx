@@ -18,7 +18,7 @@ import {
   DollarSign, RefreshCw, AlarmClock, CheckCircle, BarChart3, Mail, MessageSquare,
   Shield, AlertTriangle, BookOpen
 } from "lucide-react";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
 
 interface DisputeSummaryRow {
@@ -128,6 +128,7 @@ export default function Dashboard() {
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [activeSection, setActiveSection] = useState<DashboardSection>('overview');
   const { t } = useLanguage();
+  const [currentPath] = useLocation();
   
   const { data: locations = [] } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
@@ -223,16 +224,16 @@ export default function Dashboard() {
           <div className="w-full overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
             <TabsList className="flex w-max min-w-full justify-start sm:grid sm:w-full sm:grid-cols-5">
               <TabsTrigger value="overview" className="whitespace-nowrap px-4">{t('overview')}</TabsTrigger>
-              <Link href="/admin/locations" className="whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50">
+              <Link href="/admin/locations" className={`whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50 ${currentPath === '/admin/locations' ? 'bg-background text-foreground shadow-sm' : ''}`}>
                 {t('locations')}
               </Link>
-              <Link href="/admin/transactions" className="whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50">
+              <Link href="/admin/transactions" className={`whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50 ${currentPath === '/admin/transactions' ? 'bg-background text-foreground shadow-sm' : ''}`}>
                 {t('transactions')}
               </Link>
-              <Link href="/admin/applications" className="whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50">
+              <Link href="/admin/applications" className={`whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50 ${currentPath === '/admin/applications' ? 'bg-background text-foreground shadow-sm' : ''}`}>
                 {t('applications')}
               </Link>
-              <Link href="/admin/analytics" className="whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50">
+              <Link href="/admin/analytics" className={`whitespace-nowrap px-4 inline-flex items-center justify-center rounded-sm py-1.5 text-sm font-medium ring-offset-background transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 hover:bg-muted/50 ${currentPath === '/admin/analytics' ? 'bg-background text-foreground shadow-sm' : ''}`}>
                 {t('analytics')}
               </Link>
             </TabsList>
