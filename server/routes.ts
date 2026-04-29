@@ -4,7 +4,7 @@ import { storage } from "./storage.js";
 import { PaymentSyncService } from "./payment-sync.js";
 import { DepositSyncService } from "./deposit-sync.js";
 import { DepositRefundService } from "./deposit-refund.js";
-import { EmailNotificationService, sendOperatorWelcomeEmail, sendReturnReminderEmail } from "./email-notifications.js";
+import { EmailNotificationService, sendOperatorWelcomeEmail, sendReturnReminderEmail, sendApplicationConfirmationEmail, sendAdminNewApplicationAlert } from "./email-notifications.js";
 import { ensureSchemaUpgrades } from "./databaseStorage.js";
 import { AuditTrailService } from "./audit-trail.js";
 import { PaymentAnalyticsEngine } from "./analytics-engine.js";
@@ -1075,6 +1075,35 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const applicationData = insertGemachApplicationSchema.parse(req.body);
       const application = await storage.createApplication(applicationData);
       res.status(201).json(application);
+
+      // Fire emails asynchronously so they never block the response.
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      sendApplicationConfirmationEmail({
+        firstName: application.firstName,
+        lastName: application.lastName,
+        email: application.email,
+        city: application.city,
+        state: application.state,
+        country: application.country,
+        community: application.community,
+      }).catch((e) => console.error("Application confirmation email failed:", e));
+
+      const adminEmail = process.env.ADMIN_EMAIL || process.env.GMAIL_USER || "";
+      if (adminEmail) {
+        sendAdminNewApplicationAlert({
+          adminEmail,
+          applicantFirstName: application.firstName,
+          applicantLastName: application.lastName,
+          applicantEmail: application.email,
+          applicantPhone: application.phone,
+          city: application.city,
+          state: application.state,
+          country: application.country,
+          community: application.community,
+          message: application.message,
+          applicationsUrl: `${baseUrl}/admin/applications`,
+        }).catch((e) => console.error("Admin new-application alert failed:", e));
+      }
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid application data", errors: error.errors });
@@ -1161,6 +1190,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
         location,
         inviteCode: inviteCode.code 
       });
+
+      // Auto-fire welcome email asynchronously (no-op if email unconfigured).
+      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      sendWelcomeForLocation(location.id, {
+        channel: "email",
+        baseUrl,
+      }).catch((e) => console.error("Auto-welcome email on approval failed:", e));
     } catch (error) {
       if (error instanceof z.ZodError) {
         return res.status(400).json({ message: "Invalid location data", errors: error.errors });

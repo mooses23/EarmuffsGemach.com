@@ -99,14 +99,24 @@ export interface OperatorWelcomeContext {
 }
 
 export function buildWelcomeEmailBody(ctx: Omit<OperatorWelcomeContext, 'customBody' | 'opener'>): string {
-  const opener = `Quick note to confirm the ${ctx.locationName} dashboard is set up and ready whenever you are.`;
-  return `${opener}
+  return `Welcome to the Baby Banz Gemach operator dashboard, ${ctx.locationName}!
 
-Log in:  ${ctx.dashboardUrl}
-Code:    ${ctx.locationCode}
-PIN:     ${ctx.defaultPin}  (please change after your first login)
+Your location is now live and ready to manage. Here's how to get started in 4 quick steps:
 
-That's it — no action needed today. Reply to this email any time you need a hand.
+Step 1 — Open your dashboard
+  ${ctx.dashboardUrl}
+
+Step 2 — Sign in with your location credentials
+  Location code:  ${ctx.locationCode}
+  Temporary PIN:  ${ctx.defaultPin}
+
+Step 3 — Change your PIN
+  After signing in, go to Settings → Change PIN and set a private PIN that only you know.
+
+Step 4 — Complete your profile
+  Add your phone number, opening hours, and any notes for borrowers so families can reach you easily.
+
+That's it — you're all set! Reply to this email any time you need help.
 
 — Baby Banz Gemach
 `;
@@ -165,4 +175,61 @@ Thank you so much for helping us keep the gemach going!
 export async function sendReturnReminderEmail(ctx: ReturnReminderContext): Promise<void> {
   const { subject, body } = buildReturnReminderEmail(ctx);
   await sendNewEmail(ctx.borrowerEmail, subject, body);
+}
+
+export interface ApplicationConfirmationContext {
+  firstName: string;
+  lastName: string;
+  email: string;
+  city: string;
+  state: string;
+  country: string;
+  community?: string | null;
+}
+
+export async function sendApplicationConfirmationEmail(ctx: ApplicationConfirmationContext): Promise<void> {
+  const subject = `We received your Baby Banz Gemach application, ${ctx.firstName}!`;
+  const body = `Hi ${ctx.firstName},
+
+Thank you for applying to open a Baby Banz Earmuffs Gemach in ${ctx.city}, ${ctx.state}${ctx.country && ctx.country !== ctx.state ? `, ${ctx.country}` : ""}${ctx.community ? ` (${ctx.community})` : ""}.
+
+We've received your application and our team will review it shortly. We'll be in touch once a decision has been made.
+
+In the meantime, feel free to reply to this email if you have any questions.
+
+Warm regards,
+— The Baby Banz Gemach Network
+`;
+  await sendNewEmail(ctx.email, subject, body);
+}
+
+export interface AdminNewApplicationAlertContext {
+  adminEmail: string;
+  applicantFirstName: string;
+  applicantLastName: string;
+  applicantEmail: string;
+  applicantPhone: string;
+  city: string;
+  state: string;
+  country: string;
+  community?: string | null;
+  message?: string | null;
+  applicationsUrl: string;
+}
+
+export async function sendAdminNewApplicationAlert(ctx: AdminNewApplicationAlertContext): Promise<void> {
+  const subject = `New Gemach application — ${ctx.applicantFirstName} ${ctx.applicantLastName} (${ctx.city}, ${ctx.state})`;
+  const communityLine = ctx.community ? `Community:  ${ctx.community}\n` : "";
+  const messageLine = ctx.message ? `\nMessage from applicant:\n${ctx.message}\n` : "";
+  const body = `A new application has been submitted. Details below:
+
+Name:       ${ctx.applicantFirstName} ${ctx.applicantLastName}
+Email:      ${ctx.applicantEmail}
+Phone:      ${ctx.applicantPhone}
+Location:   ${ctx.city}, ${ctx.state}, ${ctx.country}
+${communityLine}${messageLine}
+Review and approve or reject at:
+${ctx.applicationsUrl}
+`;
+  await sendNewEmail(ctx.adminEmail, subject, body);
 }

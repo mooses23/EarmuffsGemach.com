@@ -5,6 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import { ToastAction } from "@/components/ui/toast";
@@ -45,6 +52,7 @@ import {
   ShieldCheck,
   Undo2,
   CheckCircle2,
+  Building2,
 } from "lucide-react";
 import { SwipeableRow } from "@/components/admin/SwipeableRow";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -61,7 +69,7 @@ import {
 } from "@/components/ui/dialog";
 import { Link } from "wouter";
 import DOMPurify from "dompurify";
-import type { Contact } from "@shared/schema";
+import type { Contact, Location } from "@shared/schema";
 import { groupFormContacts } from "@shared/form-thread-grouping";
 import type { TranslationKey } from "@/lib/translations";
 
@@ -339,6 +347,25 @@ export default function AdminInbox() {
   const contactsQuery = useQuery<Contact[]>({
     queryKey: ["/api/contact"],
   });
+
+  // Locations query — used to derive operator email set for inbox badge and save-email banner.
+  const locationsQuery = useQuery<Location[]>({
+    queryKey: ["/api/locations"],
+  });
+
+  // Set of lower-cased email addresses that belong to known gemach operators.
+  const operatorEmailSet = useMemo<Set<string>>(() => {
+    const s = new Set<string>();
+    for (const loc of locationsQuery.data ?? []) {
+      if (loc.email) s.add(loc.email.toLowerCase().trim());
+    }
+    return s;
+  }, [locationsQuery.data]);
+
+  // State for the "save email to profile" banner shown in thread detail view.
+  const [saveEmailBannerDismissed, setSaveEmailBannerDismissed] = useState(false);
+  const [saveEmailLocationId, setSaveEmailLocationId] = useState<string>("");
+  const [saveEmailPending, setSaveEmailPending] = useState(false);
 
   // Which messages have already been answered (from any saved reply example).
   // Aggregated server-side as one row per (sourceType, sourceRef) so the list
@@ -1210,6 +1237,8 @@ export default function AdminInbox() {
     setShowSaveFaq(false);
     setFaqQuestion("");
     setFaqCategory("general");
+    setSaveEmailBannerDismissed(false);
+    setSaveEmailLocationId("");
     const subj = item.subject?.startsWith("Re:") ? item.subject : `Re: ${item.subject || ""}`;
     setReplySubject(subj);
     if (!item.isRead) {
@@ -1425,6 +1454,79 @@ export default function AdminInbox() {
               )}
             </div>
           </div>
+
+          {/* "Save email to profile" banner — shown when the sender is not a known
+              operator email but their message mentions "gemach", hinting they
+              might be an operator writing from an unrecognised address. */}
+          {(() => {
+            const senderEmail = selected.fromEmail?.toLowerCase().trim() ?? "";
+            const isKnownOperator = senderEmail && operatorEmailSet.has(senderEmail);
+            const mentionsGemach = /gemach|gema[cç]h|גמ[״"']?ח/i.test(selected.body + " " + selected.subject);
+            if (isKnownOperator || !mentionsGemach || saveEmailBannerDismissed) return null;
+            const availableLocations = (locationsQuery.data ?? []).filter((l) => l.email !== selected.fromEmail);
+            return (
+              <div
+                className="mb-4 rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950/30 p-3 flex flex-col gap-2"
+                data-testid="banner-save-email-to-profile"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-sm font-semibold text-blue-900 dark:text-blue-100 flex items-center gap-1.5">
+                    <Building2 className="h-4 w-4 shrink-0" />
+                    Possible gemach operator
+                  </div>
+                  <button
+                    type="button"
+                    className="text-blue-700 hover:text-blue-900 dark:text-blue-300 dark:hover:text-blue-100"
+                    onClick={() => setSaveEmailBannerDismissed(true)}
+                    aria-label="Dismiss"
+                    data-testid="button-dismiss-save-email-banner"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+                <p className="text-xs text-blue-800/90 dark:text-blue-200/90">
+                  This sender mentions a gemach but isn't linked to any location profile. You can save their email to a location so they'll be recognised as an operator in future.
+                </p>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Select value={saveEmailLocationId} onValueChange={setSaveEmailLocationId}>
+                    <SelectTrigger className="h-8 text-xs w-auto min-w-[200px] flex-1" data-testid="select-save-email-location">
+                      <SelectValue placeholder="Select a location…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {availableLocations.map((loc) => (
+                        <SelectItem key={loc.id} value={String(loc.id)}>
+                          {loc.name} · {loc.locationCode}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    size="sm"
+                    variant="default"
+                    className="h-8 text-xs"
+                    disabled={!saveEmailLocationId || saveEmailPending}
+                    data-testid="button-save-email-to-profile"
+                    onClick={async () => {
+                      if (!saveEmailLocationId || !selected.fromEmail) return;
+                      setSaveEmailPending(true);
+                      try {
+                        await apiRequest("PATCH", `/api/locations/${saveEmailLocationId}`, { email: selected.fromEmail });
+                        qc.invalidateQueries({ queryKey: ["/api/locations"] });
+                        toast({ title: "Email saved", description: `${selected.fromEmail} linked to location profile.` });
+                        setSaveEmailBannerDismissed(true);
+                      } catch (e) {
+                        toast({ title: "Error", description: e instanceof Error ? e.message : "Could not save email", variant: "destructive" });
+                      } finally {
+                        setSaveEmailPending(false);
+                      }
+                    }}
+                  >
+                    {saveEmailPending ? "Saving…" : "Save to profile"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Gmail-style transcript: every message in this conversation
               (inbound + our outbound replies) rendered oldest → newest.
@@ -2173,6 +2275,17 @@ export default function AdminInbox() {
                                 <Badge variant="outline" className="text-[10px] py-0 h-5 flex-shrink-0 border-amber-500 text-amber-700 dark:text-amber-300">
                                   <ShieldAlert className="h-3 w-3 mr-1" />
                                   {t("inboxFolderSpam")}
+                                </Badge>
+                              )}
+                              {it.fromEmail && operatorEmailSet.has(it.fromEmail.toLowerCase().trim()) && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] py-0 h-5 flex-shrink-0 border-purple-500 bg-purple-50 text-purple-800 dark:bg-purple-950/40 dark:text-purple-300 dark:border-purple-600 font-semibold gap-1"
+                                  data-testid={`badge-operator-${it.key}`}
+                                  title="This sender is a registered gemach operator"
+                                >
+                                  <Building2 className="h-3 w-3" />
+                                  <span>Operator</span>
                                 </Badge>
                               )}
                             </div>

@@ -416,6 +416,11 @@ export default function AdminLocations() {
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
 
+  // ===== Inline email editing =====
+  const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
+  const [emailEditLocation, setEmailEditLocation] = useState<Location | null>(null);
+  const [emailEditValue, setEmailEditValue] = useState("");
+
   // ===== Bulk selection (for the main table) =====
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
@@ -746,6 +751,29 @@ export default function AdminLocations() {
       toast({ title: "Error", description: error.message, variant: "destructive" });
     },
   });
+
+  const saveEmailMutation = useMutation({
+    mutationFn: async ({ id, email }: { id: number; email: string }) => {
+      const res = await apiRequest("PATCH", `/api/locations/${id}`, { email });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "Email updated", description: "The operator email has been saved." });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      setIsEmailDialogOpen(false);
+      setEmailEditLocation(null);
+      setEmailEditValue("");
+    },
+    onError: (error: Error) => {
+      toast({ title: "Error", description: error.message, variant: "destructive" });
+    },
+  });
+
+  const handleEditEmail = (location: Location) => {
+    setEmailEditLocation(location);
+    setEmailEditValue(location.email || "");
+    setIsEmailDialogOpen(true);
+  };
 
   const toggleLocationStatus = (id: number, isActive: boolean) => {
     toggleStatusMutation.mutate({ id, isActive: !isActive });
@@ -1259,6 +1287,10 @@ export default function AdminLocations() {
                                             <KeyRound className="mr-2 h-4 w-4" />
                                             Change PIN
                                           </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => handleEditEmail(location)}>
+                                            <Mail className="mr-2 h-4 w-4" />
+                                            Edit Email
+                                          </DropdownMenuItem>
                                           <DropdownMenuItem
                                             onClick={() => handleDeleteLocation(location)}
                                             className="text-red-600 focus:text-red-600"
@@ -1753,6 +1785,55 @@ export default function AdminLocations() {
                 {changePinMutation.isPending
                   ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
                   : <><ShieldCheck className="h-4 w-4 mr-2" />Save PIN</>
+                }
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+
+        {/* Edit Email Dialog */}
+        <Dialog open={isEmailDialogOpen} onOpenChange={(open) => {
+          setIsEmailDialogOpen(open);
+          if (!open) { setEmailEditValue(""); setEmailEditLocation(null); }
+        }}>
+          <DialogContent className="sm:max-w-[400px]">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-primary" />
+                Edit Operator Email
+              </DialogTitle>
+              <DialogDescription>
+                {emailEditLocation ? (
+                  <>Update the contact email for <strong>{emailEditLocation.name}</strong> ({emailEditLocation.locationCode}). This does not re-trigger SMS onboarding.</>
+                ) : ""}
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="admin-email-edit">Email address</Label>
+                <Input
+                  id="admin-email-edit"
+                  type="email"
+                  placeholder="operator@example.com"
+                  value={emailEditValue}
+                  onChange={(e) => setEmailEditValue(e.target.value)}
+                  data-testid="input-email-edit"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsEmailDialogOpen(false)}>Cancel</Button>
+              <Button
+                onClick={() => {
+                  if (!emailEditLocation || !emailEditValue.trim()) return;
+                  saveEmailMutation.mutate({ id: emailEditLocation.id, email: emailEditValue.trim() });
+                }}
+                disabled={saveEmailMutation.isPending || !emailEditValue.trim()}
+                data-testid="button-save-email"
+              >
+                {saveEmailMutation.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
+                  : <><Save className="h-4 w-4 mr-2" />Save Email</>
                 }
               </Button>
             </DialogFooter>
