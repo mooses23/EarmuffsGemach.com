@@ -1705,54 +1705,66 @@ export default function AdminLocations() {
               );
             })()}
 
-            <div className="space-y-4 py-2">
+            <div className="space-y-5 py-2">
               {/* Channel picker */}
               <div>
-                <Label className="text-sm font-medium">Channel</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Channel</Label>
                 <RadioGroup
                   value={welcomeChannel}
                   onValueChange={(v) => setWelcomeChannel(v as OperatorWelcomeChannel)}
-                  className="grid grid-cols-3 gap-2 mt-2"
+                  className="grid grid-cols-3 gap-3 mt-2"
                 >
                   {/* SMS */}
                   <Label
                     htmlFor="channel-sms"
-                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "sms" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.sms.configured ? "opacity-50" : ""}`}
+                    className={`relative flex flex-col items-center gap-2 rounded-xl border-2 px-3 py-4 cursor-pointer transition-all duration-150 select-none
+                      ${welcomeChannel === "sms" ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-muted/20 hover:border-border/80 hover:bg-muted/40"}
+                      ${!serviceStatusQuery.data?.sms.configured ? "opacity-40 cursor-not-allowed" : ""}`}
                     data-testid="channel-option-sms"
                   >
                     <RadioGroupItem id="channel-sms" value="sms" disabled={!serviceStatusQuery.data?.sms.configured} className="sr-only" />
-                    <MessageSquare className="h-4 w-4" />
-                    SMS
-                    {serviceStatusQuery.data && !serviceStatusQuery.data.sms.configured && (
-                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    <MessageSquare className={`h-5 w-5 ${welcomeChannel === "sms" ? "text-primary" : "text-muted-foreground"}`} />
+                    <span className={`text-sm font-medium leading-none ${welcomeChannel === "sms" ? "text-primary" : ""}`}>SMS</span>
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.sms.configured ? (
+                      <span className="text-[10px] text-muted-foreground leading-none">Not configured</span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground leading-none">Text message</span>
                     )}
                   </Label>
 
                   {/* WhatsApp */}
                   <Label
                     htmlFor="channel-whatsapp"
-                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "whatsapp" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.whatsapp?.configured ? "opacity-50" : ""}`}
+                    className={`relative flex flex-col items-center gap-2 rounded-xl border-2 px-3 py-4 cursor-pointer transition-all duration-150 select-none
+                      ${welcomeChannel === "whatsapp" ? "border-green-500 bg-green-500/5 shadow-sm" : "border-border bg-muted/20 hover:border-border/80 hover:bg-muted/40"}
+                      ${!serviceStatusQuery.data?.whatsapp?.configured ? "opacity-40 cursor-not-allowed" : ""}`}
                     data-testid="channel-option-whatsapp"
                   >
                     <RadioGroupItem id="channel-whatsapp" value="whatsapp" disabled={!serviceStatusQuery.data?.whatsapp?.configured} className="sr-only" />
-                    <MessageCircle className="h-4 w-4 text-green-600" />
-                    WhatsApp
-                    {serviceStatusQuery.data && !serviceStatusQuery.data.whatsapp?.configured && (
-                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    <MessageCircle className={`h-5 w-5 ${welcomeChannel === "whatsapp" ? "text-green-600" : "text-muted-foreground"}`} />
+                    <span className={`text-sm font-medium leading-none ${welcomeChannel === "whatsapp" ? "text-green-700" : ""}`}>WhatsApp</span>
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.whatsapp?.configured ? (
+                      <span className="text-[10px] text-muted-foreground leading-none">Not configured</span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground leading-none">Messaging app</span>
                     )}
                   </Label>
 
                   {/* Email */}
                   <Label
                     htmlFor="channel-email"
-                    className={`flex flex-col items-center gap-1 border rounded-md p-2 text-sm cursor-pointer ${welcomeChannel === "email" ? "border-primary bg-primary/5" : "border-input"} ${!serviceStatusQuery.data?.email?.configured ? "opacity-50" : ""}`}
+                    className={`relative flex flex-col items-center gap-2 rounded-xl border-2 px-3 py-4 cursor-pointer transition-all duration-150 select-none
+                      ${welcomeChannel === "email" ? "border-primary bg-primary/5 shadow-sm" : "border-border bg-muted/20 hover:border-border/80 hover:bg-muted/40"}
+                      ${!serviceStatusQuery.data?.email?.configured ? "opacity-40 cursor-not-allowed" : ""}`}
                     data-testid="channel-option-email"
                   >
                     <RadioGroupItem id="channel-email" value="email" disabled={!serviceStatusQuery.data?.email?.configured} className="sr-only" />
-                    <Mail className="h-4 w-4" />
-                    Email
-                    {serviceStatusQuery.data && !serviceStatusQuery.data.email?.configured && (
-                      <span className="text-[10px] text-muted-foreground">Not configured</span>
+                    <Mail className={`h-5 w-5 ${welcomeChannel === "email" ? "text-primary" : "text-muted-foreground"}`} />
+                    <span className={`text-sm font-medium leading-none ${welcomeChannel === "email" ? "text-primary" : ""}`}>Email</span>
+                    {serviceStatusQuery.data && !serviceStatusQuery.data.email?.configured ? (
+                      <span className="text-[10px] text-muted-foreground leading-none">Not configured</span>
+                    ) : (
+                      <span className="text-[10px] text-muted-foreground leading-none">Inbox delivery</span>
                     )}
                   </Label>
                 </RadioGroup>
@@ -1804,7 +1816,7 @@ export default function AdminLocations() {
               {welcomeTarget?.kind === "single" && (
                 <div>
                   <div className="flex items-center justify-between">
-                    <Label className="text-sm font-medium">Message</Label>
+                    <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Message</Label>
                     {isCustomMessage && (
                       <span className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-300 font-medium" data-testid="custom-message-badge">
                         Custom message
@@ -1834,7 +1846,7 @@ export default function AdminLocations() {
                         </TabsList>
                         <TabsContent value="en">
                           <Textarea
-                            className="mt-1 text-xs font-mono min-h-[120px] resize-y"
+                            className="mt-1 text-sm leading-relaxed min-h-[140px] resize-y"
                             value={messageBody}
                             onChange={(e) => handleMessageBodyChange(e.target.value)}
                             dir="ltr"
@@ -1844,7 +1856,7 @@ export default function AdminLocations() {
                         </TabsContent>
                         <TabsContent value="he">
                           <Textarea
-                            className="mt-1 text-xs font-mono min-h-[120px] resize-y"
+                            className="mt-1 text-sm leading-relaxed min-h-[140px] resize-y"
                             value={messageBody}
                             onChange={(e) => handleMessageBodyChange(e.target.value)}
                             dir="rtl"
@@ -1891,7 +1903,7 @@ export default function AdminLocations() {
                 <div className="space-y-3">
                   <div>
                     <div className="flex items-center justify-between">
-                      <Label className="text-sm font-medium">
+                      <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         Message template
                       </Label>
                       <div className="flex items-center gap-1">
@@ -1916,7 +1928,7 @@ export default function AdminLocations() {
                       Use <code className="bg-muted px-0.5 rounded">{"{{name}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{code}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{pin}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{url}}"}</code> — each will be replaced with the recipient's actual values.
                     </p>
                     <Textarea
-                      className={`mt-1 text-xs font-mono min-h-[120px] resize-y ${!isCustomMessage ? "bg-muted/40" : ""}`}
+                      className={`mt-1 text-sm leading-relaxed min-h-[140px] resize-y ${!isCustomMessage ? "bg-muted/40" : ""}`}
                       value={messageBody}
                       onChange={(e) => handleMessageBodyChange(e.target.value)}
                       dir="auto"
