@@ -1388,7 +1388,32 @@ export default function AdminLocations() {
                                           ? <Mail className="h-3 w-3 shrink-0" />
                                           : null;
                                         const hasFailure = sms === "failed" || em === "failed" || location.welcomeWhatsappStatus === "failed";
-                                        return (
+                                        // Per-channel tooltip rows
+                                        const fmtDate = (d: Date) => {
+                                          const ago = Math.max(0, Math.floor((Date.now() - d.getTime()) / 86400000));
+                                          return ago === 0 ? "Today" : ago === 1 ? "1 day ago" : `${ago} days ago`;
+                                        };
+                                        type ChannelRow = { key: "sms" | "whatsapp" | "email"; label: string; sentAt: Date | null; status: string | null; error: string | null };
+                                        const channelRows: ChannelRow[] = [
+                                          { key: "sms", label: "SMS", sentAt: location.welcomeSmsSentAt ? new Date(location.welcomeSmsSentAt as string) : null, status: location.welcomeSmsStatus ?? null, error: location.welcomeSmsError ?? null },
+                                          { key: "whatsapp", label: "WhatsApp", sentAt: location.welcomeWhatsappSentAt ? new Date(location.welcomeWhatsappSentAt as string) : null, status: location.welcomeWhatsappStatus ?? null, error: location.welcomeWhatsappError ?? null },
+                                          { key: "email", label: "Email", sentAt: location.welcomeEmailSentAt ? new Date(location.welcomeEmailSentAt as string) : null, status: location.welcomeEmailStatus ?? null, error: location.welcomeEmailError ?? null },
+                                        ];
+                                        const hasAnyAttempt = candidates.length > 0;
+                                        const tooltipRows = channelRows.filter(r => r.sentAt || r.status);
+                                        const statusColor = (s: string | null) => {
+                                          if (!s) return "text-muted-foreground";
+                                          if (s === "delivered") return "text-green-500";
+                                          if (s === "sent" || s === "queued") return "text-blue-400";
+                                          if (s === "failed" || s === "undelivered") return "text-red-400";
+                                          return "text-muted-foreground";
+                                        };
+                                        const channelRowIcon = (key: "sms" | "whatsapp" | "email") =>
+                                          key === "sms" ? <MessageSquare className="h-3 w-3 shrink-0" />
+                                          : key === "whatsapp" ? <MessageCircle className="h-3 w-3 shrink-0 text-green-500" />
+                                          : <Mail className="h-3 w-3 shrink-0" />;
+
+                                        const mainContent = (
                                           <div className="flex flex-col gap-0.5" data-testid={`contacts-cell-${location.id}`}>
                                             {location.onboardedAt && (
                                               <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700 w-fit">Onboarded</Badge>
@@ -1406,6 +1431,60 @@ export default function AdminLocations() {
                                             )}
                                             {!location.phone && <NoPhoneBadge onClick={() => handleEditLocation(location, true)} />}
                                           </div>
+                                        );
+
+                                        if (!hasAnyAttempt) return mainContent;
+
+                                        return (
+                                          <Tooltip>
+                                            <TooltipTrigger asChild>
+                                              <div className="cursor-default w-fit" data-testid={`contacts-cell-${location.id}`}>
+                                                <div className="flex flex-col gap-0.5">
+                                                  {location.onboardedAt && (
+                                                    <Badge variant="default" className="text-xs bg-green-600 hover:bg-green-700 w-fit">Onboarded</Badge>
+                                                  )}
+                                                  {latest ? (
+                                                    <div className="flex items-center gap-1 text-[11px] text-muted-foreground" data-testid={`last-messaged-${location.id}`}>
+                                                      {channelIcon}
+                                                      <span>{daysAgo === 0 ? "Today" : daysAgo === 1 ? "1 day ago" : `${daysAgo} days ago`}</span>
+                                                    </div>
+                                                  ) : !location.onboardedAt ? (
+                                                    <Badge variant="outline" className="text-xs text-muted-foreground w-fit">Not messaged</Badge>
+                                                  ) : null}
+                                                  {hasFailure && (
+                                                    <Badge variant="destructive" className="text-xs w-fit">Failed</Badge>
+                                                  )}
+                                                  {!location.phone && <NoPhoneBadge onClick={() => handleEditLocation(location, true)} />}
+                                                </div>
+                                              </div>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="left" className="max-w-[220px] p-2" data-testid={`contacts-tooltip-${location.id}`}>
+                                              <p className="text-[10px] font-semibold mb-1.5 text-foreground/80 uppercase tracking-wide">Message history</p>
+                                              <div className="space-y-1.5">
+                                                {tooltipRows.map(row => (
+                                                  <div key={row.key} className="flex items-start gap-1.5">
+                                                    <span className="mt-0.5">{channelRowIcon(row.key)}</span>
+                                                    <div className="flex flex-col min-w-0">
+                                                      <div className="flex items-center gap-1.5">
+                                                        <span className="text-[11px] font-medium text-foreground">{row.label}</span>
+                                                        {row.status && (
+                                                          <span className={`text-[10px] font-medium ${statusColor(row.status)}`}>
+                                                            {row.status}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                      {row.sentAt && (
+                                                        <span className="text-[10px] text-muted-foreground">{fmtDate(row.sentAt)}</span>
+                                                      )}
+                                                      {row.error && (
+                                                        <span className="text-[10px] text-red-400 truncate" title={row.error}>Error: {row.error.slice(0, 40)}{row.error.length > 40 ? "…" : ""}</span>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            </TooltipContent>
+                                          </Tooltip>
                                         );
                                       })()}
                                     </TableCell>
