@@ -1395,8 +1395,9 @@ export default function AdminLocations() {
                                           { key: "whatsapp", label: "WhatsApp", sentAt: location.welcomeWhatsappSentAt ? new Date(location.welcomeWhatsappSentAt as string) : null, status: location.welcomeWhatsappStatus ?? null, error: location.welcomeWhatsappError ?? null },
                                           { key: "email", label: "Email", sentAt: location.welcomeEmailSentAt ? new Date(location.welcomeEmailSentAt as string) : null, status: location.welcomeEmailStatus ?? null, error: location.welcomeEmailError ?? null },
                                         ];
-                                        const hasAnyAttempt = candidates.length > 0;
-                                        // Always show all 3 channels; non-attempted ones show "Not sent"
+                                        // Broaden attempt detection: sentAt OR non-null status/error counts as an attempt
+                                        const hasAnyAttempt = candidates.length > 0 || channelRows.some(r => r.status || r.error);
+                                        // Always show all 3 channels; non-attempted ones show "not sent"
                                         const tooltipRows = channelRows;
                                         const fmtTimestamp = (d: Date) => d.toLocaleString(undefined, { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
                                         const statusColor = (s: string | null) => {
