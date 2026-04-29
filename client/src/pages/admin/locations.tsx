@@ -1708,19 +1708,17 @@ export default function AdminLocations() {
                       Use <code className="bg-muted px-0.5 rounded">{"{{name}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{code}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{pin}}"}</code>, <code className="bg-muted px-0.5 rounded">{"{{url}}"}</code> — each will be replaced with the recipient's actual values.
                     </p>
                     <Textarea
-                      className={`mt-1 text-xs font-mono min-h-[120px] resize-y ${!isCustomMessage ? "bg-muted/50 text-muted-foreground cursor-text" : ""}`}
+                      className={`mt-1 text-xs font-mono min-h-[120px] resize-y ${!isCustomMessage ? "bg-muted/40" : ""}`}
                       value={messageBody}
                       onChange={(e) => handleMessageBodyChange(e.target.value)}
-                      onClick={!isCustomMessage ? () => setIsCustomMessage(true) : undefined}
-                      readOnly={!isCustomMessage}
                       dir="auto"
                       data-testid="bulk-message-body"
                       placeholder="Message template…"
                     />
                     <p className="text-[10px] text-muted-foreground mt-1">
                       {isCustomMessage
-                        ? "Editing this template — each recipient's tokens will be substituted on send."
-                        : "Shows the server default template. Click to edit and create a custom message."}
+                        ? "Custom message active — each recipient's tokens will be substituted on send."
+                        : "Showing EN template reference. Edit to create a custom message; otherwise each recipient receives the server-generated default for their language."}
                     </p>
                   </div>
 
