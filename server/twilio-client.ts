@@ -279,15 +279,20 @@ export async function sendOperatorWelcomeWhatsApp(ctx: OperatorWelcomeSendContex
   if (!to) {
     return { ok: false, error: 'Phone number is missing or not a valid WhatsApp-capable number.' };
   }
-  const body = buildOperatorWelcomeMessageBody(ctx);
+  // Use admin-edited custom body when provided; otherwise fall back to the built-in template.
+  const body = ctx.customBody || buildOperatorWelcomeMessageBody(ctx);
   const client = getClient();
   // If a content template SID is configured for the operator's language,
   // use it (avoids the 24-hour customer-care window restriction). Variables
   // are positional and match the EN/HE template body order: 1=name, 2=link,
   // 3=code, 4=pin.
-  const contentSid = ctx.language === 'he'
-    ? (process.env.TWILIO_WHATSAPP_CONTENT_SID_HE || '').trim()
-    : (process.env.TWILIO_WHATSAPP_CONTENT_SID_EN || '').trim();
+  // When a custom body is supplied the content template cannot be used (it has
+  // fixed variable slots), so we send as a free-form text message instead.
+  const contentSid = !ctx.customBody
+    ? (ctx.language === 'he'
+        ? (process.env.TWILIO_WHATSAPP_CONTENT_SID_HE || '').trim()
+        : (process.env.TWILIO_WHATSAPP_CONTENT_SID_EN || '').trim())
+    : '';
   try {
     const cb = ctx.statusCallbackUrl ? { statusCallback: ctx.statusCallbackUrl } : {};
     const msg = await client.messages.create(
