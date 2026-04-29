@@ -1733,12 +1733,12 @@ export default function AdminLocations() {
                     const primaryQuery = bulkPreviewSamples.en ? bulkPreviewEnQuery : bulkPreviewHeQuery;
                     const primaryLang = bulkPreviewSamples.en ? "en" : "he";
                     const hasHe = !!bulkPreviewSamples.he && !!bulkPreviewSamples.en;
-                    // Count channel-eligible candidates (must have phone for SMS/WhatsApp, contactEmail for email)
+                    // Count channel-eligible candidates (must have phone for SMS/WhatsApp, email for email channel)
                     const candidatePool = welcomeTarget.kind === "selected"
                       ? ([...selectedIds].map(id => locations.find(l => l.id === id)).filter(Boolean) as Location[])
                       : locations.filter((l) => l.isActive !== false && !l.onboardedAt);
                     const totalCandidates = candidatePool.filter(l =>
-                      welcomeChannel === "email" ? !!l.contactEmail : !!l.phone
+                      welcomeChannel === "email" ? !!l.email : !!l.phone
                     ).length;
                     const moreCount = totalCandidates > 1 ? totalCandidates - 1 : 0;
                     return (
