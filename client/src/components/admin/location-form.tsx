@@ -183,7 +183,6 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
     <Form {...form}>
       <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
 
-        {/* ── Gemach Name ── */}
         <div className="space-y-3">
           <SectionHeading icon={Globe} label={t("gemachName")} />
           <BilingualPair>
@@ -227,7 +226,6 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
           </BilingualPair>
         </div>
 
-        {/* ── Contact Person ── */}
         <div className="space-y-3">
           <SectionHeading icon={User} label={t("contactPersonLabel")} />
           <BilingualPair>
@@ -271,7 +269,6 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
           </BilingualPair>
         </div>
 
-        {/* ── Address ── */}
         <div className="space-y-3">
           <SectionHeading icon={MapPin} label={t("addressLabel")} />
           <BilingualPair>
@@ -334,9 +331,8 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
           />
         </div>
 
-        {/* ── Contact Info ── */}
         <div className="space-y-3">
-          <SectionHeading icon={Phone} label="Contact Info" />
+          <SectionHeading icon={Phone} label={t("contactInfoSection")} />
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <FormField
               control={form.control}
@@ -389,9 +385,8 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
           </div>
         </div>
 
-        {/* ── Settings ── */}
         <div className="space-y-4">
-          <SectionHeading icon={Globe} label="Settings" />
+          <SectionHeading icon={Globe} label={t("locationSettingsSection")} />
 
           <FormField
             control={form.control}
@@ -531,7 +526,6 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
           />
         </div>
 
-        {/* ── Submit ── */}
         <div className="border-t border-border/60 pt-4">
           <Button type="submit" className="w-full h-11 text-sm font-medium" disabled={isPending}>
             {isPending ? (
