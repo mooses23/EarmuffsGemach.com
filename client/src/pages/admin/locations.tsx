@@ -87,6 +87,7 @@ import {
   WifiOff,
   CreditCard,
   Save,
+  Settings,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -214,6 +215,91 @@ function LocationStripeFeeSection({ locationId }: { locationId: number }) {
         {saveMutation.isPending ? "Saving…" : "Save fee"}
       </Button>
     </div>
+  );
+}
+
+function GlobalStripeSettingsPanel() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const { data, isLoading } = useQuery<StripeAdminSettings>({
+    queryKey: ["/api/admin/settings/stripe"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/settings/stripe", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load Stripe settings");
+      return res.json();
+    },
+  });
+
+  const [maxCardAgeDays, setMaxCardAgeDays] = useState<string>("");
+  const [requireNotify, setRequireNotify] = useState<boolean>(true);
+  const [seeded, setSeeded] = useState(false);
+
+  if (data && !seeded) {
+    setMaxCardAgeDays(String(data.maxCardAgeDays));
+    setRequireNotify(data.requirePreChargeNotification);
+    setSeeded(true);
+  }
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("PATCH", "/api/admin/settings/stripe", {
+        maxCardAgeDays: Number(maxCardAgeDays),
+        requirePreChargeNotification: requireNotify,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/stripe"] });
+      setSeeded(false);
+      toast({ title: "Saved", description: "Global Stripe settings updated." });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <details className="mb-6 group">
+      <summary className="flex items-center gap-2 cursor-pointer list-none rounded-lg border bg-card px-4 py-3 text-sm font-medium select-none hover:bg-muted/50 transition-colors">
+        <Settings className="h-4 w-4 text-muted-foreground" />
+        <span>Global Stripe charge settings</span>
+        <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <Card className="mt-0 rounded-t-none border-t-0">
+        <CardContent className="pt-4 space-y-4">
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-medium mb-1">Max card age (days)</label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={365}
+                    value={maxCardAgeDays}
+                    onChange={e => setMaxCardAgeDays(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground mt-1">Cards older than this are blocked from off-session charges (default 90).</p>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium mb-1">Require pre-charge notification</label>
+                  <div className="flex items-center gap-2 mt-2">
+                    <Switch checked={requireNotify} onCheckedChange={setRequireNotify} data-testid="switch-require-notify" />
+                    <span className="text-sm">{requireNotify ? "Enforced (default)" : "Best-effort (disabled)"}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">When on, charges are blocked if the borrower cannot be notified.</p>
+                </div>
+              </div>
+              <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                <Save className="h-4 w-4 mr-2" />
+                {saveMutation.isPending ? "Saving…" : "Save settings"}
+              </Button>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </details>
   );
 }
 
@@ -796,6 +882,8 @@ export default function AdminLocations() {
             </Dialog>
           </div>
         </div>
+
+        <GlobalStripeSettingsPanel />
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
