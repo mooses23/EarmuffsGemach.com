@@ -177,6 +177,9 @@ export const locations = pgTable("locations", {
   onboardedAt: timestamp("onboarded_at"),
 });
 
+// "both" is retained here for backward-compatibility with stored location defaults and legacy API
+// calls only.  The admin UI no longer exposes "both" as a selectable channel; it is normalized
+// to "sms" wherever it is read from localStorage or location.defaultWelcomeChannel.
 export const OPERATOR_WELCOME_CHANNELS = ["sms", "email", "both", "whatsapp"] as const;
 export type OperatorWelcomeChannel = (typeof OPERATOR_WELCOME_CHANNELS)[number];
 
