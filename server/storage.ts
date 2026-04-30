@@ -112,6 +112,14 @@ export interface IStorage {
   updateApplication(id: number, data: Partial<GemachApplication>): Promise<GemachApplication>;
   recordApplicationStatusChange(change: InsertApplicationStatusChange): Promise<ApplicationStatusChange>;
   getApplicationStatusChanges(applicationId: number): Promise<ApplicationStatusChange[]>;
+  // Atomic status update + audit insert. Either both rows commit or neither does.
+  updateApplicationStatusAtomic(input: {
+    applicationId: number;
+    newStatus: string;
+    source: string;
+    changedByUserId?: number | null;
+    changedByUsername?: string | null;
+  }): Promise<{ application: GemachApplication; change: ApplicationStatusChange }>;
 
   // Inventory operations (using new inventory table)
   getInventoryByLocation(locationId: number): Promise<Inventory[]>;
@@ -2688,6 +2696,31 @@ export class MemStorage implements IStorage {
     return this.applicationStatusChanges
       .filter((c) => c.applicationId === applicationId)
       .sort((a, b) => b.changedAt.getTime() - a.changedAt.getTime());
+  }
+
+  async updateApplicationStatusAtomic(input: {
+    applicationId: number;
+    newStatus: string;
+    source: string;
+    changedByUserId?: number | null;
+    changedByUsername?: string | null;
+  }): Promise<{ application: GemachApplication; change: ApplicationStatusChange }> {
+    const previous = this.applications.get(input.applicationId);
+    if (!previous) {
+      throw new Error(`Application with id ${input.applicationId} not found`);
+    }
+    const previousStatus = previous.status;
+    const updated: GemachApplication = { ...previous, status: input.newStatus };
+    this.applications.set(input.applicationId, updated);
+    const change = await this.recordApplicationStatusChange({
+      applicationId: input.applicationId,
+      previousStatus,
+      newStatus: input.newStatus,
+      source: input.source,
+      changedByUserId: input.changedByUserId ?? null,
+      changedByUsername: input.changedByUsername ?? null,
+    });
+    return { application: updated, change };
   }
 
   // Transaction methods

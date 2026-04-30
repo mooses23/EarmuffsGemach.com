@@ -550,6 +550,35 @@ export class DatabaseStorage implements IStorage {
       .orderBy(desc(applicationStatusChanges.changedAt));
   }
 
+  async updateApplicationStatusAtomic(input: {
+    applicationId: number;
+    newStatus: string;
+    source: string;
+    changedByUserId?: number | null;
+    changedByUsername?: string | null;
+  }): Promise<{ application: GemachApplication; change: ApplicationStatusChange }> {
+    return await db.transaction(async (tx) => {
+      const existing = await tx.select().from(gemachApplications).where(eq(gemachApplications.id, input.applicationId));
+      const previous = existing[0];
+      if (!previous) {
+        throw new Error(`Application with id ${input.applicationId} not found`);
+      }
+      const updated = await tx.update(gemachApplications)
+        .set({ status: input.newStatus })
+        .where(eq(gemachApplications.id, input.applicationId))
+        .returning();
+      const change = await tx.insert(applicationStatusChanges).values({
+        applicationId: input.applicationId,
+        previousStatus: previous.status,
+        newStatus: input.newStatus,
+        source: input.source,
+        changedByUserId: input.changedByUserId ?? null,
+        changedByUsername: input.changedByUsername ?? null,
+      }).returning();
+      return { application: updated[0], change: change[0] };
+    });
+  }
+
   // Transaction operations
   async getAllTransactions(): Promise<Transaction[]> {
     return db.select().from(transactions);

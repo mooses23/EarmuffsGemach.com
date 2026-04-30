@@ -232,34 +232,39 @@ export default function Dashboard() {
     loc => loc.isActive !== false && !loc.phone && !loc.onboardedAt
   ).length;
 
-  const StatsCard = ({ title, value, subtitle, icon: Icon, className = "" }: {
+  const StatsCard = ({ title, value, subtitle, icon: Icon, className = "", href, testId }: {
     title: string;
     value: string | number;
     subtitle: string;
     icon: any;
     className?: string;
-  }) => (
-    <Card className={className}>
-      <CardContent className={viewMode === 'compact' ? 'p-4' : 'pt-6'}>
-        <div className={`flex items-center ${viewMode === 'list' ? 'justify-start gap-4' : 'justify-between'}`}>
-          <div>
-            <p className={`text-sm text-muted-foreground ${viewMode === 'compact' ? 'text-xs' : ''}`}>
-              {title}
-            </p>
-            <p className={`font-bold ${viewMode === 'compact' ? 'text-lg' : 'text-2xl'}`}>
-              {value}
-            </p>
+    href?: string;
+    testId?: string;
+  }) => {
+    const card = (
+      <Card className={`${className} ${href ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`} data-testid={testId}>
+        <CardContent className={viewMode === 'compact' ? 'p-4' : 'pt-6'}>
+          <div className={`flex items-center ${viewMode === 'list' ? 'justify-start gap-4' : 'justify-between'}`}>
+            <div>
+              <p className={`text-sm text-muted-foreground ${viewMode === 'compact' ? 'text-xs' : ''}`}>
+                {title}
+              </p>
+              <p className={`font-bold ${viewMode === 'compact' ? 'text-lg' : 'text-2xl'}`}>
+                {value}
+              </p>
+            </div>
+            <div className={`p-2 bg-primary/10 rounded-full ${viewMode === 'compact' ? 'p-1' : ''}`}>
+              <Icon className={`text-primary ${viewMode === 'compact' ? 'h-4 w-4' : 'h-6 w-6'}`} />
+            </div>
           </div>
-          <div className={`p-2 bg-primary/10 rounded-full ${viewMode === 'compact' ? 'p-1' : ''}`}>
-            <Icon className={`text-primary ${viewMode === 'compact' ? 'h-4 w-4' : 'h-6 w-6'}`} />
-          </div>
-        </div>
-        <p className={`text-xs text-muted-foreground mt-2 ${viewMode === 'compact' ? 'text-[10px]' : ''}`}>
-          {subtitle}
-        </p>
-      </CardContent>
-    </Card>
-  );
+          <p className={`text-xs text-muted-foreground mt-2 ${viewMode === 'compact' ? 'text-[10px]' : ''}`}>
+            {subtitle}
+          </p>
+        </CardContent>
+      </Card>
+    );
+    return href ? <Link href={href}>{card}</Link> : card;
+  };
 
   return (
     <>
@@ -323,6 +328,8 @@ export default function Dashboard() {
                 value={pendingApplications}
                 subtitle={t('waitingForReview')}
                 icon={FileText}
+                href="/admin/applications"
+                testId="card-pending-applications"
               />
               
               <StatsCard

@@ -1504,26 +1504,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ message: "Application not found" });
       }
 
-      const previousStatus = application.status;
-      const updatedApplication = await storage.updateApplication(id, updates);
-
-      if (updates.status && updates.status !== previousStatus) {
-        try {
-          await storage.recordApplicationStatusChange({
-            applicationId: id,
-            previousStatus,
-            newStatus: updates.status,
-            source: "patch",
-            changedByUserId: req.user?.id ?? null,
-            changedByUsername: req.user?.username ?? null,
-          });
-        } catch (auditErr) {
-          // Don't fail the request if audit logging fails — but make it loud.
-          console.error("Failed to record application status change:", auditErr);
-        }
+      // Allow-list currently only permits `status`. If the new status differs
+      // from the existing one we use the atomic helper so that the row update
+      // and the audit insert commit (or roll back) together — no silent loss
+      // of audit history is possible.
+      if (updates.status && updates.status !== application.status) {
+        const { application: updatedApplication } = await storage.updateApplicationStatusAtomic({
+          applicationId: id,
+          newStatus: updates.status,
+          source: "patch",
+          changedByUserId: req.user?.id ?? null,
+          changedByUsername: req.user?.username ?? null,
+        });
+        return res.json(updatedApplication);
       }
 
-      res.json(updatedApplication);
+      // No-op (status unchanged or only non-status fields, which the
+      // allow-list currently rejects anyway): just return current row.
+      res.json(application);
     } catch (error) {
       console.error("Error updating application:", error);
       res.status(500).json({ message: "Failed to update application" });
@@ -1587,7 +1585,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (application.status !== "pending") {
         return res.status(400).json({ message: "Application is not pending" });
       }
-      const previousStatus = application.status;
 
       // Validate regionId exists
       const region = await storage.getRegion(req.body.regionId);
@@ -1627,21 +1624,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
         applicationId: id
       });
       
-      // Update application status to approved
-      const updatedApplication = await storage.updateApplication(id, { status: "approved" });
-
-      try {
-        await storage.recordApplicationStatusChange({
-          applicationId: id,
-          previousStatus,
-          newStatus: "approved",
-          source: "approve_with_location",
-          changedByUserId: req.user?.id ?? null,
-          changedByUsername: req.user?.username ?? null,
-        });
-      } catch (auditErr) {
-        console.error("Failed to record application status change (approve-with-location):", auditErr);
-      }
+      // Atomic status update + audit insert: if either fails, both roll back so
+      // we never end up with an approved row that has no audit history.
+      const { application: updatedApplication } = await storage.updateApplicationStatusAtomic({
+        applicationId: id,
+        newStatus: "approved",
+        source: "approve_with_location",
+        changedByUserId: req.user?.id ?? null,
+        changedByUsername: req.user?.username ?? null,
+      });
 
       res.status(201).json({ 
         application: updatedApplication, 
