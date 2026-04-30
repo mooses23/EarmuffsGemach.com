@@ -129,6 +129,14 @@ Preferred communication style: Simple, everyday language.
 - Admin (`-1` from the helper) is normalized to `undefined` before being passed to `PayLaterService`, which lets admins act across all locations while operators remain scoped to their own.
 - Non-admin/non-operator Passport users (e.g. borrowers) are rejected.
 
+### Twilio SMS Export Policy (Tasks #180, #182)
+- **Never** drop a raw Twilio Console CSV export into `attached_assets/` (or anywhere inside the repo). The filename embeds the Twilio Account SID (`AC<32 hex>`) and the body contains customer phone numbers and message bodies. Replit's "Saved your changes before starting work" auto-checkpoint will snapshot anything sitting in `attached_assets/`, so an attached export rides straight into the next git push.
+- **Drop exports under `/tmp/sms-exports/` instead** (outside the project tree, not snapshotted by Replit). See `docs/sms-exports.md` for the full workflow including how to scrub a sample if you really need one in the repo.
+- **Two automated guards back this up**:
+  - `.gitignore` ignores `attached_assets/*.csv`, `attached_assets/sms-log-*`, `attached_assets/messages-*`, `attached_assets/twilio-*`, and `attached_assets/*AC*.csv` so an accidental `git add` is a no-op.
+  - `.github/workflows/secret-scan.yml` runs ripgrep for `\bAC[0-9a-fA-F]{32}\b` on every push and PR and fails the build if a SID lands in the working tree under any filename.
+- If the secret-scan workflow ever fires: rotate the Twilio Auth Token first, then rewrite history (a follow-up "delete the line" commit is **not** enough — the SID stays in git history).
+
 ### Schema Drift Hardening (Task #175)
 - `server/databaseStorage.ts` `ensureSchemaUpgrades()` wraps every `ALTER`/`CREATE` in a per-statement `safe()` helper; a single failure no longer aborts the rest or crashes cold start. `schemaUpgradesRun` only flips on full success so the next cold start retries.
 - `server/startup-checks.ts` `runSchemaDriftCheck()` runs after `ensureSchemaUpgrades` (wired in `server/routes.ts`) and verifies every post-baseline column/table exists, logging `schema-drift: OK` on success or ERROR-level lines with the exact `ALTER`/`CREATE` to apply on drift. Never throws. Production-only; dev/test boots skip the check.
