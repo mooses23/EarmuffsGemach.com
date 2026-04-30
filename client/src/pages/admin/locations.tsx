@@ -1279,6 +1279,7 @@ export default function AdminLocations() {
 
   // Determine bulk send label based on channel for "send to selected" button
   const selectedCount = selectedIds.size;
+  const messageableCount = locations.filter((l) => selectedIds.has(l.id) && (!!l.phone || !!l.email)).length;
 
   return (
     <TooltipProvider>
@@ -1477,7 +1478,7 @@ export default function AdminLocations() {
                         data-testid="button-onboarding-bulk-selected"
                       >
                         <Send className="h-4 w-4 mr-1" />
-                        Message Selected ({selectedCount})
+                        Message Selected ({messageableCount < selectedCount ? `${messageableCount} of ${selectedCount}` : selectedCount})
                       </Button>
                       <TooltipProvider>
                         <Tooltip>
