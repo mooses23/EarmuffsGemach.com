@@ -94,6 +94,27 @@ async function withRefundLock<T>(transactionId: number, fn: () => Promise<T>): P
   }
 }
 
+// Same in-process serialization for cash recording. Without this, two operators
+// tapping "record cash" at the same instant could both pass the
+// existingCash-check inside DepositService.initiateCashPayment and create
+// duplicate completed cash payments. Single-process only — a multi-instance
+// deploy still needs a DB-level partial unique index for full safety.
+const cashLocks = new Map<number, Promise<void>>();
+async function withCashLock<T>(transactionId: number, fn: () => Promise<T>): Promise<T> {
+  while (cashLocks.has(transactionId)) {
+    try { await cashLocks.get(transactionId); } catch { /* predecessor failed — proceed */ }
+  }
+  let release!: () => void;
+  const lock = new Promise<void>((resolve) => { release = resolve; });
+  cashLocks.set(transactionId, lock);
+  try {
+    return await fn();
+  } finally {
+    cashLocks.delete(transactionId);
+    release();
+  }
+}
+
 // Domains that should never appear in admin replies. Catches the old/incorrect
 // gemach domain plus common misspellings/TLD swaps of the official gemach
 // domain so that a typo doesn't get sent to recipients as a dead link.
@@ -2527,42 +2548,66 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // CASH PAYMENT PROCESSING
   app.post("/api/cash-payment", async (req, res) => {
     try {
-      if (!req.isAuthenticated()) {
+      // Accept either Passport (admin/operator) or PIN-based (operator) auth.
+      const operatorLocationId = getOperatorLocationId(req);
+      if (operatorLocationId === null) {
         return res.status(401).json({ message: "Authentication required" });
       }
-      
-      const { transactionId, locationId } = req.body;
-      
-      // Get location to determine deposit amount
-      const location = await storage.getLocation(locationId);
-      if (!location) {
-        return res.status(404).json({ message: "Location not found" });
-      }
-      
-      const depositAmount = location.depositAmount || 20;
-      
-      // Cash deposits are collected in person at borrow time, so we mark
-      // them completed immediately. No admin confirmation step is needed.
-      const payment = await storage.createPayment({
-        transactionId,
-        paymentMethod: "cash",
-        depositAmount: depositAmount * 100,
-        processingFee: 0, // No processing fee for cash
-        totalAmount: depositAmount * 100,
-        status: "completed"
-      });
 
-      // Keep the transaction's depositPaymentMethod in sync (was 'pending'
-      // for newly created transactions) so reports show 'cash' right away.
-      await storage.updateTransaction(transactionId, {
-        depositPaymentMethod: "cash",
-      });
+      const transactionIdRaw = req.body?.transactionId;
+      const locationIdRaw = req.body?.locationId;
+      const transactionId = typeof transactionIdRaw === "number" ? transactionIdRaw : parseInt(transactionIdRaw, 10);
+      const locationId = typeof locationIdRaw === "number" ? locationIdRaw : parseInt(locationIdRaw, 10);
+      if (!Number.isFinite(transactionId) || !Number.isFinite(locationId)) {
+        return res.status(400).json({ message: "transactionId and locationId are required" });
+      }
+
+      // Resolve actor identity for audit + role.
+      let role: UserRole;
+      let userId: number | undefined;
+      if (req.isAuthenticated()) {
+        const user = req.user as Express.User;
+        userId = user.id;
+        if (user.isAdmin) {
+          role = 'admin';
+        } else if (user.role === 'operator') {
+          role = 'operator';
+        } else {
+          // Passport-authenticated borrowers (or other roles) must not record cash.
+          return res.status(403).json({ message: "Only operators and admins can record cash payments" });
+        }
+      } else {
+        // PIN session = operator scoped to that location.
+        role = 'operator';
+      }
+
+      const result = await withCashLock(transactionId, () =>
+        DepositService.initiateCashPayment(transactionId, locationId, {
+          userId,
+          role,
+          operatorLocationId,
+          ipAddress: req.ip,
+        })
+      );
+
+      if (!result.success) {
+        // Map authorization-style errors to 403, validation-style to 400.
+        const msg = result.error || "Failed to record cash payment";
+        const status =
+          msg.includes('not authorized') || msg.includes('Borrowers cannot') ? 403 :
+          msg.includes('not found') || msg.includes('does not belong') ? 400 :
+          400;
+        return res.status(status).json({ message: msg });
+      }
+
+      const location = await storage.getLocation(locationId);
+      const depositAmount = location?.depositAmount || 20;
 
       res.json({
-        paymentId: payment.id,
+        paymentId: result.paymentId,
         status: "completed",
         amount: depositAmount * 100,
-        message: "Cash deposit recorded"
+        message: "Cash deposit recorded",
       });
     } catch (error) {
       console.error("Error processing cash payment:", error);
@@ -2738,7 +2783,38 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (paymentMethod === 'stripe') {
         paymentResult = await DepositService.initiateStripePayment(transaction.id, locationId);
       } else if (paymentMethod === 'cash') {
-        paymentResult = await DepositService.initiateCashPayment(transaction.id, locationId);
+        // Cash deposits create a *completed* payment row, so they must come
+        // from a real operator/admin — never a public/borrower request to
+        // /api/deposits/initiate. Reject anonymous or non-operator callers
+        // here even though the rest of /api/deposits/initiate is public.
+        const operatorLocationId = getOperatorLocationId(req);
+        if (operatorLocationId === null) {
+          return res.status(401).json({ message: "Operator or admin authentication required to record cash" });
+        }
+        let role: UserRole = 'operator';
+        let userId: number | undefined;
+        if (req.isAuthenticated()) {
+          const user = req.user as Express.User;
+          userId = user.id;
+          if (user.isAdmin) {
+            role = 'admin';
+          } else if (user.role === 'operator') {
+            role = 'operator';
+          } else {
+            return res.status(403).json({ message: "Only operators and admins can record cash" });
+          }
+        } else {
+          // PIN session = operator at that location.
+          role = 'operator';
+        }
+        paymentResult = await withCashLock(transaction.id, () =>
+          DepositService.initiateCashPayment(transaction.id, locationId, {
+            userId,
+            role,
+            operatorLocationId,
+            ipAddress: req.ip,
+          })
+        );
       } else {
         return res.status(400).json({ message: "Unsupported payment method" });
       }
@@ -4675,14 +4751,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.post("/api/operator/transactions/:id/charge", async (req, res) => {
     try {
       const transactionId = parseInt(req.params.id);
-      const operatorLocationId = (req.session as any).operatorLocationId;
-      
-      if (!req.isAuthenticated() && !operatorLocationId) {
+
+      // Accept Passport (admin/operator) and PIN (operator) auth uniformly.
+      // -1 means admin via getOperatorLocationId; we normalize that to
+      // `undefined` before handing off so PayLaterService's location check
+      // is bypassed for admins (any location) and enforced for operators.
+      const resolvedLocationId = getOperatorLocationId(req);
+      if (resolvedLocationId === null) {
         return res.status(401).json({ message: "Authentication required" });
       }
 
+      // Block any Passport user that isn't admin or operator (e.g. borrower).
+      if (req.isAuthenticated()) {
+        const u = req.user as Express.User;
+        if (!u.isAdmin && u.role !== 'operator') {
+          return res.status(403).json({ message: "Only operators and admins can charge cards" });
+        }
+      }
+
       const userId = req.isAuthenticated() ? (req.user as any).id : undefined;
-      const locationId = operatorLocationId || (req.user as any)?.locationId;
+      const locationId = resolvedLocationId === -1 ? undefined : resolvedLocationId;
       const operatorNote: string | undefined = typeof req.body?.operatorNote === 'string'
         ? req.body.operatorNote.trim() || undefined
         : undefined;
@@ -5003,14 +5091,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const transactionId = parseInt(req.params.id);
       const { reason } = req.body;
-      const operatorLocationId = (req.session as any).operatorLocationId;
-      
-      if (!req.isAuthenticated() && !operatorLocationId) {
+
+      // Same auth pattern as /charge — admins (any location) and operators
+      // (their own location) can release/decline a saved card.
+      const resolvedLocationId = getOperatorLocationId(req);
+      if (resolvedLocationId === null) {
         return res.status(401).json({ message: "Authentication required" });
       }
 
+      if (req.isAuthenticated()) {
+        const u = req.user as Express.User;
+        if (!u.isAdmin && u.role !== 'operator') {
+          return res.status(403).json({ message: "Only operators and admins can release cards" });
+        }
+      }
+
       const userId = req.isAuthenticated() ? (req.user as any).id : undefined;
-      const locationId = operatorLocationId || (req.user as any)?.locationId;
+      const locationId = resolvedLocationId === -1 ? undefined : resolvedLocationId;
 
       const result = await PayLaterService.declineTransaction(transactionId, userId, locationId, reason);
 

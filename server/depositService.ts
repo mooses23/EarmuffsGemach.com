@@ -133,14 +133,82 @@ export class DepositService {
     }
   }
 
+  /**
+   * Records a cash deposit. Authorization, transaction validation, idempotency
+   * and audit logging all live here so every caller (HTTP route, scripts,
+   * future webhooks) gets the same guarantees:
+   *
+   *   - actor.role must be 'admin' or 'operator' (borrowers are rejected)
+   *   - operators can only record cash for transactions at their own location
+   *   - admins can record cash for any location
+   *   - the transaction must exist and its locationId must match the passed-in
+   *     locationId (catches stale clients posting the wrong location)
+   *   - idempotent: a duplicate call for a transaction that already has a
+   *     completed cash payment returns that existing payment instead of
+   *     double-recording
+   *   - writes an audit_logs row attributing the action to the actor
+   */
   static async initiateCashPayment(
     transactionId: number,
-    locationId: number
+    locationId: number,
+    actor: {
+      userId?: number;
+      role: UserRole;
+      operatorLocationId?: number; // -1 for admin via getOperatorLocationId, real id for operator
+      ipAddress?: string;
+    }
   ): Promise<PaymentResult> {
     try {
+      if (actor.role === 'borrower') {
+        return { success: false, error: 'Borrowers cannot record cash payments' };
+      }
+
+      const transaction = await storage.getTransaction(transactionId);
+      if (!transaction) {
+        return { success: false, error: 'Transaction not found' };
+      }
+
+      // The body's locationId must agree with the transaction. Catches a UI
+      // bug or a client posting from a stale location selector.
+      if (transaction.locationId !== locationId) {
+        return { success: false, error: 'Transaction does not belong to this location' };
+      }
+
+      // Operators are scoped to their own location. -1 means admin via the
+      // getOperatorLocationId helper; admins are allowed across all locations.
+      // An operator actor with no concrete operatorLocationId is rejected —
+      // we never want to silently bypass the location check.
+      if (actor.role === 'operator') {
+        if (actor.operatorLocationId === undefined) {
+          return { success: false, error: 'Operator not authorized for this location' };
+        }
+        if (actor.operatorLocationId !== -1 && actor.operatorLocationId !== locationId) {
+          return { success: false, error: 'Operator not authorized for this location' };
+        }
+      }
+
       const location = await storage.getLocation(locationId);
       if (!location) {
         return { success: false, error: 'Location not found' };
+      }
+
+      // Idempotency: if this transaction already has a completed cash payment,
+      // return it instead of writing a duplicate. Two operators tapping the
+      // confirm button at the same time should result in one row, not two.
+      const existingPayments = await storage.getPaymentsByTransaction(transactionId);
+      const existingCash = existingPayments.find(
+        (p) => p.paymentMethod === 'cash' && p.status === 'completed'
+      );
+      if (existingCash) {
+        // Backfill depositPaymentMethod just in case it's still 'pending'.
+        if (transaction.depositPaymentMethod !== 'cash') {
+          await storage.updateTransaction(transactionId, { depositPaymentMethod: 'cash' });
+        }
+        return {
+          success: true,
+          paymentId: existingCash.id,
+          transactionId,
+        };
       }
 
       const depositAmount = location.depositAmount || 20;
@@ -159,6 +227,11 @@ export class DepositService {
         paymentData: JSON.stringify({
           createdAt: new Date().toISOString(),
           autoCompleted: true,
+          recordedBy: {
+            userId: actor.userId ?? null,
+            role: actor.role,
+            operatorLocationId: actor.operatorLocationId ?? null,
+          },
         }),
       });
 
@@ -169,10 +242,31 @@ export class DepositService {
         depositPaymentMethod: 'cash',
       });
 
+      // Audit log so we can answer "who recorded this cash deposit?" later.
+      try {
+        await storage.createAuditLog({
+          actorUserId: actor.userId,
+          actorType: actor.role === 'admin' ? 'user' : 'operator',
+          action: 'cash_payment_recorded',
+          entityType: 'payment',
+          entityId: payment.id,
+          afterJson: JSON.stringify({
+            transactionId,
+            locationId,
+            amountCents: depositAmount * 100,
+            role: actor.role,
+          }),
+          ipAddress: actor.ipAddress,
+        });
+      } catch (auditErr) {
+        // Audit failures must never block the actual deposit recording.
+        console.error('Failed to write cash_payment_recorded audit log:', auditErr);
+      }
+
       return {
         success: true,
         paymentId: payment.id,
-        transactionId
+        transactionId,
       };
     } catch (error: any) {
       console.error('Cash payment initiation error:', error);

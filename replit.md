@@ -114,3 +114,17 @@ Preferred communication style: Simple, everyday language.
 - Admin GET endpoint: `GET /api/admin/message-send-logs` (supports optional `locationId` and `limit` query params).
 - Admin UI: A collapsible "Message Send History" card on `/admin/locations` below the location table. Shows a summary strip (sent/failed/skipped counts) and a full scrollable table with color-coded rows. Batch sends are visually grouped. Refreshes automatically every 10s when open, and invalidates on every send.
 - Message compose textareas and preview blocks use `font-sans` instead of `font-mono` for proper Hebrew rendering.
+### Cash Deposit Recording (Operator)
+- `POST /api/cash-payment` is the canonical "record cash deposit" endpoint.
+- Auth: Passport (admin or operator) **or** PIN session (operator). Borrowers and other Passport roles are rejected.
+- `DepositService.initiateCashPayment(transactionId, locationId, actor)` validates: transaction exists, `transaction.locationId === locationId`, operator (non-admin) is scoped to that location. Operators with no `operatorLocationId` are rejected outright (no silent bypass).
+- **Idempotent**: a duplicate call for a transaction that already has a completed cash payment returns the existing `paymentId` instead of creating a second row.
+- **Race-safe**: an in-process `withCashLock(transactionId)` mutex (mirrors `withRefundLock`) serializes concurrent requests on the same transaction. (Single-process only — a multi-instance deploy needs a DB-level partial unique index for full safety.)
+- Every successful call writes an `audit_logs` row (`action='cash_payment_recorded'`, `actorUserId`, `actorType`, `entityType='payment'`, `entityId=<paymentId>`, IP, role+amount in `afterJson`). Audit-write failures are logged but do not fail the request.
+- `/api/deposits/initiate` (the public deposit-creation endpoint) is still public for the Stripe path, but its `cash` branch now requires operator/admin auth and goes through the same lock + service.
+- Operator Deposit Dashboard (`/operator/deposits`) — the "Pending Confirmations" tab/card/bulk-confirm button were removed (cash auto-completes at borrow time, so nothing ever lingers in a confirming state). The dashboard now shows 3 overview cards and 2 tabs (Recent Activity default, Analytics).
+
+### Operator Card Actions (Charge / Decline)
+- `POST /api/operator/transactions/:id/charge` and `.../decline` use the shared `getOperatorLocationId(req)` helper so both Passport operators and PIN-session operators are accepted.
+- Admin (`-1` from the helper) is normalized to `undefined` before being passed to `PayLaterService`, which lets admins act across all locations while operators remain scoped to their own.
+- Non-admin/non-operator Passport users (e.g. borrowers) are rejected.

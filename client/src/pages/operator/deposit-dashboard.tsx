@@ -1,15 +1,11 @@
-import { useState, useEffect } from "react";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Clock, CheckCircle, XCircle, AlertTriangle, DollarSign, TrendingUp, Users, Home, ClipboardList, LogOut } from "lucide-react";
-import { DepositConfirmation } from "@/components/payment/deposit-confirmation";
+import { CheckCircle, XCircle, DollarSign, Users, Home, ClipboardList, LogOut } from "lucide-react";
 import { useOperatorAuth } from "@/hooks/use-operator-auth";
-import { apiRequest, queryClient } from "@/lib/queryClient";
-import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 
 interface Payment {
@@ -38,16 +34,8 @@ interface Transaction {
   notes: string;
 }
 
-interface Location {
-  id: number;
-  name: string;
-  depositAmount: number;
-  processingFeePercent: number;
-}
-
 export default function OperatorDepositDashboard() {
   const { operatorLocation, isLoading: isOperatorLoading, logout } = useOperatorAuth();
-  const { toast } = useToast();
   const { t } = useLanguage();
   const [currentPath, setPath] = useLocation();
 
@@ -82,11 +70,12 @@ export default function OperatorDepositDashboard() {
     },
   });
 
-  // All payments and transactions are already filtered by the backend to the operator's location
+  // Cash deposits now auto-complete at borrow time, so there is no
+  // "confirming" queue to surface here. We show today's activity, totals,
+  // and a payment-method breakdown instead.
   const relevantTransactions = transactions;
   const relevantPayments = payments;
 
-  const pendingConfirmations = relevantPayments.filter(p => p.status === "confirming");
   const todayDeposits = relevantPayments.filter(p => {
     const today = new Date().toDateString();
     return new Date(p.createdAt).toDateString() === today;
@@ -96,43 +85,6 @@ export default function OperatorDepositDashboard() {
   const failedDeposits = relevantPayments.filter(p => p.status === "failed");
 
   const totalDepositValue = completedDeposits.reduce((sum, p) => sum + p.totalAmount, 0);
-  const pendingDepositValue = pendingConfirmations.reduce((sum, p) => sum + p.totalAmount, 0);
-
-  const bulkConfirmMutation = useMutation({
-    mutationFn: async (paymentIds: number[]) => {
-      const results = await Promise.all(
-        paymentIds.map(id => 
-          apiRequest("POST", `/api/payments/${id}/confirm`, { 
-            confirmed: true, 
-            notes: "Bulk confirmation by operator" 
-          })
-        )
-      );
-      return results;
-    },
-    onSuccess: () => {
-      toast({
-        title: t("bulkConfirmationComplete"),
-        description: t("successfullyConfirmedDeposits"),
-      });
-      queryClient.invalidateQueries({ queryKey: ["/api/locations", operatorLocation?.id, "payments"] });
-      queryClient.invalidateQueries({ queryKey: ["/api/locations", operatorLocation?.id, "transactions"] });
-    },
-    onError: () => {
-      toast({
-        title: t("bulkConfirmationFailed"),
-        description: t("someConfirmationsMayHaveFailed"),
-        variant: "destructive",
-      });
-    },
-  });
-
-  const handleBulkConfirm = () => {
-    const cashPayments = pendingConfirmations.filter(p => p.paymentMethod === "cash");
-    if (cashPayments.length > 0) {
-      bulkConfirmMutation.mutate(cashPayments.map(p => p.id));
-    }
-  };
 
   if (paymentsLoading || transactionsLoading || isOperatorLoading) {
     return (
@@ -161,9 +113,9 @@ export default function OperatorDepositDashboard() {
         </div>
         <div className="flex items-center gap-2">
           <Link href="/operator/dashboard">
-            <Button 
-              variant={currentPath === "/operator/dashboard" ? "default" : "outline"} 
-              size="sm" 
+            <Button
+              variant={currentPath === "/operator/dashboard" ? "default" : "outline"}
+              size="sm"
               className="flex items-center gap-2"
             >
               <ClipboardList className="h-4 w-4" />
@@ -171,18 +123,18 @@ export default function OperatorDepositDashboard() {
             </Button>
           </Link>
           <Link href="/operator/deposits">
-            <Button 
-              variant={currentPath === "/operator/deposits" ? "default" : "outline"} 
-              size="sm" 
+            <Button
+              variant={currentPath === "/operator/deposits" ? "default" : "outline"}
+              size="sm"
               className="flex items-center gap-2"
             >
               <DollarSign className="h-4 w-4" />
               {t("deposits")}
             </Button>
           </Link>
-          <Button 
-            variant="ghost" 
-            size="sm" 
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => logout()}
             className="flex items-center gap-2 text-muted-foreground"
           >
@@ -202,20 +154,7 @@ export default function OperatorDepositDashboard() {
       </div>
 
       {/* Overview Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">{t("pendingConfirmations")}</CardTitle>
-            <Clock className="h-4 w-4 text-yellow-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{pendingConfirmations.length}</div>
-            <p className="text-xs text-gray-600">
-              ${(pendingDepositValue / 100).toFixed(2)} {t("totalValue")}
-            </p>
-          </CardContent>
-        </Card>
-
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">{t("todaysDeposits")}</CardTitle>
@@ -256,54 +195,15 @@ export default function OperatorDepositDashboard() {
         </Card>
       </div>
 
-      <Tabs defaultValue="confirmations" className="space-y-4">
+      <Tabs defaultValue="recent" className="space-y-4">
         <TabsList>
-          <TabsTrigger value="confirmations">{t("pendingConfirmations")}</TabsTrigger>
           <TabsTrigger value="recent">{t("recentActivity")}</TabsTrigger>
           <TabsTrigger value="analytics">{t("analytics")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="confirmations" className="space-y-4">
-          {pendingConfirmations.length > 0 && (
-            <div className="flex justify-between items-center">
-              <h2 className="text-xl font-semibold">{t("depositsRequiringConfirmation")}</h2>
-              <Button 
-                onClick={handleBulkConfirm}
-                disabled={bulkConfirmMutation.isPending || pendingConfirmations.filter(p => p.paymentMethod === "cash").length === 0}
-                variant="outline"
-              >
-                {bulkConfirmMutation.isPending ? t("confirming") : t("bulkConfirmCash")}
-              </Button>
-            </div>
-          )}
-
-          {pendingConfirmations.length > 0 ? (
-            <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
-              {pendingConfirmations.map((payment) => (
-                <DepositConfirmation 
-                  key={payment.id} 
-                  payment={payment}
-                  onConfirmed={() => {
-                    queryClient.invalidateQueries({ queryKey: ["/api/locations", operatorLocation?.id, "payments"] });
-                    queryClient.invalidateQueries({ queryKey: ["/api/locations", operatorLocation?.id, "transactions"] });
-                  }}
-                />
-              ))}
-            </div>
-          ) : (
-            <Card>
-              <CardContent className="py-12 text-center">
-                <CheckCircle className="h-12 w-12 text-green-600 mx-auto mb-4" />
-                <h3 className="text-lg font-semibold mb-2">{t("allDepositsConfirmed")}</h3>
-                <p className="text-gray-600">{t("noDepositsRequireConfirmation")}</p>
-              </CardContent>
-            </Card>
-          )}
-        </TabsContent>
-
         <TabsContent value="recent" className="space-y-4">
           <h2 className="text-xl font-semibold">{t("recentDepositActivity")}</h2>
-          
+
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
             <Card>
               <CardHeader>
@@ -369,7 +269,7 @@ export default function OperatorDepositDashboard() {
 
         <TabsContent value="analytics" className="space-y-4">
           <h2 className="text-xl font-semibold">{t("depositAnalytics")}</h2>
-          
+
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card>
               <CardHeader>
@@ -385,8 +285,8 @@ export default function OperatorDepositDashboard() {
                         <span className="capitalize">{method}</span>
                         <div className="flex items-center gap-2">
                           <div className="w-16 bg-gray-200 rounded-full h-2">
-                            <div 
-                              className="bg-blue-600 h-2 rounded-full" 
+                            <div
+                              className="bg-blue-600 h-2 rounded-full"
                               style={{ width: `${percentage}%` }}
                             />
                           </div>
