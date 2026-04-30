@@ -201,8 +201,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await ensureSchemaUpgrades();
   // Task #175 — verify the result in production only. Dev/test boots skip
   // this to avoid noisy logs against ephemeral local DBs.
+  //
+  // Fire-and-forget: do NOT await. The drift check runs ~50 sequential
+  // information_schema queries; on Vercel serverless cold starts that
+  // pushed registerRoutes() past the function timeout, causing every
+  // route (including /api/locations and /api/login) to 500. The check
+  // is purely diagnostic — it only logs / emails on drift — so it's
+  // safe to let it complete in the background after the server is
+  // accepting requests. See incident notes in replit.md (Task #175).
   if (process.env.NODE_ENV === 'production') {
-    await runSchemaDriftCheck().catch((err) => {
+    runSchemaDriftCheck().catch((err) => {
       console.error('[schema-drift] check failed unexpectedly:', err);
     });
   }
@@ -1552,7 +1560,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Resend application confirmation email (admin only)
-  app.post("/api/applications/:id/resend-confirmation", requireRole("admin"), async (req, res) => {
+  app.post("/api/applications/:id/resend-confirmation", requireRole(["admin"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       const application = await storage.getApplication(id);
