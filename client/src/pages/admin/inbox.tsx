@@ -323,6 +323,8 @@ export default function AdminInbox() {
   const [replyText, setReplyText] = useState("");
   const [replySubject, setReplySubject] = useState("");
   const [translations, setTranslations] = useState<Record<string, string>>({});
+  const [brokenLinkWarning, setBrokenLinkWarning] = useState<{ links: { url: string; reason?: string }[]; item: UnifiedItem } | null>(null);
+  const [linkCheckPending, setLinkCheckPending] = useState(false);
   const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
   const [editOpen, setEditOpen] = useState(false);
   const [glossaryOpen, setGlossaryOpen] = useState(false);
@@ -1123,6 +1125,53 @@ export default function AdminInbox() {
     onError: (err: unknown) =>
       toast({ title: t("error"), description: err instanceof Error ? err.message : t("failedToSendReply"), variant: "destructive" }),
   });
+
+  function extractUrls(text: string): string[] {
+    const re = /https?:\/\/[^\s"'<>)\]]+/gi;
+    const matches = text.match(re) ?? [];
+    return Array.from(new Set(matches.map((u) => u.replace(/[.,;:!?]+$/, ""))));
+  }
+
+  async function handleSendClick(item: UnifiedItem) {
+    const urls = extractUrls(replyText);
+    // Always send rawText so the backend can scan for bare-domain blocklist hits
+    // (e.g. "babybanzgemach.com/apply" without an http:// prefix).
+    if (urls.length === 0) {
+      // Still check raw text for blocklisted bare domains even if no http:// URLs present.
+      setLinkCheckPending(true);
+      try {
+        const res = await apiRequest("POST", "/api/admin/check-urls", { urls: [], rawText: replyText });
+        const data: { results: { url: string; ok: boolean; reason?: string }[] } = await res.json();
+        const broken = (data.results ?? []).filter((r) => !r.ok);
+        if (broken.length > 0) {
+          setBrokenLinkWarning({ links: broken, item });
+        } else {
+          sendReplyMutation.mutate(item);
+        }
+      } catch {
+        sendReplyMutation.mutate(item);
+      } finally {
+        setLinkCheckPending(false);
+      }
+      return;
+    }
+    setLinkCheckPending(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/check-urls", { urls, rawText: replyText });
+      const data: { results: { url: string; ok: boolean; reason?: string }[] } = await res.json();
+      const broken = (data.results ?? []).filter((r) => !r.ok);
+      if (broken.length > 0) {
+        setBrokenLinkWarning({ links: broken, item });
+      } else {
+        sendReplyMutation.mutate(item);
+      }
+    } catch {
+      sendReplyMutation.mutate(item);
+    } finally {
+      setLinkCheckPending(false);
+    }
+  }
+
   const [reviewWarning, setReviewWarning] = useState<string | null>(null);
   const [matchedLocation, setMatchedLocation] = useState<{ id: number; name: string } | null>(null);
   const [forwardNote, setForwardNote] = useState("");
@@ -1632,12 +1681,12 @@ export default function AdminInbox() {
                   </Button>
                 </div>
                 <Button
-                  onClick={() => sendReplyMutation.mutate(selected)}
-                  disabled={!replyText.trim() || sendReplyMutation.isPending}
+                  onClick={() => handleSendClick(selected)}
+                  disabled={!replyText.trim() || sendReplyMutation.isPending || linkCheckPending}
                   data-testid="button-send-reply"
                 >
                   <Send className="h-4 w-4 mr-2" />
-                  {sendReplyMutation.isPending ? t("sending") : t("sendReply")}
+                  {sendReplyMutation.isPending ? t("sending") : linkCheckPending ? "Checking links…" : t("sendReply")}
                 </Button>
               </div>
               <p className="text-xs text-muted-foreground">{t("inboxSentFromGemach")}</p>
@@ -1808,6 +1857,44 @@ export default function AdminInbox() {
                   onClick={() => confirmDeleteId !== null && deleteContact.mutate(confirmDeleteId)}
                 >
                   {deleteContact.isPending ? t("deleting") : t("msgDelete")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog open={brokenLinkWarning !== null} onOpenChange={(o) => !o && setBrokenLinkWarning(null)}>
+            <AlertDialogContent data-testid="dialog-broken-link-warning">
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                  Potentially broken link detected
+                </AlertDialogTitle>
+                <AlertDialogDescription asChild>
+                  <div className="space-y-2 text-sm">
+                    <p>The following link{(brokenLinkWarning?.links.length ?? 0) > 1 ? "s" : ""} in your reply could not be verified:</p>
+                    <ul className="space-y-1">
+                      {(brokenLinkWarning?.links ?? []).map(({ url, reason }) => (
+                        <li key={url} className="flex flex-col gap-0.5 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5">
+                          <span className="break-all font-mono text-xs text-foreground">{url}</span>
+                          {reason && <span className="text-xs text-muted-foreground">{reason}</span>}
+                        </li>
+                      ))}
+                    </ul>
+                    <p className="text-muted-foreground">You can go back to fix the link, or send the reply anyway.</p>
+                  </div>
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel data-testid="button-broken-link-go-back">Go back to edit</AlertDialogCancel>
+                <AlertDialogAction
+                  data-testid="button-broken-link-send-anyway"
+                  onClick={() => {
+                    const itemToSend = brokenLinkWarning?.item;
+                    setBrokenLinkWarning(null);
+                    if (itemToSend) sendReplyMutation.mutate(itemToSend);
+                  }}
+                >
+                  Send anyway
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

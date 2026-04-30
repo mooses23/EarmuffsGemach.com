@@ -1,6 +1,9 @@
 import { randomUUID } from 'crypto';
 import type { Express, Request, Response } from "express";
 import { createServer, type Server } from "http";
+import * as _http from 'http';
+import * as _https from 'https';
+import * as _dns from 'dns';
 import { storage } from "./storage.js";
 import { PaymentSyncService } from "./payment-sync.js";
 import { DepositSyncService } from "./deposit-sync.js";
@@ -4241,6 +4244,138 @@ export async function registerRoutes(app: Express): Promise<Server> {
         indexCreated: indexResult.created,
       });
     } catch (e: any) { res.status(500).json({ message: e.message }); }
+  });
+
+  // Check URLs in a draft reply for potential broken links.
+  // Used by the inbox composer to warn the admin before sending.
+  app.post("/api/admin/check-urls", async (req, res) => {
+    if (!req.isAuthenticated()) return res.status(401).json({ message: "Authentication required" });
+    const user = req.user as Express.User;
+    if (!user.isAdmin) return res.status(403).json({ message: "Admin access required" });
+
+    const { urls, rawText } = req.body as { urls?: unknown; rawText?: unknown };
+    if (!Array.isArray(urls)) return res.status(400).json({ message: "urls must be an array" });
+    const safeUrls = urls.filter((u): u is string => typeof u === "string" && u.length < 2048).slice(0, 20);
+
+    // Known-bad domain blocklist (e.g. the domain that caused the original incident).
+    const BLOCKED_DOMAINS = ["babybanzgemach.com"];
+
+    // Also scan raw draft text for bare-domain mentions of blocklisted domains
+    // so we catch "babybanzgemach.com/apply" even without an http:// prefix.
+    const blockedInText: { url: string; ok: boolean; reason: string }[] = [];
+    if (typeof rawText === "string") {
+      for (const domain of BLOCKED_DOMAINS) {
+        const escaped = domain.replace(/\./g, "\\.");
+        const pattern = new RegExp(`(?:^|\\s|[(<])((?:https?:\\/\\/)?(?:www\\.)?${escaped}[^\\s)>]*)`, "gi");
+        let m: RegExpExecArray | null;
+        while ((m = pattern.exec(rawText)) !== null) {
+          const match = m[1].trim();
+          if (match) blockedInText.push({ url: match, ok: false, reason: "domain on blocklist" });
+        }
+      }
+    }
+
+    // Returns true if a dotted-decimal IPv4 address falls in a private/reserved range.
+    function isPrivateIPv4(ip: string): boolean {
+      const parts = ip.split(".").map(Number);
+      if (parts.length !== 4 || parts.some((p) => isNaN(p) || p < 0 || p > 255)) return true; // malformed → treat as unsafe
+      const [a, b, c] = parts;
+      return (
+        a === 0 ||                             // 0.0.0.0/8
+        a === 10 ||                            // 10.0.0.0/8
+        a === 127 ||                           // 127.0.0.0/8 loopback
+        (a === 100 && b >= 64 && b <= 127) ||  // 100.64.0.0/10 shared address space
+        (a === 169 && b === 254) ||            // 169.254.0.0/16 link-local & metadata (AWS/GCP)
+        (a === 172 && b >= 16 && b <= 31) ||   // 172.16.0.0/12
+        (a === 192 && b === 0 && c === 0) ||   // 192.0.0.0/24
+        (a === 192 && b === 0 && c === 2) ||   // 192.0.2.0/24 TEST-NET-1
+        (a === 192 && b === 168) ||            // 192.168.0.0/16
+        (a === 198 && (b === 18 || b === 19)) ||// 198.18.0.0/15
+        (a === 198 && b === 51 && c === 100) || // 198.51.100.0/24 TEST-NET-2
+        (a === 203 && b === 0 && c === 113) ||  // 203.0.113.0/24 TEST-NET-3
+        a >= 224                               // multicast + reserved
+      );
+    }
+
+    const checkOne = (rawUrl: string): Promise<{ url: string; ok: boolean; reason?: string }> => {
+      return new Promise((resolve) => {
+        let parsedUrl: URL;
+        try {
+          parsedUrl = new URL(rawUrl);
+        } catch {
+          return resolve({ url: rawUrl, ok: false, reason: "invalid URL" });
+        }
+        if (!["http:", "https:"].includes(parsedUrl.protocol)) {
+          return resolve({ url: rawUrl, ok: true }); // skip non-http links (mailto:, tel:, etc.)
+        }
+
+        const rawHostname = parsedUrl.hostname.toLowerCase();
+        const hostname = rawHostname.replace(/^www\./, "");
+        if (BLOCKED_DOMAINS.includes(hostname) || BLOCKED_DOMAINS.includes(rawHostname)) {
+          return resolve({ url: rawUrl, ok: false, reason: "domain on blocklist" });
+        }
+
+        // SSRF guard: resolve hostname and reject if it maps to a private/reserved IP.
+        _dns.lookup(parsedUrl.hostname, { family: 4 }, (dnsErr, address) => {
+          if (dnsErr) {
+            // Could not resolve — treat as unreachable/broken.
+            return resolve({ url: rawUrl, ok: false, reason: "DNS resolution failed" });
+          }
+          if (isPrivateIPv4(address)) {
+            return resolve({ url: rawUrl, ok: false, reason: "resolves to a private/reserved IP" });
+          }
+
+          const lib = parsedUrl.protocol === "https:" ? _https : _http;
+          const UA = "BabyBanz-Link-Checker/1.0";
+
+          // Helper: make a single HTTP request and resolve with ok/reason.
+          const makeRequest = (method: string, onResult: (status: number | null, err?: string) => void) => {
+            const timer = setTimeout(() => {
+              try { rr.destroy(); } catch {}
+              onResult(null, "timeout");
+            }, 6000);
+            const opts: Record<string, unknown> = { method, timeout: 6000, headers: { "User-Agent": UA } };
+            if (method === "GET") opts["headers"] = { "User-Agent": UA, "Range": "bytes=0-0" };
+            const rr = lib.request(rawUrl, opts, (resp: { statusCode?: number; resume?: () => void }) => {
+              clearTimeout(timer);
+              try { if (typeof resp.resume === "function") resp.resume(); } catch {} // drain response
+              onResult(resp.statusCode ?? 0);
+            });
+            rr.on("error", (e: Error) => { clearTimeout(timer); onResult(null, e.message); });
+            rr.end();
+          };
+
+          makeRequest("HEAD", (status, err) => {
+            if (err) return resolve({ url: rawUrl, ok: false, reason: err });
+            if (status !== null && status >= 200 && status < 400) {
+              return resolve({ url: rawUrl, ok: true });
+            }
+            // HEAD returned 405 (Method Not Allowed) or 403 — retry with GET.
+            if (status === 405 || status === 403) {
+              makeRequest("GET", (status2, err2) => {
+                if (err2) return resolve({ url: rawUrl, ok: false, reason: err2 });
+                if (status2 !== null && (status2 >= 200 && status2 < 400 || status2 === 206)) {
+                  return resolve({ url: rawUrl, ok: true });
+                }
+                resolve({ url: rawUrl, ok: false, reason: `HTTP ${status2}` });
+              });
+            } else {
+              resolve({ url: rawUrl, ok: false, reason: `HTTP ${status}` });
+            }
+          });
+        });
+      });
+    };
+
+    try {
+      const urlResults = await Promise.all(safeUrls.map(checkOne));
+      // Merge blocklist hits from raw text, deduplicating by url string.
+      const seen = new Set(urlResults.map((r) => r.url));
+      const extra = blockedInText.filter((r) => !seen.has(r.url));
+      res.json({ results: [...urlResults, ...extra] });
+    } catch (e: any) {
+      res.status(500).json({ message: e.message });
+    }
   });
 
   // Send reply to an email
