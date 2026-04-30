@@ -2846,9 +2846,31 @@ function ThreadTranscriptPanel({
                   >
                     {outbound ? t("inboxThreadOutbound") : t("inboxThreadInbound")}
                   </Badge>
-                  <span className="font-medium truncate text-sm" data-testid={`thread-entry-from-${m.id}`}>
-                    {m.from || (outbound ? "us" : "—")}
-                  </span>
+                  {outbound ? (
+                    // Outbound message: show "To: <recipient>" so admins can see
+                    // at a glance who the message went to. Mirror the list-view
+                    // convention: prefer the parsed email over the display name
+                    // for an unambiguous identifier, fall back to raw m.to or
+                    // m.from ("us") when nothing is available.
+                    <>
+                      <span className="text-xs text-muted-foreground flex-shrink-0">To:</span>
+                      <span
+                        className="font-medium truncate text-sm"
+                        title={m.to || undefined}
+                        data-testid={`thread-entry-to-${m.id}`}
+                      >
+                        {(() => {
+                          if (!m.to) return m.from || "—";
+                          const p = parseEmailAddress(m.to);
+                          return p.email || p.name || m.to;
+                        })()}
+                      </span>
+                    </>
+                  ) : (
+                    <span className="font-medium truncate text-sm" data-testid={`thread-entry-from-${m.id}`}>
+                      {m.from || "—"}
+                    </span>
+                  )}
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0 text-xs text-muted-foreground">
                   <Clock className="h-3 w-3" />
