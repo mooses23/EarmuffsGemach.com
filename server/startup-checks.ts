@@ -241,13 +241,24 @@ const REQUIRED_TABLES: Array<{ name: string; addedFor: string }> = [
   { name: 'global_settings', addedFor: 'admin global settings (e.g. AI auto-reply toggle)' },
   { name: 'disputes', addedFor: 'Stripe dispute tracking' },
   { name: 'message_send_logs', addedFor: 'operator message send history (Task #58)' },
-  // Task #175 — these were declared in shared/schema.ts long ago without a
-  // corresponding CREATE in ensureSchemaUpgrades, so prod was missing them.
-  // ensureSchemaUpgrades now creates them idempotently AND drift detection
-  // verifies they exist after upgrade.
-  { name: 'playbook_facts', addedFor: 'AI drafting playbook facts (Task #175 backfill)' },
-  { name: 'faq_entries', addedFor: 'AI drafting FAQ entries (Task #175 backfill)' },
+  { name: 'playbook_facts', addedFor: 'AI drafting playbook facts' },
+  { name: 'faq_entries', addedFor: 'AI drafting FAQ entries' },
 ];
+
+function errMsg(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  return String(err);
+}
+
+interface DbExecuteResult {
+  rows?: Array<{ present?: number }>;
+}
+
+function presentRows(result: unknown): Array<{ present?: number }> {
+  if (Array.isArray(result)) return result as Array<{ present?: number }>;
+  const r = result as DbExecuteResult | null | undefined;
+  return r?.rows ?? [];
+}
 
 export async function runSchemaDriftCheck(): Promise<{
   missingColumns: string[];
@@ -262,17 +273,16 @@ export async function runSchemaDriftCheck(): Promise<{
   let db: typeof import('./db.js').db;
   try {
     ({ db } = await import('./db.js'));
-  } catch (err: any) {
-    introspectionErrors.push(`db import failed: ${err?.message ?? err}`);
-    console.error(
-      `[schema-drift] could not load db client; skipping drift check. ${err?.message ?? err}`
-    );
+  } catch (err) {
+    const m = errMsg(err);
+    introspectionErrors.push(`db import failed: ${m}`);
+    console.error(`[schema-drift] could not load db client; skipping drift check. ${m}`);
     return { missingColumns, missingTables, introspectionErrors };
   }
 
   for (const { table, column, addedFor } of REQUIRED_COLUMNS) {
     try {
-      const result: any = await db.execute(sql`
+      const result = await db.execute(sql`
         SELECT 1 AS present
         FROM information_schema.columns
         WHERE table_schema = 'public'
@@ -280,18 +290,17 @@ export async function runSchemaDriftCheck(): Promise<{
           AND column_name = ${column}
         LIMIT 1
       `);
-      const rows = (result?.rows ?? result) as Array<{ present: number }>;
-      if (!rows || rows.length === 0) {
+      if (presentRows(result).length === 0) {
         missingColumns.push(`${table}.${column}`);
         console.error(
-          `[schema-drift] ERROR: required column "${table}.${column}" is missing in production. ` +
-          `It should have been added by ensureSchemaUpgrades for ${addedFor}. ` +
-          `Routes that read or write this column will return HTTP 500 until the column is added. ` +
-          `Apply: ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} <type>;`
+          `[schema-drift] ERROR: required column "${table}.${column}" is missing (${addedFor}). ` +
+          `Reads/writes will return HTTP 500. ` +
+          `Apply: ALTER TABLE ${table} ADD COLUMN IF NOT EXISTS ${column} <type>; ` +
+          `(see ensureSchemaUpgrades in server/databaseStorage.ts for the exact type.)`
         );
       }
-    } catch (err: any) {
-      const msg = `column "${table}.${column}": ${err?.message ?? err}`;
+    } catch (err) {
+      const msg = `column "${table}.${column}": ${errMsg(err)}`;
       introspectionErrors.push(msg);
       console.error(`[schema-drift] could not introspect ${msg}`);
     }
@@ -299,24 +308,23 @@ export async function runSchemaDriftCheck(): Promise<{
 
   for (const { name, addedFor } of REQUIRED_TABLES) {
     try {
-      const result: any = await db.execute(sql`
+      const result = await db.execute(sql`
         SELECT 1 AS present
         FROM information_schema.tables
         WHERE table_schema = 'public'
           AND table_name = ${name}
         LIMIT 1
       `);
-      const rows = (result?.rows ?? result) as Array<{ present: number }>;
-      if (!rows || rows.length === 0) {
+      if (presentRows(result).length === 0) {
         missingTables.push(name);
         console.error(
-          `[schema-drift] ERROR: required table "${name}" is missing in production. ` +
-          `It should have been created by ensureSchemaUpgrades for ${addedFor}. ` +
-          `Routes that read or write this table will return HTTP 500 until the table is created.`
+          `[schema-drift] ERROR: required table "${name}" is missing (${addedFor}). ` +
+          `Reads/writes will return HTTP 500 until the table is created. ` +
+          `(See CREATE TABLE statement for "${name}" in ensureSchemaUpgrades in server/databaseStorage.ts.)`
         );
       }
-    } catch (err: any) {
-      const msg = `table "${name}": ${err?.message ?? err}`;
+    } catch (err) {
+      const msg = `table "${name}": ${errMsg(err)}`;
       introspectionErrors.push(msg);
       console.error(`[schema-drift] could not introspect ${msg}`);
     }

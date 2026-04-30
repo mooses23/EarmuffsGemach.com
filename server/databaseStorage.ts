@@ -1428,19 +1428,18 @@ let schemaUpgradesRun = false;
 export async function ensureSchemaUpgrades(): Promise<void> {
   if (schemaUpgradesRun) return;
 
-  // Per-statement try/catch — one bad ALTER must NOT short-circuit the rest of
-  // the chain. Without this, a single failure (e.g. on a new Vercel cold start
-  // where a downstream statement fails because it references a column an
-  // earlier statement didn't manage to add) would leave the production schema
-  // permanently behind `shared/schema.ts` and silently keep returning 500s
-  // from the routes that depend on the missing columns. See Task #175.
-  const failures: Array<{ label: string; error: any }> = [];
+  // Per-statement try/catch so one bad ALTER does not short-circuit the rest
+  // of the chain (Task #175). Without this, a single failure could leave
+  // production permanently behind shared/schema.ts and silently 500.
+  const failures: Array<{ label: string; error: unknown }> = [];
+  const errorMessage = (err: unknown): string =>
+    err instanceof Error ? err.message : String(err);
   const safe = async (label: string, action: () => Promise<unknown>): Promise<void> => {
     try {
       await action();
-    } catch (err: any) {
+    } catch (err) {
       failures.push({ label, error: err });
-      console.error(`[ensureSchemaUpgrades] ${label} failed: ${err?.message ?? err}`);
+      console.error(`[ensureSchemaUpgrades] ${label} failed: ${errorMessage(err)}`);
     }
   };
 
@@ -1462,11 +1461,8 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     )
   `));
   await safe("create index return_reminder_events_tx_idx", () => db.execute(sql`CREATE INDEX IF NOT EXISTS return_reminder_events_tx_idx ON return_reminder_events (transaction_id, sent_at DESC)`));
-  // Task #9 + Task #175 tables (drizzle-kit on this project does not run
-  // pg push, so we create them idempotently here so existing DBs pick them
-  // up automatically). playbook_facts and faq_entries were declared in
-  // shared/schema.ts long ago without a corresponding CREATE here, which is
-  // exactly the silent-drift pattern Task #175 is closing.
+  // Idempotent CREATE for tables declared in shared/schema.ts but not
+  // managed by drizzle-kit on this project.
   await safe("create table playbook_facts", () => db.execute(sql`
     CREATE TABLE IF NOT EXISTS playbook_facts (
       id SERIAL PRIMARY KEY,
@@ -1665,12 +1661,7 @@ export async function ensureSchemaUpgrades(): Promise<void> {
     }
   });
 
-  // Only flip the run-once guard if every statement succeeded. If anything
-  // failed we leave the guard at false so the next call (e.g. a fresh cold
-  // start, or the next request after a transient pool error during init)
-  // re-runs the chain. Note: in practice this function is invoked once per
-  // process from registerRoutes, so "retry" really means the next time the
-  // process boots (or the next cold start on Vercel).
+  // Only flip the run-once guard on full success; otherwise retry next boot.
   if (failures.length === 0) {
     schemaUpgradesRun = true;
   } else {
