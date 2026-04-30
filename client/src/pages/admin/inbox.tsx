@@ -127,7 +127,13 @@ function loadPersistedFilters(): PersistedFilterState {
         ? parsed.replyFilter
         : DEFAULT_FILTER_STATE.replyFilter;
     const search = typeof parsed.search === "string" ? parsed.search.slice(0, 500) : DEFAULT_FILTER_STATE.search;
-    return { folder, sourceFilter, readFilter, replyFilter, search };
+    // If the persisted folder is Sent, normalize secondary filters to the same
+    // state that handleFolderChange would produce, so stale filter values from
+    // an older session don't produce an empty-looking Sent view on reload.
+    const normalizedSource: SourceFilter = folder === "sent" ? "email" : sourceFilter;
+    const normalizedRead: ReadFilter = folder === "sent" ? "all" : readFilter;
+    const normalizedReply: ReplyFilter = folder === "sent" ? "all" : replyFilter;
+    return { folder, sourceFilter: normalizedSource, readFilter: normalizedRead, replyFilter: normalizedReply, search };
   } catch {
     return DEFAULT_FILTER_STATE;
   }
