@@ -1468,16 +1468,33 @@ export default function AdminLocations() {
                     </div>
                   )}
                   {selectedCount > 0 && (
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={openSelectedPicker}
-                      disabled={dialogIsPending}
-                      data-testid="button-onboarding-bulk-selected"
-                    >
-                      <Send className="h-4 w-4 mr-1" />
-                      Message Selected ({selectedCount})
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={openSelectedPicker}
+                        disabled={dialogIsPending}
+                        data-testid="button-onboarding-bulk-selected"
+                      >
+                        <Send className="h-4 w-4 mr-1" />
+                        Message Selected ({selectedCount})
+                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="max-w-xs text-xs">
+                            <p>
+                              Only selected locations with at least one contact method (phone or email) will receive a message.
+                            </p>
+                            <p className="mt-1 text-muted-foreground">
+                              Selected locations missing both phone and email are excluded.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                   )}
                 </div>
               </div>
