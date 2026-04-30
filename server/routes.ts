@@ -1508,15 +1508,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedApplication = await storage.updateApplication(id, updates);
 
       if (updates.status && updates.status !== previousStatus) {
-        const actor = req.user as any;
         try {
           await storage.recordApplicationStatusChange({
             applicationId: id,
             previousStatus,
             newStatus: updates.status,
             source: "patch",
-            changedByUserId: actor?.id ?? null,
-            changedByUsername: actor?.username ?? null,
+            changedByUserId: req.user?.id ?? null,
+            changedByUsername: req.user?.username ?? null,
           });
         } catch (auditErr) {
           // Don't fail the request if audit logging fails — but make it loud.
@@ -1632,14 +1631,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const updatedApplication = await storage.updateApplication(id, { status: "approved" });
 
       try {
-        const actor = req.user as any;
         await storage.recordApplicationStatusChange({
           applicationId: id,
           previousStatus,
           newStatus: "approved",
           source: "approve_with_location",
-          changedByUserId: actor?.id ?? null,
-          changedByUsername: actor?.username ?? null,
+          changedByUserId: req.user?.id ?? null,
+          changedByUsername: req.user?.username ?? null,
         });
       } catch (auditErr) {
         console.error("Failed to record application status change (approve-with-location):", auditErr);
