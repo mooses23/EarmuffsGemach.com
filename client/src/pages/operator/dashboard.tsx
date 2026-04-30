@@ -2741,24 +2741,22 @@ export default function OperatorDashboard() {
   }, [isOperatorLoading, operatorLocation, setPath]);
 
   useEffect(() => {
-    if (!operatorLocation) return;
-    const isDefault = (operatorLocation as any).pinIsDefault === true;
-    const suppressKey = `pinPromptSuppressed:${operatorLocation.id}`;
-    const suppressed = typeof window !== "undefined" && localStorage.getItem(suppressKey) === "1";
-    if (isDefault && !suppressed) {
-      setShowPinPrompt(true);
-    }
-  }, [operatorLocation]);
-
-  useEffect(() => {
     if (tourStartedRef.current) return;
     const isDefault = (operatorLocation as any)?.pinIsDefault === true;
     if (!operatorLocation || !isDefault) return;
+
+    const suppressKey = `pinPromptSuppressed:${operatorLocation.id}`;
+    const suppressed = typeof window !== "undefined" && localStorage.getItem(suppressKey) === "1";
+
+    const showPinPromptIfNeeded = () => {
+      if (!suppressed) setTimeout(() => setShowPinPrompt(true), 400);
+    };
+
+    if (suppressed) return;
+
     tourStartedRef.current = true;
 
     const isHe = language === "he";
-
-    let skipped = false;
 
     const driverObj = driver({
       showProgress: true,
@@ -2766,14 +2764,18 @@ export default function OperatorDashboard() {
       progressText: isHe ? "{{current}} מתוך {{total}}" : "{{current}} of {{total}}",
       nextBtnText: isHe ? "הבא ›" : "Next ›",
       prevBtnText: isHe ? "‹ הקודם" : "‹ Back",
-      doneBtnText: isHe ? "שנה PIN ←" : "Change PIN →",
+      doneBtnText: isHe ? "סיים ›" : "Done ›",
+      allowClose: true,
+      stagePadding: 8,
+      stageRadius: 8,
+      popoverClass: "driverjs-popover-mobile",
       onPopoverRender: (popover) => {
         popover.closeButton.textContent = isHe ? "דלג בינתיים" : "Skip for now";
-        popover.closeButton.onclick = () => { skipped = true; driverObj.destroy(); };
+        popover.closeButton.onclick = () => { driverObj.destroy(); };
       },
       onDestroyStarted: () => {
         driverObj.destroy();
-        if (!skipped) setActiveTab("security");
+        showPinPromptIfNeeded();
       },
       steps: [
         {
@@ -3103,7 +3105,7 @@ export default function OperatorDashboard() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[440px]" data-testid="dialog-pin-default-prompt">
+        <DialogContent className="w-full max-w-sm mx-auto sm:max-w-[440px] animate-in fade-in-0 zoom-in-95 duration-200" data-testid="dialog-pin-default-prompt">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <KeyRound className="h-5 w-5 text-amber-500" />
@@ -3122,9 +3124,10 @@ export default function OperatorDashboard() {
               {t("pinDefaultDontRemind")}
             </Label>
           </div>
-          <DialogFooter className="gap-2 sm:gap-2">
+          <DialogFooter className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <Button
               variant="outline"
+              className="w-full sm:w-auto"
               onClick={() => {
                 if (suppressPinPrompt && operatorLocation) {
                   localStorage.setItem(`pinPromptSuppressed:${operatorLocation.id}`, "1");
@@ -3136,6 +3139,7 @@ export default function OperatorDashboard() {
               {t("pinDefaultLater")}
             </Button>
             <Button
+              className="w-full sm:w-auto"
               onClick={() => {
                 setShowPinPrompt(false);
                 setActiveTab("security");

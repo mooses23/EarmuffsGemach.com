@@ -409,3 +409,9 @@ html {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(100, 116, 139, 0.7);
 }
+
+/* driver.js mobile-friendly popover */
+.driverjs-popover-mobile {
+  max-width: min(340px, 90vw) !important;
+  width: min(340px, 90vw) !important;
+}
