@@ -2872,9 +2872,13 @@ function ThreadTranscriptPanel({
                           // the selected row's recipient (covers saved-only
                           // outbound replies that have no `to`) before giving
                           // up to a placeholder — never show m.from ("us").
+                          // Render the full "Name <email>" when both exist so
+                          // the detail view (which has more horizontal space
+                          // than the list row) shows the complete recipient.
                           const raw = m.to || selected.toAddress;
                           if (!raw) return "—";
                           const p = parseEmailAddress(raw);
+                          if (p.name && p.email) return `${p.name} <${p.email}>`;
                           return p.email || p.name || raw;
                         })()}
                       </span>
