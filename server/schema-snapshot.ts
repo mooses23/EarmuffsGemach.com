@@ -23,7 +23,20 @@ import {
 } from '../scripts/schema-snapshot.mjs';
 import { sendNewEmail } from './gmail-client.js';
 import { DEFAULT_ADMIN_EMAIL } from './config-defaults.js';
-import { log } from './vite.js';
+
+// Inlined from server/vite.ts on purpose: importing from './vite.js' here
+// pulls vite.config into the Vercel serverless bundle, which fails to
+// resolve at runtime ("Cannot find module '/var/task/vite.config'") and
+// kills every route. Keep this in sync with the log() in vite.ts.
+function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 
 // We resolve the snapshot path from process.cwd() instead of importing the
 // SNAPSHOT_PATH constant from the .mjs. The .mjs computes its constant from

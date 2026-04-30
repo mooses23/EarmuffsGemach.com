@@ -21,12 +21,25 @@
  */
 
 import { sql } from 'drizzle-orm';
-import { log } from './vite.js';
 // NOTE: `db` is imported dynamically inside runSchemaDriftCheck() so that
 // importing this module early does not trigger db.ts's DATABASE_URL guard
 // before runStartupChecks() can print its friendly env-validation report.
 import { getTwilioConfigStatus, getTwilioWhatsAppConfigStatus } from './twilio-client.js';
 import { getGmailConfigStatus } from './gmail-client.js';
+
+// Inlined from server/vite.ts on purpose: importing from './vite.js' here
+// pulls vite.config into the Vercel serverless bundle, which fails to
+// resolve at runtime ("Cannot find module '/var/task/vite.config'") and
+// kills every route. Keep this in sync with the log() in vite.ts.
+function log(message: string, source = "express") {
+  const formattedTime = new Date().toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: true,
+  });
+  console.log(`${formattedTime} [${source}] ${message}`);
+}
 import {
   DEFAULT_SITE_URL,
   DEFAULT_DRAFT_MODEL,
