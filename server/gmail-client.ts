@@ -187,7 +187,7 @@ function getHeader(headers: { name?: string | null; value?: string | null }[], n
   return header?.value || '';
 }
 
-export function extractBody(payload: any): string {
+function extractBody(payload: any): string {
   if (payload.body?.data) {
     return decodeBase64Url(payload.body.data);
   }

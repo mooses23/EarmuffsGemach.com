@@ -26,7 +26,6 @@ export function AdminNavTabs() {
     { label: t('paymentMethodsLabel'), href: "/admin/payment-methods" },
     { label: t('paymentStatusMonitor'), href: "/admin/payment-status" },
     { label: t('docsTab'), href: "/admin/glossary" },
-    { label: "[TEMP] Link Correction", href: "/admin/mass-correction" },
   ];
 
   const isActive = (href: string) => {
