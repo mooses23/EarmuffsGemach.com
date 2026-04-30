@@ -2771,7 +2771,10 @@ export default function OperatorDashboard() {
       popoverClass: "driverjs-popover-mobile",
       onPopoverRender: (popover) => {
         popover.closeButton.textContent = isHe ? "דלג בינתיים" : "Skip for now";
-        popover.closeButton.onclick = () => { driverObj.destroy(); };
+        popover.closeButton.onclick = () => {
+          showPinPromptIfNeeded();
+          driverObj.destroy();
+        };
       },
       onDestroyStarted: () => {
         driverObj.destroy();
@@ -2795,6 +2798,8 @@ export default function OperatorDashboard() {
             description: isHe
               ? "כאן תראה כמה אטמי אוזניים יש לך במלאי, כמה הושאלו, וכמה פיקדונות מוחזקים."
               : "See how many earmuffs are in stock, how many are out on loan, and the total deposits you're holding.",
+            side: "over" as any,
+            align: "center",
           },
         },
         {
@@ -2804,6 +2809,8 @@ export default function OperatorDashboard() {
             description: isHe
               ? "השתמש בלשוניות אלה כדי להשאיל אטמים, לרשום החזרות ולנהל את האבטחה שלך."
               : "Use these tabs to lend earmuffs to families, record returns, and manage your account security.",
+            side: "over" as any,
+            align: "center",
           },
         },
         {
@@ -2813,6 +2820,8 @@ export default function OperatorDashboard() {
             description: isHe
               ? "כשהמלאי שלך אוזל, השתמש בהוראות אלה כדי להזמין עוד אטמי בייבי בנז. שמור דף זה בסימנייה!"
               : "When your stock runs low, use these instructions to reorder Baby Banz earmuffs. Bookmark this page for easy access!",
+            side: "over" as any,
+            align: "center",
           },
         },
         {
@@ -2822,6 +2831,8 @@ export default function OperatorDashboard() {
             description: isHe
               ? "ה-PIN שלך עדיין הוא ברירת המחדל 1234. שנה אותו עכשיו כדי לאבטח את החשבון שלך. הסיור הזה יופיע בכל כניסה עד שתשנה את ה-PIN."
               : "Your PIN is still the default 1234. Change it now to secure your account. This tour will appear every login until you do.",
+            side: "over" as any,
+            align: "center",
           },
         },
       ],
