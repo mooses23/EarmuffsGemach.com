@@ -41,6 +41,16 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -80,6 +90,7 @@ import {
   MessageSquare,
   MessageCircle,
   AlertTriangle,
+  AlertCircle,
   ExternalLink,
   ChevronDown,
   ChevronRight,
@@ -603,6 +614,12 @@ export default function AdminLocations() {
   const [sendFailures, setSendFailures] = useState<Array<{ name: string; error: string }>>([]);
   const [sendReport, setSendReport] = useState<{ sent: number; failed: number; skipped: number; eligible?: number } | null>(null);
   const [sendHistoryOpen, setSendHistoryOpen] = useState(false);
+  // Broken-link warning state for bulk campaigns. The pending action is invoked
+  // when the admin clicks "Send anyway" after seeing the warning.
+  const [brokenLinkWarning, setBrokenLinkWarning] = useState<
+    { links: { url: string; reason?: string }[]; onConfirm: () => void } | null
+  >(null);
+  const [linkCheckPending, setLinkCheckPending] = useState(false);
 
   const sendHistoryQuery = useQuery<MessageSendLog[]>({
     queryKey: ["/api/admin/message-send-logs"],
@@ -987,6 +1004,38 @@ export default function AdminLocations() {
     setWelcomeDialogOpen(true);
   };
 
+  // Extract http(s) URLs from a draft message body (mirrors inbox composer logic).
+  function extractUrls(text: string): string[] {
+    const re = /https?:\/\/[^\s"'<>)\]]+/gi;
+    const matches = text.match(re) ?? [];
+    return Array.from(new Set(matches.map((u) => u.replace(/[.,;:!?]+$/, ""))));
+  }
+
+  // Probes the bulk message body for broken or blocklisted links via the same
+  // /api/admin/check-urls endpoint the inbox composer uses. If any link comes
+  // back not-ok, we surface the warning dialog and defer sending until the
+  // admin confirms "Send anyway". On network/check failure we fail open and
+  // proceed with the send rather than blocking the campaign.
+  const runCheckUrlsAndSend = async (proceed: () => void) => {
+    const draftText = messageBody;
+    const urls = extractUrls(draftText);
+    setLinkCheckPending(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/check-urls", { urls, rawText: draftText });
+      const data: { results: { url: string; ok: boolean; reason?: string }[] } = await res.json();
+      const broken = (data.results ?? []).filter((r) => !r.ok);
+      if (broken.length > 0) {
+        setBrokenLinkWarning({ links: broken, onConfirm: proceed });
+      } else {
+        proceed();
+      }
+    } catch {
+      proceed();
+    } finally {
+      setLinkCheckPending(false);
+    }
+  };
+
   const sendFromDialog = () => {
     if (!welcomeTarget) return;
     if (welcomeTarget.kind === "single") {
@@ -998,13 +1047,18 @@ export default function AdminLocations() {
         customMessage: isCustomMessage,
       });
     } else if (welcomeTarget.kind === "selected") {
-      sendBulkStream({ locationIds: Array.from(selectedIds), channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
+      const ids = Array.from(selectedIds);
+      runCheckUrlsAndSend(() =>
+        sendBulkStream({ locationIds: ids, channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage }),
+      );
     } else {
-      sendAllStream({ channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage });
+      runCheckUrlsAndSend(() =>
+        sendAllStream({ channel: welcomeChannel, rememberAsDefault, messageBody: messageBody.trim() || undefined, customMessage: isCustomMessage }),
+      );
     }
   };
 
-  const dialogIsPending = sendWelcomeOneMutation.isPending || sendAllNotOnboardedMutation.isPending || !!streamState;
+  const dialogIsPending = sendWelcomeOneMutation.isPending || sendAllNotOnboardedMutation.isPending || !!streamState || linkCheckPending;
 
   const toggleSelectAll = (checked: boolean, visibleIds: number[]) => {
     if (checked) setSelectedIds(new Set(visibleIds));
@@ -2570,9 +2624,11 @@ export default function AdminLocations() {
                 <>
                   <Button variant="outline" onClick={() => setWelcomeDialogOpen(false)} disabled={dialogIsPending}>Cancel</Button>
                   <Button onClick={sendFromDialog} disabled={dialogIsPending} data-testid="button-send-welcome-confirm">
-                    {dialogIsPending
-                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</>
-                      : <><Send className="h-4 w-4 mr-2" />Send Message</>
+                    {linkCheckPending
+                      ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Checking links…</>
+                      : dialogIsPending
+                        ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Sending…</>
+                        : <><Send className="h-4 w-4 mr-2" />Send Message</>
                     }
                   </Button>
                 </>
@@ -2580,6 +2636,45 @@ export default function AdminLocations() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Broken-link warning for bulk campaigns — mirrors the inbox composer dialog. */}
+        <AlertDialog open={brokenLinkWarning !== null} onOpenChange={(o) => !o && setBrokenLinkWarning(null)}>
+          <AlertDialogContent data-testid="dialog-bulk-broken-link-warning">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <AlertCircle className="h-5 w-5 text-destructive" />
+                Potentially broken link detected
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-2 text-sm">
+                  <p>The following link{(brokenLinkWarning?.links.length ?? 0) > 1 ? "s" : ""} in your bulk message could not be verified:</p>
+                  <ul className="space-y-1">
+                    {(brokenLinkWarning?.links ?? []).map(({ url, reason }) => (
+                      <li key={url} className="flex flex-col gap-0.5 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5">
+                        <span className="break-all font-mono text-xs text-foreground">{url}</span>
+                        {reason && <span className="text-xs text-muted-foreground">{reason}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="text-muted-foreground">You can go back to fix the link, or send the campaign anyway.</p>
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel data-testid="button-bulk-broken-link-go-back">Go back to edit</AlertDialogCancel>
+              <AlertDialogAction
+                data-testid="button-bulk-broken-link-send-anyway"
+                onClick={() => {
+                  const proceed = brokenLinkWarning?.onConfirm;
+                  setBrokenLinkWarning(null);
+                  if (proceed) proceed();
+                }}
+              >
+                Send anyway
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         {/* PIN Change Dialog */}
         <Dialog open={isPinDialogOpen} onOpenChange={(open) => {
