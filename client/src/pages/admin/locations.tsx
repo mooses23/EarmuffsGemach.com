@@ -91,6 +91,7 @@ import {
   Settings,
   Bell,
   Globe,
+  Info,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 
@@ -1401,21 +1402,55 @@ export default function AdminLocations() {
                 {/* Bulk welcome action buttons */}
                 <div className="flex flex-wrap gap-2 shrink-0">
                   {eligibleNotOnboarded.length > 0 ? (
-                    <Button
-                      variant="default"
-                      size="sm"
-                      onClick={openAllNotOnboardedPicker}
-                      disabled={dialogIsPending}
-                      data-testid="button-onboarding-all-not-onboarded"
-                    >
-                      <Send className="h-4 w-4 mr-1" />
-                      Message Locations ({eligibleNotOnboarded.length})
-                    </Button>
+                    <div className="flex items-center gap-1">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={openAllNotOnboardedPicker}
+                        disabled={dialogIsPending}
+                        data-testid="button-onboarding-all-not-onboarded"
+                      >
+                        <Send className="h-4 w-4 mr-1" />
+                        Message Locations ({eligibleNotOnboarded.length})
+                      </Button>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="max-w-xs text-xs">
+                            <p>
+                              Counts locations that haven't been onboarded yet and have at least one contact method (phone or email).
+                            </p>
+                            <p className="mt-1 text-muted-foreground">
+                              Excluded: already onboarded locations, and locations missing both a phone number and email address.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                   ) : (
-                    <Badge variant="outline" className="text-xs font-normal border-green-500 text-green-700 bg-green-50">
-                      <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
-                      All locations set up
-                    </Badge>
+                    <div className="flex items-center gap-1">
+                      <Badge variant="outline" className="text-xs font-normal border-green-500 text-green-700 bg-green-50">
+                        <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
+                        All locations set up
+                      </Badge>
+                      <TooltipProvider>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <Info className="h-4 w-4 text-muted-foreground cursor-help shrink-0" />
+                          </TooltipTrigger>
+                          <TooltipContent side="bottom" className="max-w-xs text-xs">
+                            <p>
+                              All eligible locations have already been onboarded.
+                            </p>
+                            <p className="mt-1 text-muted-foreground">
+                              Eligible locations are those not yet onboarded with at least one contact method (phone or email). Locations missing both are excluded.
+                            </p>
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </div>
                   )}
                   {selectedCount > 0 && (
                     <Button
