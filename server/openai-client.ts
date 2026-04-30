@@ -37,7 +37,7 @@ export function __setOpenAIClientForTests(stubs: {
   if (stubs.embed !== undefined) embedCreate = stubs.embed ?? realEmbedCreate;
 }
 
-const SITE_URL = process.env.SITE_URL || 'https://babybanzgemach.com';
+const SITE_URL = process.env.SITE_URL || 'https://earmuffsgemach.com';
 const DRAFT_MODEL = process.env.OPENAI_DRAFT_MODEL || 'gpt-4o';
 const EMBED_MODEL = process.env.OPENAI_EMBED_MODEL || 'text-embedding-3-small';
 const CONFIDENCE_THRESHOLD = 0.6;
@@ -295,6 +295,63 @@ export async function seedKnowledgeDocs(): Promise<{ created: number; skipped: n
     console.warn('seedKnowledgeDocs failed:', err instanceof Error ? err.message : String(err));
   }
   return { created, skipped, updated };
+}
+
+const OLD_DOMAIN = 'babybanzgemach.com';
+const NEW_DOMAIN = 'earmuffsgemach.com';
+
+// Idempotent one-time migration: replace all occurrences of the old domain
+// with the new domain across every row in the AI knowledge base (knowledge docs,
+// playbook facts, and FAQ entries) and re-index their embeddings so the vector
+// store also reflects the corrected text. Safe to run on every startup.
+export async function migrateDomainInKnowledgeBase(): Promise<{ updated: number }> {
+  let updated = 0;
+  const reindexPromises: Promise<void>[] = [];
+  try {
+    const docs = await storage.getAllKnowledgeDocs().catch(() => [] as KnowledgeDoc[]);
+    for (const d of docs) {
+      if (!d.body.includes(OLD_DOMAIN)) continue;
+      const newBody = d.body.split(OLD_DOMAIN).join(NEW_DOMAIN);
+      const patched = await storage.updateKnowledgeDoc(d.id, { body: newBody });
+      if (patched) reindexPromises.push(reindexDoc(patched));
+      updated++;
+    }
+
+    const facts = await storage.getAllPlaybookFacts().catch(() => []);
+    for (const f of facts) {
+      if (!f.factValue.includes(OLD_DOMAIN)) continue;
+      const newValue = f.factValue.split(OLD_DOMAIN).join(NEW_DOMAIN);
+      const patched = await storage.updatePlaybookFact(f.id, { factValue: newValue });
+      if (patched) reindexPromises.push(reindexFact(patched));
+      updated++;
+    }
+
+    const faqs = await storage.getAllFaqEntries().catch(() => [] as FaqEntry[]);
+    for (const faq of faqs) {
+      const answerHit = faq.answer.includes(OLD_DOMAIN);
+      const questionHit = faq.question.includes(OLD_DOMAIN);
+      if (!answerHit && !questionHit) continue;
+      const newAnswer = answerHit ? faq.answer.split(OLD_DOMAIN).join(NEW_DOMAIN) : faq.answer;
+      const newQuestion = questionHit ? faq.question.split(OLD_DOMAIN).join(NEW_DOMAIN) : faq.question;
+      const patched = await storage.updateFaqEntry(faq.id, { answer: newAnswer, question: newQuestion });
+      if (patched) reindexPromises.push(reindexFaq(patched));
+      updated++;
+    }
+
+    if (reindexPromises.length > 0) {
+      const results = await Promise.allSettled(reindexPromises);
+      const failures = results.filter(r => r.status === 'rejected').length;
+      if (failures > 0) {
+        console.warn(`[domain-migration] ${failures} reindex operation(s) failed — embeddings may be stale.`);
+      }
+    }
+  } catch (err) {
+    console.warn('migrateDomainInKnowledgeBase failed:', err instanceof Error ? err.message : String(err));
+  }
+  if (updated > 0) {
+    console.log(`[domain-migration] Updated ${updated} knowledge base record(s): ${OLD_DOMAIN} → ${NEW_DOMAIN}`);
+  }
+  return { updated };
 }
 
 export async function backfillEmbeddings(): Promise<{ scanned: number; created: number }> {

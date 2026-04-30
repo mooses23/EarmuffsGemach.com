@@ -32,6 +32,7 @@ import { groupContactsByThread } from "./inbox-threading.js";
 import {
   generateEmailResponse, translateText, generateWelcomeOpener,
   reindexFact, reindexFaq, reindexDoc, reindexReplyExample, backfillEmbeddings, seedKnowledgeDocs,
+  migrateDomainInKnowledgeBase,
 } from "./openai-client.js";
 import { z } from "zod";
 import { computeReplyWasEdited } from "./reply-edit-detection.js";
@@ -101,7 +102,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   await ensureSchemaUpgrades();
   // Idempotent: seeds /rules + common scenarios docs on first boot so the AI
   // has authoritative long-form context out of the box. Safe to call every start.
-  seedKnowledgeDocs().catch(() => {});
+  // Chain migrateDomainInKnowledgeBase immediately after so any newly-created
+  // docs are also covered by the domain replacement pass.
+  seedKnowledgeDocs()
+    .then(() => migrateDomainInKnowledgeBase())
+    .catch(() => {});
 
   // Helper to check operator authorization - supports both Passport auth and PIN-based session
   function getOperatorLocationId(req: any): number | null {
