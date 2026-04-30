@@ -8,8 +8,25 @@ test-results
 playwright-report
 .playwright
 
-# Ad-hoc Twilio SMS log exports — contain the Twilio Account SID in the
-# filename and customer PII (phone numbers, names) in the body. These get
-# auto-saved into attached_assets/ by Replit checkpoints; never commit them.
-attached_assets/sms-log-*.csv
-attached_assets/sms-log-AC*.csv
+# ---------------------------------------------------------------------------
+# Twilio SMS / messaging-log exports.
+#
+# Replit's "Saved your changes before starting work" auto-checkpoint will
+# happily snapshot anything sitting in attached_assets/, and Twilio's
+# Console export drops files like:
+#   sms-log-AC<32 hex chars>.csv     <- contains the Account SID + PII
+#   messages-AC<32 hex chars>.csv
+#   sms-log-2026-04-30.csv
+# straight into that directory if you "attach" them in chat. Once a file is
+# tracked, pushing to GitHub leaks the SID and customer phone numbers.
+#
+# Policy: never commit raw Twilio CSV exports. Drop them under
+# /tmp/sms-exports/ instead (see docs/sms-exports.md). The patterns below
+# are intentionally broad so a slightly-renamed export (e.g. "messages.csv"
+# or "twilio-export.csv") is still caught before it can be staged.
+# ---------------------------------------------------------------------------
+attached_assets/*.csv
+attached_assets/sms-log-*
+attached_assets/messages-*
+attached_assets/twilio-*
+attached_assets/*AC*.csv
