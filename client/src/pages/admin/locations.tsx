@@ -1039,13 +1039,20 @@ export default function AdminLocations() {
   const sendFromDialog = () => {
     if (!welcomeTarget) return;
     if (welcomeTarget.kind === "single") {
-      sendWelcomeOneMutation.mutate({
-        id: welcomeTarget.id,
-        channel: welcomeChannel,
-        rememberAsDefault,
-        messageBody: messageBody.trim() || undefined,
-        customMessage: isCustomMessage,
-      });
+      const trimmedBody = messageBody.trim();
+      const proceed = () =>
+        sendWelcomeOneMutation.mutate({
+          id: welcomeTarget.id,
+          channel: welcomeChannel,
+          rememberAsDefault,
+          messageBody: trimmedBody || undefined,
+          customMessage: isCustomMessage,
+        });
+      if (trimmedBody) {
+        runCheckUrlsAndSend(proceed);
+      } else {
+        proceed();
+      }
     } else if (welcomeTarget.kind === "selected") {
       const ids = Array.from(selectedIds);
       runCheckUrlsAndSend(() =>
@@ -2637,7 +2644,7 @@ export default function AdminLocations() {
           </DialogContent>
         </Dialog>
 
-        {/* Broken-link warning for bulk campaigns — mirrors the inbox composer dialog. */}
+        {/* Broken-link warning shown before sending welcome messages (single or bulk) — mirrors the inbox composer dialog. */}
         <AlertDialog open={brokenLinkWarning !== null} onOpenChange={(o) => !o && setBrokenLinkWarning(null)}>
           <AlertDialogContent data-testid="dialog-bulk-broken-link-warning">
             <AlertDialogHeader>
@@ -2647,7 +2654,7 @@ export default function AdminLocations() {
               </AlertDialogTitle>
               <AlertDialogDescription asChild>
                 <div className="space-y-2 text-sm">
-                  <p>The following link{(brokenLinkWarning?.links.length ?? 0) > 1 ? "s" : ""} in your bulk message could not be verified:</p>
+                  <p>The following link{(brokenLinkWarning?.links.length ?? 0) > 1 ? "s" : ""} in your message could not be verified:</p>
                   <ul className="space-y-1">
                     {(brokenLinkWarning?.links ?? []).map(({ url, reason }) => (
                       <li key={url} className="flex flex-col gap-0.5 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5">
