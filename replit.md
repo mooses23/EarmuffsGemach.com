@@ -38,8 +38,9 @@ Preferred communication style: Simple, everyday language.
 - **Invite Code System**: For user registration.
 
 ### Payment Processing
-- **Unified Deposit System**: $20 refundable deposit model with role-based access control for payment confirmation.
+- **Unified Deposit System**: $20 refundable deposit model.
 - **Multiple Payment Methods**: Supports Stripe, PayPal, cash, etc.
+- **Cash Deposits Auto-Complete**: Cash is collected in person at borrow time, so cash payments are recorded as `completed` immediately (no admin/operator confirmation step). The legacy `/admin/payment-confirmations` page has been removed; that route now redirects to `/admin/transactions`. A startup backfill (`server/backfill-cash-payments.ts`) flips any leftover `confirming`/`pending` cash rows to `completed` and corrects their transaction's `depositPaymentMethod`.
 - **Pay Later System**: Card verification without immediate charge via Stripe SetupIntents, charging only if items are damaged or not returned. This minimizes transaction fees for successful returns.
 - **Refund System**: Role-based access control for processing full or partial refunds, aligned with deposit system.
 

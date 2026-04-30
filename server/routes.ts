@@ -2541,21 +2541,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       const depositAmount = location.depositAmount || 20;
       
-      // Create cash payment record - requires confirmation
+      // Cash deposits are collected in person at borrow time, so we mark
+      // them completed immediately. No admin confirmation step is needed.
       const payment = await storage.createPayment({
         transactionId,
         paymentMethod: "cash",
         depositAmount: depositAmount * 100,
         processingFee: 0, // No processing fee for cash
         totalAmount: depositAmount * 100,
-        status: "confirming" // Requires manual confirmation even for cash
+        status: "completed"
       });
-      
+
+      // Keep the transaction's depositPaymentMethod in sync (was 'pending'
+      // for newly created transactions) so reports show 'cash' right away.
+      await storage.updateTransaction(transactionId, {
+        depositPaymentMethod: "cash",
+      });
+
       res.json({
         paymentId: payment.id,
-        status: "confirming",
+        status: "completed",
         amount: depositAmount * 100,
-        message: "Payment created - requires confirmation"
+        message: "Cash deposit recorded"
       });
     } catch (error) {
       console.error("Error processing cash payment:", error);

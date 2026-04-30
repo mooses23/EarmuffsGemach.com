@@ -5,6 +5,7 @@ import { WebhookHandlers } from "./webhookHandlers.js";
 import { DepositService } from "./depositService.js";
 import { getTwilioConfigStatus } from "./twilio-client.js";
 import { startRefundReconciliation } from "./refund-reconciliation.js";
+import { backfillPendingCashPayments } from "./backfill-cash-payments.js";
 
 const app = express();
 
@@ -112,5 +113,6 @@ app.use((req, res, next) => {
       log('WARNING: APP_URL/SITE_URL is not set; SMS reminders will fail in production.');
     }
     startRefundReconciliation();
+    void backfillPendingCashPayments();
   });
 })();

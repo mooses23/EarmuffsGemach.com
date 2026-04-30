@@ -39,7 +39,6 @@ const AdminLocations = lazy(() => import("@/pages/admin/locations"));
 const AdminTransactions = lazy(() => import("@/pages/admin/transactions"));
 const AdminApplications = lazy(() => import("@/pages/admin/applications"));
 const AdminPaymentMethods = lazy(() => import("@/pages/admin/payment-methods"));
-const PaymentConfirmations = lazy(() => import("@/pages/admin/payment-confirmations"));
 const PaymentStatusMonitor = lazy(() => import("@/pages/admin/payment-status-monitor"));
 const AdminInbox = lazy(() => import("@/pages/admin/inbox"));
 const AdminGlossary = lazy(() => import("@/pages/admin/glossary"));
@@ -92,13 +91,13 @@ function LayoutRouter() {
         <ProtectedRoute path="/admin/transactions" component={withAdminLayout(AdminTransactions)} requiredRole="admin" />
         <ProtectedRoute path="/admin/applications" component={withAdminLayout(AdminApplications)} requiredRole="admin" />
         <ProtectedRoute path="/admin/payment-methods" component={withAdminLayout(AdminPaymentMethods)} requiredRole="admin" />
-        <ProtectedRoute path="/admin/payment-confirmations" component={withAdminLayout(PaymentConfirmations)} requiredRole="admin" />
         <ProtectedRoute path="/admin/payment-status" component={withAdminLayout(PaymentStatusMonitor)} requiredRole="admin" />
         <ProtectedRoute path="/admin/inbox" component={withAdminLayout(AdminInbox)} requiredRole="admin" />
         <ProtectedRoute path="/admin/glossary" component={withAdminLayout(AdminGlossary)} requiredRole="admin" />
         <ProtectedRoute path="/admin/analytics" component={withAdminLayout(AdminAnalytics)} requiredRole="admin" />
         <Route path="/admin/emails">{() => <Redirect to="/admin/inbox" />}</Route>
         <Route path="/admin/messages">{() => <Redirect to="/admin/inbox" />}</Route>
+        <Route path="/admin/payment-confirmations">{() => <Redirect to="/admin/transactions" />}</Route>
         
         {/* Operator Routes - Use localStorage-based auth via useOperatorAuth hook */}
         <Route path="/operator/login" component={OperatorLogin} />

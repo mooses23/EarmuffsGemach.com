@@ -145,6 +145,9 @@ export class DepositService {
 
       const depositAmount = location.depositAmount || 20;
 
+      // Cash deposits are handed over in person at borrow time, so we record
+      // them as completed immediately rather than parking them in a
+      // "confirming" queue waiting for an admin to click a button.
       const payment = await storage.createPayment({
         transactionId,
         paymentMethod: 'cash',
@@ -152,11 +155,18 @@ export class DepositService {
         depositAmount: depositAmount * 100,
         processingFee: 0,
         totalAmount: depositAmount * 100,
-        status: 'confirming',
+        status: 'completed',
         paymentData: JSON.stringify({
           createdAt: new Date().toISOString(),
-          requiresConfirmation: true
-        })
+          autoCompleted: true,
+        }),
+      });
+
+      // Mirror the post-confirmation step from confirmPayment(): mark the
+      // transaction's depositPaymentMethod as 'cash' so reports/UI no longer
+      // show it as 'pending'.
+      await storage.updateTransaction(transactionId, {
+        depositPaymentMethod: 'cash',
       });
 
       return {

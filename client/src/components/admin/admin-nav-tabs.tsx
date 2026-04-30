@@ -22,7 +22,6 @@ export function AdminNavTabs() {
 
   const secondaryTabs = [
     { label: t('inboxTitle'), href: "/admin/inbox" },
-    { label: t('paymentConfirmations'), href: "/admin/payment-confirmations" },
     { label: t('paymentMethodsLabel'), href: "/admin/payment-methods" },
     { label: t('paymentStatusMonitor'), href: "/admin/payment-status" },
     { label: t('docsTab'), href: "/admin/glossary" },
