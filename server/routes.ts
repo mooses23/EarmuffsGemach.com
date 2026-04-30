@@ -68,6 +68,7 @@ import {
   insertKnowledgeDocSchema,
   operatorLoginSchema,
   HEADBAND_COLORS,
+  APPLICATION_STATUSES,
   type InsertReplyExample,
   type Contact,
   type Location as LocationRow,
@@ -1410,7 +1411,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // APPLICATIONS ROUTES
-  app.get("/api/applications", async (req, res) => {
+  // Admin-only — applicant rows contain PII (name, email, phone, address,
+  // free-text message). Public form posts are still allowed below.
+  app.get("/api/applications", requireRole(["admin"]), async (req, res) => {
     try {
       const applications = await storage.getAllApplications();
       res.json(applications);
@@ -1469,20 +1472,77 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  app.patch("/api/applications/:id", async (req, res) => {
+  // Admin-only update for an application. Body is restricted to a small
+  // allow-list so a forgotten/over-broad PATCH cannot silently rewrite
+  // applicant data. Status transitions are recorded in the audit log so
+  // we can always trace who changed what — and recover from mistakes.
+  const patchApplicationBodySchema = z.object({
+    status: z.enum(APPLICATION_STATUSES).optional(),
+  }).strict();
+
+  app.patch("/api/applications/:id", requireRole(["admin"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ message: "Invalid application id" });
+      }
+
+      const parsedBody = patchApplicationBodySchema.safeParse(req.body);
+      if (!parsedBody.success) {
+        return res.status(400).json({
+          message: "Invalid update payload",
+          errors: parsedBody.error.errors,
+        });
+      }
+      const updates = parsedBody.data;
+      if (Object.keys(updates).length === 0) {
+        return res.status(400).json({ message: "No updatable fields provided" });
+      }
+
       const application = await storage.getApplication(id);
-      
       if (!application) {
         return res.status(404).json({ message: "Application not found" });
       }
-      
-      const updatedApplication = await storage.updateApplication(id, req.body);
+
+      const previousStatus = application.status;
+      const updatedApplication = await storage.updateApplication(id, updates);
+
+      if (updates.status && updates.status !== previousStatus) {
+        const actor = req.user as any;
+        try {
+          await storage.recordApplicationStatusChange({
+            applicationId: id,
+            previousStatus,
+            newStatus: updates.status,
+            source: "patch",
+            changedByUserId: actor?.id ?? null,
+            changedByUsername: actor?.username ?? null,
+          });
+        } catch (auditErr) {
+          // Don't fail the request if audit logging fails — but make it loud.
+          console.error("Failed to record application status change:", auditErr);
+        }
+      }
+
       res.json(updatedApplication);
     } catch (error) {
       console.error("Error updating application:", error);
       res.status(500).json({ message: "Failed to update application" });
+    }
+  });
+
+  // Admin-only: read the audit trail of status changes for a single application.
+  app.get("/api/applications/:id/status-changes", requireRole(["admin"]), async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (Number.isNaN(id)) {
+        return res.status(400).json({ message: "Invalid application id" });
+      }
+      const changes = await storage.getApplicationStatusChanges(id);
+      res.json(changes);
+    } catch (error) {
+      console.error("Error fetching application status changes:", error);
+      res.status(500).json({ message: "Failed to fetch status changes" });
     }
   });
 
@@ -1516,7 +1576,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Approve application and create location
-  app.post("/api/applications/:id/approve-with-location", async (req, res) => {
+  app.post("/api/applications/:id/approve-with-location", requireRole(["admin"]), async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
       const application = await storage.getApplication(id);
@@ -1528,6 +1588,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (application.status !== "pending") {
         return res.status(400).json({ message: "Application is not pending" });
       }
+      const previousStatus = application.status;
 
       // Validate regionId exists
       const region = await storage.getRegion(req.body.regionId);
@@ -1569,7 +1630,21 @@ export async function registerRoutes(app: Express): Promise<Server> {
       
       // Update application status to approved
       const updatedApplication = await storage.updateApplication(id, { status: "approved" });
-      
+
+      try {
+        const actor = req.user as any;
+        await storage.recordApplicationStatusChange({
+          applicationId: id,
+          previousStatus,
+          newStatus: "approved",
+          source: "approve_with_location",
+          changedByUserId: actor?.id ?? null,
+          changedByUsername: actor?.username ?? null,
+        });
+      } catch (auditErr) {
+        console.error("Failed to record application status change (approve-with-location):", auditErr);
+      }
+
       res.status(201).json({ 
         application: updatedApplication, 
         location,

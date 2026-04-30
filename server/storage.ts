@@ -4,6 +4,7 @@ import {
   cityCategories, type CityCategory, type InsertCityCategory,
   locations, type Location, type InsertLocation,
   gemachApplications, type GemachApplication, type InsertGemachApplication,
+  applicationStatusChanges, type ApplicationStatusChange, type InsertApplicationStatusChange,
   inviteCodes, type InviteCode, type InsertInviteCode,
   transactions, type Transaction, type InsertTransaction,
   contacts, type Contact, type InsertContact,
@@ -109,6 +110,8 @@ export interface IStorage {
   getApplication(id: number): Promise<GemachApplication | undefined>;
   createApplication(application: InsertGemachApplication): Promise<GemachApplication>;
   updateApplication(id: number, data: Partial<GemachApplication>): Promise<GemachApplication>;
+  recordApplicationStatusChange(change: InsertApplicationStatusChange): Promise<ApplicationStatusChange>;
+  getApplicationStatusChanges(applicationId: number): Promise<ApplicationStatusChange[]>;
 
   // Inventory operations (using new inventory table)
   getInventoryByLocation(locationId: number): Promise<Inventory[]>;
@@ -242,6 +245,8 @@ export class MemStorage implements IStorage {
   private returnReminderEventsMap: Map<number, ReturnReminderEvent>;
   private returnReminderEventCounter: number = 1;
   private validInviteCodes: Set<string>;
+  private applicationStatusChanges: ApplicationStatusChange[] = [];
+  private applicationStatusChangeCounter: number = 1;
 
   private userCounter: number;
   private regionCounter: number;
@@ -2661,6 +2666,28 @@ export class MemStorage implements IStorage {
     const updatedApplication = { ...application, ...data };
     this.applications.set(id, updatedApplication);
     return updatedApplication;
+  }
+
+  async recordApplicationStatusChange(change: InsertApplicationStatusChange): Promise<ApplicationStatusChange> {
+    const id = this.applicationStatusChangeCounter++;
+    const record: ApplicationStatusChange = {
+      id,
+      applicationId: change.applicationId,
+      previousStatus: change.previousStatus,
+      newStatus: change.newStatus,
+      source: change.source,
+      changedByUserId: change.changedByUserId ?? null,
+      changedByUsername: change.changedByUsername ?? null,
+      changedAt: new Date(),
+    };
+    this.applicationStatusChanges.push(record);
+    return record;
+  }
+
+  async getApplicationStatusChanges(applicationId: number): Promise<ApplicationStatusChange[]> {
+    return this.applicationStatusChanges
+      .filter((c) => c.applicationId === applicationId)
+      .sort((a, b) => b.changedAt.getTime() - a.changedAt.getTime());
   }
 
   // Transaction methods

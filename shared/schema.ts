@@ -241,6 +241,32 @@ export const insertGemachApplicationSchema = createInsertSchema(gemachApplicatio
   message: true,
 });
 
+export const APPLICATION_STATUSES = ["pending", "approved", "rejected"] as const;
+export type ApplicationStatus = typeof APPLICATION_STATUSES[number];
+
+// Audit trail for every change to an application's status. We only record
+// transitions of the `status` column so admins (and we) can trace when an
+// application was approved, rejected, or restored to pending — and by whom.
+export const applicationStatusChanges = pgTable("application_status_changes", {
+  id: serial("id").primaryKey(),
+  applicationId: integer("application_id").notNull(),
+  previousStatus: text("previous_status").notNull(),
+  newStatus: text("new_status").notNull(),
+  source: text("source").notNull(), // "patch" | "approve_with_location"
+  changedByUserId: integer("changed_by_user_id"),
+  changedByUsername: text("changed_by_username"),
+  changedAt: timestamp("changed_at").notNull().defaultNow(),
+});
+
+export const insertApplicationStatusChangeSchema = createInsertSchema(applicationStatusChanges).pick({
+  applicationId: true,
+  previousStatus: true,
+  newStatus: true,
+  source: true,
+  changedByUserId: true,
+  changedByUsername: true,
+});
+
 // Invite Codes schema (for operator registration)
 export const inviteCodes = pgTable("invite_codes", {
   id: serial("id").primaryKey(),
@@ -415,6 +441,9 @@ export type InsertLocation = z.infer<typeof insertLocationSchema>;
 
 export type GemachApplication = typeof gemachApplications.$inferSelect;
 export type InsertGemachApplication = z.infer<typeof insertGemachApplicationSchema>;
+
+export type ApplicationStatusChange = typeof applicationStatusChanges.$inferSelect;
+export type InsertApplicationStatusChange = z.infer<typeof insertApplicationStatusChangeSchema>;
 
 export type InviteCode = typeof inviteCodes.$inferSelect;
 export type InsertInviteCode = z.infer<typeof insertInviteCodeSchema>;

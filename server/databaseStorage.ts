@@ -6,6 +6,7 @@ import {
   cityCategories, type CityCategory, type InsertCityCategory,
   locations, type Location, type InsertLocation,
   gemachApplications, type GemachApplication, type InsertGemachApplication,
+  applicationStatusChanges, type ApplicationStatusChange, type InsertApplicationStatusChange,
   inviteCodes, type InviteCode, type InsertInviteCode,
   transactions, type Transaction, type InsertTransaction,
   contacts, type Contact, type InsertContact,
@@ -528,6 +529,25 @@ export class DatabaseStorage implements IStorage {
       throw new Error(`Application with id ${id} not found`);
     }
     return result[0];
+  }
+
+  async recordApplicationStatusChange(change: InsertApplicationStatusChange): Promise<ApplicationStatusChange> {
+    const result = await db.insert(applicationStatusChanges).values({
+      applicationId: change.applicationId,
+      previousStatus: change.previousStatus,
+      newStatus: change.newStatus,
+      source: change.source,
+      changedByUserId: change.changedByUserId ?? null,
+      changedByUsername: change.changedByUsername ?? null,
+    }).returning();
+    return result[0];
+  }
+
+  async getApplicationStatusChanges(applicationId: number): Promise<ApplicationStatusChange[]> {
+    return db.select()
+      .from(applicationStatusChanges)
+      .where(eq(applicationStatusChanges.applicationId, applicationId))
+      .orderBy(desc(applicationStatusChanges.changedAt));
   }
 
   // Transaction operations
@@ -1535,6 +1555,31 @@ export async function ensureSchemaUpgrades(): Promise<void> {
         sent_by_user_id INTEGER,
         batch_id TEXT
       )
+    `);
+
+    // Make sure the confirmation-email-sent timestamp column exists. The
+    // gemach_applications schema declares it but older databases (including
+    // some dev environments) were created without it, which breaks every
+    // SELECT * over the table. Idempotent.
+    await db.execute(sql`ALTER TABLE gemach_applications ADD COLUMN IF NOT EXISTS confirmation_email_sent_at TIMESTAMP`);
+
+    // Task #174: audit trail for application status changes so admins can
+    // trace and recover from accidental approve/reject toggles.
+    await db.execute(sql`
+      CREATE TABLE IF NOT EXISTS application_status_changes (
+        id SERIAL PRIMARY KEY,
+        application_id INTEGER NOT NULL,
+        previous_status TEXT NOT NULL,
+        new_status TEXT NOT NULL,
+        source TEXT NOT NULL,
+        changed_by_user_id INTEGER,
+        changed_by_username TEXT,
+        changed_at TIMESTAMP NOT NULL DEFAULT NOW()
+      )
+    `);
+    await db.execute(sql`
+      CREATE INDEX IF NOT EXISTS application_status_changes_application_id_idx
+        ON application_status_changes (application_id)
     `);
 
     // Task #70: data-fix — clear refund_amount that was incorrectly written

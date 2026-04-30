@@ -71,7 +71,9 @@ import {
   Loader2,
   DollarSign,
   KeyRound,
-  User
+  User,
+  RotateCcw,
+  Info
 } from "lucide-react";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
@@ -95,7 +97,7 @@ export default function AdminApplications() {
   const { t } = useLanguage();
   const queryClient = useQueryClient();
   const [searchTerm, setSearchTerm] = useState("");
-  const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "approved" | "rejected">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "pending" | "approved" | "rejected">("pending");
   const [viewApplication, setViewApplication] = useState<GemachApplication | null>(null);
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false);
   const [approveApplication, setApproveApplication] = useState<GemachApplication | null>(null);
@@ -212,6 +214,13 @@ export default function AdminApplications() {
     updateStatusMutation.mutate({ id, status: "rejected" });
   };
 
+  const handleRestoreToPending = (id: number) => {
+    if (typeof window !== "undefined" && !window.confirm(t('restoreToPendingConfirm'))) {
+      return;
+    }
+    updateStatusMutation.mutate({ id, status: "pending" });
+  };
+
   const handleViewApplication = (application: GemachApplication) => {
     setViewApplication(application);
     setIsViewDialogOpen(true);
@@ -295,6 +304,16 @@ export default function AdminApplications() {
     );
   });
 
+  // Per-status counts shown on the filter buttons so admins can see at a
+  // glance how many approved/rejected applications are hidden behind a filter.
+  const statusCounts = {
+    all: applications.length,
+    pending: applications.filter(a => a.status === "pending").length,
+    approved: applications.filter(a => a.status === "approved").length,
+    rejected: applications.filter(a => a.status === "rejected").length,
+  };
+  const hiddenNonPendingCount = statusCounts.approved + statusCounts.rejected;
+
   return (
     <>
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
@@ -320,37 +339,54 @@ export default function AdminApplications() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <Button 
                   variant={filterStatus === "all" ? "default" : "outline"} 
                   size="sm"
                   onClick={() => setFilterStatus("all")}
+                  data-testid="filter-status-all"
                 >
-                  {t('all')}
+                  {t('all')} ({statusCounts.all})
                 </Button>
                 <Button 
                   variant={filterStatus === "pending" ? "default" : "outline"} 
                   size="sm"
                   onClick={() => setFilterStatus("pending")}
+                  data-testid="filter-status-pending"
                 >
-                  {t('pending')}
+                  {t('pending')} ({statusCounts.pending})
                 </Button>
                 <Button 
                   variant={filterStatus === "approved" ? "default" : "outline"} 
                   size="sm"
                   onClick={() => setFilterStatus("approved")}
+                  data-testid="filter-status-approved"
                 >
-                  {t('approved')}
+                  {t('approved')} ({statusCounts.approved})
                 </Button>
                 <Button 
                   variant={filterStatus === "rejected" ? "default" : "outline"} 
                   size="sm"
                   onClick={() => setFilterStatus("rejected")}
+                  data-testid="filter-status-rejected"
                 >
-                  {t('rejected')}
+                  {t('rejected')} ({statusCounts.rejected})
                 </Button>
               </div>
             </div>
+            {filterStatus === "pending" && hiddenNonPendingCount > 0 && (
+              <div
+                className="mt-3 flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-xs text-blue-900"
+                data-testid="hidden-applications-note"
+              >
+                <Info className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                <span>
+                  {t('hiddenApplicationsNote')
+                    .replace('{approved}', String(statusCounts.approved))
+                    .replace('{rejected}', String(statusCounts.rejected))}
+                </span>
+              </div>
+            )}
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
@@ -450,15 +486,31 @@ export default function AdminApplications() {
                               </DropdownMenuItem>
                               {application.status === "pending" && (
                                 <>
-                                  <DropdownMenuItem onClick={() => handleStartApproval(application)}>
+                                  <DropdownMenuItem
+                                    onClick={() => handleStartApproval(application)}
+                                    data-testid={`menu-approve-${application.id}`}
+                                  >
                                     <Plus className="mr-2 h-4 w-4 text-green-600" />
                                     {t('approveCreateLocation')}
                                   </DropdownMenuItem>
-                                  <DropdownMenuItem onClick={() => handleReject(application.id)}>
+                                  <DropdownMenuItem
+                                    onClick={() => handleReject(application.id)}
+                                    data-testid={`menu-reject-${application.id}`}
+                                  >
                                     <X className="mr-2 h-4 w-4 text-red-600" />
                                     {t('rejectApplication')}
                                   </DropdownMenuItem>
                                 </>
+                              )}
+                              {application.status !== "pending" && (
+                                <DropdownMenuItem
+                                  onClick={() => handleRestoreToPending(application.id)}
+                                  disabled={updateStatusMutation.isPending}
+                                  data-testid={`menu-restore-${application.id}`}
+                                >
+                                  <RotateCcw className="mr-2 h-4 w-4 text-blue-600" />
+                                  {t('restoreToPending')}
+                                </DropdownMenuItem>
                               )}
                             </DropdownMenuContent>
                           </DropdownMenu>
