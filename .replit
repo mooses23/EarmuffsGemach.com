@@ -45,3 +45,6 @@ timeoutMs = 20000
 [userenv]
 
 [userenv.development]
+
+[userenv.shared]
+SITE_URL = "https://earmuffsgemach.com"
