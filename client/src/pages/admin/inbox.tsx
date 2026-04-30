@@ -300,15 +300,22 @@ export default function AdminInbox() {
   const [replyFilter, setReplyFilter] = useState<ReplyFilter>(() => loadPersistedFilters().replyFilter);
   const [folder, setFolder] = useState<Folder>(() => loadPersistedFilters().folder);
 
-  // Switching to the Sent folder hides form items and makes the source/read/
-  // reply filters meaningless, so reset them to their default "all" state.
+  // Reset secondary filters whenever the folder changes so stale filter
+  // state from one folder doesn't bleed into another:
+  // • Entering Sent: pin source="email" (no form submissions in Sent),
+  //   clear read/reply filters since they don't apply.
+  // • Leaving Sent: restore source="all" so form submissions reappear
+  //   and the source Select is not left on "email"-only.
   const handleFolderChange = (next: Folder) => {
-    setFolder(next);
     if (next === "sent") {
       setSourceFilter("email");
       setReadFilter("all");
       setReplyFilter("all");
+    } else if (folder === "sent") {
+      // Returning from Sent — restore source so forms are visible again.
+      setSourceFilter("all");
     }
+    setFolder(next);
   };
 
   // Mirror filter state to localStorage on every change. Whenever the admin
