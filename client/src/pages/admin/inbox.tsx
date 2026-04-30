@@ -2815,10 +2815,11 @@ function ThreadTranscriptPanel({
         )}
         {messages.map((m, idx) => {
           const open = isExpanded(m, idx);
-          // Treat any message in the Sent view as outbound for header
-          // rendering, even if direction is missing/inbound on a fallback
-          // entry — the Sent folder only ever lists outbound threads.
-          const outbound = m.direction === "outbound" || isSentView;
+          // Per-message direction is authoritative so mixed Sent threads
+          // (outbound + inbound replies) keep correct From/To headers per
+          // entry. The Sent fallback entry is seeded with direction
+          // "outbound" above, covering the loading/error case.
+          const outbound = m.direction === "outbound";
           // Translate is offered on every inbound entry.
           const showTranslate = !outbound;
           const isLatestInbound = isCurrent(m);
