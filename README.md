@@ -931,7 +931,7 @@ vercel
 
 **Important:** 
 - Use `.env.example` as a reference for all required environment variables
-- Run `npm run verify-env` to check your environment setup
+- Run `npm run verify-env` to check your environment setup (this runs the same boot-time checker the server uses on startup, defined in `server/startup-checks.ts`)
 - See [VERCEL_DEPLOYMENT.md](./VERCEL_DEPLOYMENT.md) for complete migration guide from Replit
 
 #### Railway

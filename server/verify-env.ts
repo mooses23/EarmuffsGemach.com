@@ -1,81 +1,51 @@
 /**
- * Environment Variable Verification Script
- * Run this to check if all required environment variables are set
+ * Environment Variable Verification CLI.
+ *
+ * Thin wrapper around `collectStartupCheckMessages` from
+ * `server/startup-checks.ts` so the boot-time checker is the single source
+ * of truth for which env vars are required / warning / notice. Run with:
+ *
+ *   npm run verify-env
+ *
+ * Exits with code 1 when there are any errors (missing required vars in the
+ * current NODE_ENV) and 0 otherwise. Warnings and notices are printed but
+ * never fail the process.
  */
 
-const requiredVars = [
-  'DATABASE_URL',
-  'SESSION_SECRET',
-];
+import { collectStartupCheckMessages } from './startup-checks.js';
 
-const recommendedVars = [
-  'STRIPE_SECRET_KEY',
-  'STRIPE_PUBLISHABLE_KEY',
-  'STRIPE_WEBHOOK_SECRET',
-  'PAYPAL_CLIENT_ID',
-  'PAYPAL_CLIENT_SECRET',
-];
+const { errors, warnings, notices } = collectStartupCheckMessages();
 
-const optionalVars = [
-  'SMTP_HOST',
-  'SMTP_PORT',
-  'SMTP_USER',
-  'SMTP_PASSWORD',
-  'APP_URL',
-  'OPENAI_API_KEY',
-  'GMAIL_CLIENT_ID',
-  'GMAIL_CLIENT_SECRET',
-  'GMAIL_REFRESH_TOKEN',
-];
+console.log(`Verifying environment variables (NODE_ENV=${process.env.NODE_ENV ?? 'unset'})...\n`);
 
-console.log('🔍 Verifying Environment Variables...\n');
-
-let hasErrors = false;
-let hasWarnings = false;
-
-// Check required variables
-console.log('✅ Required Variables:');
-requiredVars.forEach(varName => {
-  if (!process.env[varName]) {
-    console.log(`  ❌ ${varName} - MISSING (CRITICAL)`);
-    hasErrors = true;
-  } else {
-    console.log(`  ✅ ${varName} - Set`);
-  }
-});
-
-// Check recommended variables
-console.log('\n⚠️  Recommended Variables (for full functionality):');
-recommendedVars.forEach(varName => {
-  if (!process.env[varName]) {
-    console.log(`  ⚠️  ${varName} - Missing (payments may not work)`);
-    hasWarnings = true;
-  } else {
-    console.log(`  ✅ ${varName} - Set`);
-  }
-});
-
-// Check optional variables
-console.log('\n💡 Optional Variables:');
-optionalVars.forEach(varName => {
-  if (!process.env[varName]) {
-    console.log(`  ℹ️  ${varName} - Not set`);
-  } else {
-    console.log(`  ✅ ${varName} - Set`);
-  }
-});
-
-// Summary
-console.log('\n' + '='.repeat(50));
-if (hasErrors) {
-  console.log('❌ ERRORS FOUND: Missing required environment variables');
-  console.log('   Add these to your Vercel project settings before deploying');
-  process.exit(1);
-} else if (hasWarnings) {
-  console.log('⚠️  WARNINGS: Some recommended variables are missing');
-  console.log('   Application will work but some features may be limited');
-  process.exit(0);
-} else {
-  console.log('✅ ALL ENVIRONMENT VARIABLES CONFIGURED CORRECTLY');
-  process.exit(0);
+if (errors.length > 0) {
+  console.log('ERRORS (required vars missing — deploy will fail):');
+  for (const e of errors) console.log(`  - ${e}`);
+  console.log('');
 }
+
+if (warnings.length > 0) {
+  console.log('WARNINGS (features will be degraded or disabled):');
+  for (const w of warnings) console.log(`  - ${w}`);
+  console.log('');
+}
+
+if (notices.length > 0) {
+  console.log('NOTICES (defaults / fallbacks in use):');
+  for (const n of notices) console.log(`  - ${n}`);
+  console.log('');
+}
+
+console.log('='.repeat(60));
+if (errors.length > 0) {
+  console.log(`FAILED: ${errors.length} required variable(s) missing.`);
+  console.log('Set these in the deployment environment before deploying.');
+  process.exit(1);
+}
+
+if (warnings.length > 0) {
+  console.log(`OK with ${warnings.length} warning(s). The app will start but some features will be limited.`);
+} else {
+  console.log('All environment variables are configured correctly.');
+}
+process.exit(0);

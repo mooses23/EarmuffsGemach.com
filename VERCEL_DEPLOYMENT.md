@@ -223,7 +223,7 @@ See `.env.example` for a complete list of all required and optional environment 
 
 ## Useful Commands
 
-- `npm run verify-env` - Verify all environment variables are set
+- `npm run verify-env` - Run the boot-time configuration checker (`server/startup-checks.ts`) as a CLI to verify environment variables before deploying
 - `npm run db:push` - Push database schema to production
 - `npm run seed` - Seed database with initial data
 - `npm run build` - Build the application for production
