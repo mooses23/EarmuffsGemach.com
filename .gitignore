@@ -7,3 +7,9 @@ vite.config.ts.*
 test-results
 playwright-report
 .playwright
+
+# Ad-hoc Twilio SMS log exports — contain the Twilio Account SID in the
+# filename and customer PII (phone numbers, names) in the body. These get
+# auto-saved into attached_assets/ by Replit checkpoints; never commit them.
+attached_assets/sms-log-*.csv
+attached_assets/sms-log-AC*.csv

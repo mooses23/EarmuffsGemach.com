@@ -137,11 +137,23 @@ export default function AdminApplications() {
     },
   });
 
-  const selectedRegionId = form.watch("regionId");
-  
-  const filteredCityCategories = cityCategories.filter(
-    (cat) => cat.regionId === selectedRegionId
-  );
+  // Group all city categories by region for the searchable, cross-region dropdown
+  // shown on the approval dialog so the admin can pick any community without
+  // first switching the Region selector.
+  const cityCategoriesByRegion = regions
+    .slice()
+    .sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0))
+    .map((region) => ({
+      region,
+      categories: cityCategories
+        .filter((cat) => cat.regionId === region.id)
+        .sort((a, b) => {
+          const order = (a.displayOrder ?? 0) - (b.displayOrder ?? 0);
+          if (order !== 0) return order;
+          return a.name.localeCompare(b.name);
+        }),
+    }))
+    .filter((group) => group.categories.length > 0);
 
   const updateStatusMutation = useMutation({
     mutationFn: ({ id, status }: { id: number; status: string }) => 
@@ -808,7 +820,20 @@ export default function AdminApplications() {
                                 )}
                               </FormLabel>
                               <Select 
-                                onValueChange={(value) => field.onChange(value === "none" ? null : parseInt(value))}
+                                onValueChange={(value) => {
+                                  if (value === "none") {
+                                    field.onChange(null);
+                                    return;
+                                  }
+                                  const id = parseInt(value);
+                                  field.onChange(id);
+                                  // Auto-sync the Region selector to match the picked community
+                                  // so admins don't have to switch regions first.
+                                  const picked = cityCategories.find((c) => c.id === id);
+                                  if (picked && picked.regionId !== form.getValues("regionId")) {
+                                    form.setValue("regionId", picked.regionId, { shouldDirty: true });
+                                  }
+                                }}
                                 value={field.value?.toString() ?? "none"}
                               >
                                 <FormControl>
@@ -816,12 +841,22 @@ export default function AdminApplications() {
                                     <SelectValue placeholder={t('selectCommunityCategory')} />
                                   </SelectTrigger>
                                 </FormControl>
-                                <SelectContent>
+                                <SelectContent className="max-h-80">
                                   <SelectItem value="none">{t('noCategoryOption')}</SelectItem>
-                                  {filteredCityCategories.map((category) => (
-                                    <SelectItem key={category.id} value={category.id.toString()}>
-                                      {category.name}
-                                    </SelectItem>
+                                  {cityCategoriesByRegion.map((group) => (
+                                    <div key={group.region.id}>
+                                      <div className="px-2 pt-2 pb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                        {group.region.name}
+                                      </div>
+                                      {group.categories.map((category) => (
+                                        <SelectItem key={category.id} value={category.id.toString()}>
+                                          {category.name}
+                                          {category.stateCode ? (
+                                            <span className="ml-1 text-muted-foreground">, {category.stateCode}</span>
+                                          ) : null}
+                                        </SelectItem>
+                                      ))}
+                                    </div>
                                   ))}
                                 </SelectContent>
                               </Select>
