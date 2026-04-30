@@ -1611,6 +1611,7 @@ export default function AdminInbox() {
               behavior. */}
           <ThreadTranscriptPanel
             selected={selected}
+            folder={folder}
             t={t}
             translatedBody={translatedBody}
             onTranslateLatestInbound={handleTranslateMessage}
@@ -2650,6 +2651,7 @@ function SaveToFaqPanel({
 // body so the detail view always renders something.
 function ThreadTranscriptPanel({
   selected,
+  folder,
   t,
   translatedBody,
   onTranslateLatestInbound,
@@ -2657,12 +2659,14 @@ function ThreadTranscriptPanel({
   uiTarget,
 }: {
   selected: UnifiedItem;
+  folder: Folder;
   t: (k: TranslationKey) => string;
   translatedBody: string | null;
   onTranslateLatestInbound: () => void;
   isTranslating: boolean;
   uiTarget: "en" | "he";
 }) {
+  const isSentView = folder === "sent";
   // Per-entry translations for older inbound messages (latest uses parent state).
   const [entryTranslations, setEntryTranslations] = useState<Record<string, string>>({});
   const [translatingId, setTranslatingId] = useState<string | null>(null);
@@ -2705,20 +2709,25 @@ function ThreadTranscriptPanel({
     },
   });
 
-  // Fallback when the thread fetch is loading or failed.
+  // Fallback when the thread fetch is loading or failed. In the Sent view
+  // the selected row represents an outbound message, so seed the fallback
+  // entry as outbound with `to` populated from selected.toAddress so the
+  // header still renders "To: …" correctly while the thread fetch is
+  // in flight.
   const fallbackEntry: ThreadEntry = useMemo(() => ({
     id: `${selected.source}:${selected.id}`,
-    direction: "inbound",
+    direction: isSentView ? "outbound" : "inbound",
     from: selected.fromEmail
       ? `${selected.fromName} <${selected.fromEmail}>`
       : selected.fromName,
+    to: isSentView ? selected.toAddress : undefined,
     subject: selected.subject,
     body: selected.body,
     date: safeDate(selected.date),
     isRead: selected.isRead,
     source: selected.source === "email" ? "gmail" : "form",
     messageRef: String(selected.id),
-  }), [selected]);
+  }), [selected, isSentView]);
 
   const messages: ThreadEntry[] = query.data?.messages?.length
     ? query.data.messages
@@ -2806,7 +2815,10 @@ function ThreadTranscriptPanel({
         )}
         {messages.map((m, idx) => {
           const open = isExpanded(m, idx);
-          const outbound = m.direction === "outbound";
+          // Treat any message in the Sent view as outbound for header
+          // rendering, even if direction is missing/inbound on a fallback
+          // entry — the Sent folder only ever lists outbound threads.
+          const outbound = m.direction === "outbound" || isSentView;
           // Translate is offered on every inbound entry.
           const showTranslate = !outbound;
           const isLatestInbound = isCurrent(m);
@@ -2847,11 +2859,6 @@ function ThreadTranscriptPanel({
                     {outbound ? t("inboxThreadOutbound") : t("inboxThreadInbound")}
                   </Badge>
                   {outbound ? (
-                    // Outbound message: show "To: <recipient>" so admins can see
-                    // at a glance who the message went to. Mirror the list-view
-                    // convention: prefer the parsed email over the display name
-                    // for an unambiguous identifier, fall back to raw m.to or
-                    // m.from ("us") when nothing is available.
                     <>
                       <span className="text-xs text-muted-foreground flex-shrink-0">To:</span>
                       <span
