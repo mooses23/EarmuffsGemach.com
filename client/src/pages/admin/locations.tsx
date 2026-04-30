@@ -1400,16 +1400,23 @@ export default function AdminLocations() {
                 </div>
                 {/* Bulk welcome action buttons */}
                 <div className="flex flex-wrap gap-2 shrink-0">
-                  <Button
-                    variant="default"
-                    size="sm"
-                    onClick={openAllNotOnboardedPicker}
-                    disabled={dialogIsPending || eligibleNotOnboarded.length === 0}
-                    data-testid="button-onboarding-all-not-onboarded"
-                  >
-                    <Send className="h-4 w-4 mr-1" />
-                    Message Locations ({eligibleNotOnboarded.length})
-                  </Button>
+                  {eligibleNotOnboarded.length > 0 ? (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      onClick={openAllNotOnboardedPicker}
+                      disabled={dialogIsPending}
+                      data-testid="button-onboarding-all-not-onboarded"
+                    >
+                      <Send className="h-4 w-4 mr-1" />
+                      Message Locations ({eligibleNotOnboarded.length})
+                    </Button>
+                  ) : (
+                    <Badge variant="outline" className="text-xs font-normal border-green-500 text-green-700 bg-green-50">
+                      <CheckCircle className="h-3 w-3 mr-1 text-green-600" />
+                      All locations set up
+                    </Badge>
+                  )}
                   {selectedCount > 0 && (
                     <Button
                       variant="secondary"

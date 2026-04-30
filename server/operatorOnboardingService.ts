@@ -301,8 +301,9 @@ export async function sendWelcomeForLocation(
       email: wantsEmail && !!emailResult ? { ok: !!emailResult.ok, error: emailResult.error } : undefined,
       defaultWelcomeChannel: options.rememberAsDefault ? options.channel : undefined,
     });
-  } catch (e: any) {
-    console.error('[onboarding] failed to record attempt for location', loc.id, ':', e?.message);
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : String(e);
+    console.error('[onboarding] failed to record attempt for location', loc.id, ':', message);
   }
 
   const ok =
