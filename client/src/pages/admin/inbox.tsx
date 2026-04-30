@@ -2863,13 +2863,18 @@ function ThreadTranscriptPanel({
                       <span className="text-xs text-muted-foreground flex-shrink-0">To:</span>
                       <span
                         className="font-medium truncate text-sm"
-                        title={m.to || undefined}
+                        title={m.to || selected.toAddress || undefined}
                         data-testid={`thread-entry-to-${m.id}`}
                       >
                         {(() => {
-                          if (!m.to) return m.from || "—";
-                          const p = parseEmailAddress(m.to);
-                          return p.email || p.name || m.to;
+                          // Prefer the message's own To header. Fall back to
+                          // the selected row's recipient (covers saved-only
+                          // outbound replies that have no `to`) before giving
+                          // up to a placeholder — never show m.from ("us").
+                          const raw = m.to || selected.toAddress;
+                          if (!raw) return "—";
+                          const p = parseEmailAddress(raw);
+                          return p.email || p.name || raw;
                         })()}
                       </span>
                     </>
