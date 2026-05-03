@@ -146,15 +146,41 @@ function NeedsAttentionPanel({ alerts, dismissed, onDismiss }: {
   const visible = alerts.filter(a => !dismissed.has(a.id));
   const [gmailOpen, setGmailOpen] = useState(false);
 
+  // Group by severity (critical → warning → info) and add per-severity counts.
+  const order: Severity[] = ['critical', 'warning', 'info'];
+  const grouped = order
+    .map((sev) => ({ sev, items: visible.filter((a) => a.severity === sev) }))
+    .filter((g) => g.items.length > 0);
+  const counts = {
+    critical: visible.filter((a) => a.severity === 'critical').length,
+    warning: visible.filter((a) => a.severity === 'warning').length,
+    info: visible.filter((a) => a.severity === 'info').length,
+  };
+
   return (
     <Card className="mb-6" data-testid="card-needs-attention">
       <CardHeader className="pb-3">
-        <CardTitle className="flex items-center gap-2 text-base">
+        <CardTitle className="flex flex-wrap items-center gap-2 text-base">
           <AlertTriangle className="h-4 w-4 text-amber-600" />
           {t('needsAttention')}
           <Badge variant={visible.length > 0 ? 'destructive' : 'secondary'} className="ml-2" data-testid="badge-attention-count">
             {visible.length}
           </Badge>
+          {counts.critical > 0 && (
+            <Badge className={`${SEV_STYLES.critical.badge}`} data-testid="badge-attention-critical">
+              {t('severityCritical')}: {counts.critical}
+            </Badge>
+          )}
+          {counts.warning > 0 && (
+            <Badge className={`${SEV_STYLES.warning.badge}`} data-testid="badge-attention-warning">
+              {t('severityWarning')}: {counts.warning}
+            </Badge>
+          )}
+          {counts.info > 0 && (
+            <Badge className={`${SEV_STYLES.info.badge}`} data-testid="badge-attention-info">
+              {t('severityInfo')}: {counts.info}
+            </Badge>
+          )}
         </CardTitle>
       </CardHeader>
       <CardContent className="pt-0">
@@ -164,65 +190,75 @@ function NeedsAttentionPanel({ alerts, dismissed, onDismiss }: {
             {t('nothingNeedsAttention')}
           </p>
         ) : (
-          <ul className="space-y-2">
-            {visible.map((a) => {
-              const sev = SEV_STYLES[a.severity];
-              const Icon = a.icon;
-              const isGmail = a.id === 'gmail';
-              return (
-                <li
-                  key={a.id}
-                  className={`rounded-md border ${sev.bar} p-3`}
-                  data-testid={`alert-row-${a.id}`}
-                >
-                  <div className="flex items-start gap-3">
-                    <Icon className={`h-5 w-5 mt-0.5 shrink-0 ${sev.icon}`} aria-hidden="true" />
-                    <div className="flex-1 min-w-0">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <Badge className={`${sev.badge} uppercase text-[10px] px-1.5 py-0`}>
-                          {t(a.severity === 'critical' ? 'severityCritical' : a.severity === 'warning' ? 'severityWarning' : 'severityInfo')}
-                        </Badge>
-                        <p className={`font-semibold ${sev.text}`}>{a.title}</p>
-                      </div>
-                      <p className={`text-sm mt-1 ${sev.text} opacity-90`}>{a.body}</p>
-                      {isGmail && <GmailReconnectInstructions open={gmailOpen} />}
-                      <div className="mt-2 flex flex-wrap gap-3 items-center">
-                        {a.action && (
+          <div className="space-y-4">
+            {grouped.map(({ sev: sevKey, items }) => (
+              <div key={sevKey} data-testid={`alert-group-${sevKey}`}>
+                <p className={`text-xs font-semibold uppercase tracking-wide mb-1.5 ${SEV_STYLES[sevKey].text}`}>
+                  {t(sevKey === 'critical' ? 'severityCritical' : sevKey === 'warning' ? 'severityWarning' : 'severityInfo')}
+                  {' '}({items.length})
+                </p>
+                <ul className="space-y-2">
+                  {items.map((a) => {
+                    const sev = SEV_STYLES[a.severity];
+                    const Icon = a.icon;
+                    const isGmail = a.id === 'gmail';
+                    return (
+                      <li
+                        key={a.id}
+                        className={`rounded-md border ${sev.bar} p-3`}
+                        data-testid={`alert-row-${a.id}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <Icon className={`h-5 w-5 mt-0.5 shrink-0 ${sev.icon}`} aria-hidden="true" />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge className={`${sev.badge} uppercase text-[10px] px-1.5 py-0`}>
+                                {t(a.severity === 'critical' ? 'severityCritical' : a.severity === 'warning' ? 'severityWarning' : 'severityInfo')}
+                              </Badge>
+                              <p className={`font-semibold ${sev.text}`}>{a.title}</p>
+                            </div>
+                            <p className={`text-sm mt-1 ${sev.text} opacity-90`}>{a.body}</p>
+                            {isGmail && <GmailReconnectInstructions open={gmailOpen} />}
+                            <div className="mt-2 flex flex-wrap gap-3 items-center">
+                              {a.action && (
+                                <button
+                                  type="button"
+                                  onClick={a.action.onClick}
+                                  className={`text-sm font-medium ${sev.text} hover:underline inline-flex items-center gap-1`}
+                                  data-testid={`alert-action-${a.id}`}
+                                >
+                                  {a.action.label}
+                                  <ArrowRight className="h-3 w-3 rtl:rotate-180" />
+                                </button>
+                              )}
+                              {isGmail && (
+                                <button
+                                  type="button"
+                                  onClick={() => setGmailOpen(v => !v)}
+                                  className={`text-sm font-medium ${sev.text} hover:underline`}
+                                >
+                                  {gmailOpen ? t('hideInstructions') : t('showInstructions')}
+                                </button>
+                              )}
+                            </div>
+                          </div>
                           <button
                             type="button"
-                            onClick={a.action.onClick}
-                            className={`text-sm font-medium ${sev.text} hover:underline inline-flex items-center gap-1`}
-                            data-testid={`alert-action-${a.id}`}
+                            onClick={() => onDismiss(a.id)}
+                            aria-label={t('dismiss')}
+                            className={`p-1 rounded hover:bg-black/5 ${sev.text}`}
+                            data-testid={`alert-dismiss-${a.id}`}
                           >
-                            {a.action.label}
-                            <ArrowRight className="h-3 w-3 rtl:rotate-180" />
+                            <X className="h-4 w-4" />
                           </button>
-                        )}
-                        {isGmail && (
-                          <button
-                            type="button"
-                            onClick={() => setGmailOpen(v => !v)}
-                            className={`text-sm font-medium ${sev.text} hover:underline`}
-                          >
-                            {gmailOpen ? t('hideInstructions') : t('showInstructions')}
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => onDismiss(a.id)}
-                      aria-label={t('dismiss')}
-                      className={`p-1 rounded hover:bg-black/5 ${sev.text}`}
-                      data-testid={`alert-dismiss-${a.id}`}
-                    >
-                      <X className="h-4 w-4" />
-                    </button>
-                  </div>
-                </li>
-              );
-            })}
-          </ul>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
         )}
       </CardContent>
     </Card>

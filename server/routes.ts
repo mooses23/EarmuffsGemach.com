@@ -5562,7 +5562,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           action: tx.isReturned ? "returned" : "lent",
           name: tx.borrowerName,
           subtitle: locName.get(tx.locationId) || `Location #${tx.locationId}`,
-          href: `/admin/transactions`,
+          // Filter hint: focus the specific tx and prefilter by status.
+          href: `/admin/transactions?focus=${tx.id}&status=${tx.isReturned ? 'returned' : 'open'}`,
         });
       }
       for (const app of apps) {
@@ -5572,7 +5573,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           at: new Date(app.submittedAt as any).toISOString(),
           name: `${app.firstName} ${app.lastName}`,
           subtitle: `${app.city}${app.state ? ", " + app.state : ""}`,
-          href: `/admin/applications`,
+          // Filter hint: open pending tab, focus this application.
+          href: `/admin/applications?status=pending&focus=${app.id}`,
         });
       }
       for (const c of msgs) {
@@ -5582,7 +5584,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
           at: new Date(c.submittedAt as any).toISOString(),
           name: c.name,
           subtitle: c.subject || (c.email || ""),
-          href: `/admin/inbox`,
+          // Filter hint: open unread, focus this message.
+          href: `/admin/inbox?status=unread&focus=${c.id}`,
         });
       }
 
