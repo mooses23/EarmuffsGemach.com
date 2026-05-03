@@ -1,7 +1,10 @@
 import React, { useState, createContext, useContext } from "react";
 import { Link, useLocation } from "wouter";
 import { ChevronDown, User, LogOut, LayoutDashboard, Languages, Menu, X } from "lucide-react";
-import logoImage from "@assets/BabyBanz_Gemach_1769321439923.jpg";
+import logoJpg80 from "@assets/optimized/logo-80.jpg";
+import logoJpg160 from "@assets/optimized/logo-160.jpg";
+import logoWebp80 from "@assets/optimized/logo-80.webp";
+import logoWebp160 from "@assets/optimized/logo-160.webp";
 import { MobileMenu } from "./mobile-menu";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,7 +40,22 @@ export function Header() {
           <div className="flex items-center space-x-2 md:space-x-3 ml-2 md:ml-8">
             <Link href="/" className="flex items-center space-x-2 md:space-x-3">
               <div className="glass-icon-blue rounded-full p-1.5 md:p-2">
-                <img src={logoImage} alt={t("earmuffsGemach")} className="h-8 w-8 md:h-10 md:w-10 rounded-full object-cover" />
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcSet={`${logoWebp80} 1x, ${logoWebp160} 2x`}
+                  />
+                  <img
+                    src={logoJpg80}
+                    srcSet={`${logoJpg80} 1x, ${logoJpg160} 2x`}
+                    width={40}
+                    height={40}
+                    alt={t("earmuffsGemach")}
+                    className="h-8 w-8 md:h-10 md:w-10 rounded-full object-cover"
+                    decoding="async"
+                    {...({ fetchpriority: "high" } as any)}
+                  />
+                </picture>
               </div>
               <h1 className="text-lg md:text-2xl font-bold text-white hidden sm:block">
                 {t("earmuffsGemach")}

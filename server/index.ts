@@ -1,8 +1,34 @@
 import express, { type Request, Response, NextFunction } from "express";
+import compression from "compression";
 import { setupVite, serveStatic, log } from "./vite.js";
 import { runStartupChecks } from "./startup-checks.js";
 
 const app = express();
+
+// Gzip/deflate every text-like response (HTML, JS, CSS, JSON). Keeps the
+// landing page payload small without changing any markup. Express picks the
+// best encoding the client's Accept-Encoding supports.
+app.use(
+  compression({
+    threshold: 1024,
+    filter: (req, res) => {
+      // Stripe webhook needs the raw body — don't ever transform it.
+      if (req.path === "/api/stripe/webhook") return false;
+      return compression.filter(req, res);
+    },
+  }),
+);
+
+// Cache headers for fingerprinted Vite assets. Anything served out of /assets/
+// has a content-hash in the filename, so we can mark it immutable and let the
+// browser keep it for a year. Plain non-hashed files (index.html, sw, …) keep
+// the default no-cache behaviour.
+app.use((req, res, next) => {
+  if (req.method === "GET" && req.path.startsWith("/assets/")) {
+    res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+  }
+  next();
+});
 
 (async () => {
   // Validate environment configuration FIRST, before importing any module

@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { getLocations, getRegions } from "@/lib/api";
 import { useLanguage } from "@/hooks/use-language";
 import { localizeUSState } from "@/lib/location-names";
 import { pickLocalized } from "@/lib/localized-record";
@@ -41,21 +40,23 @@ export function HierarchicalLocationSearch() {
   const [showCommunityView, setShowCommunityView] = useState(false);
   const [initialRegionApplied, setInitialRegionApplied] = useState(false);
 
-  const { data: locations = [], isLoading: locationsLoading } = useQuery({
-    queryKey: ["/api/locations"],
-    queryFn: () => getLocations(),
+  // Single combined fetch — the server returns regions, city categories and
+  // sanitised locations in one round-trip. This replaces three separate
+  // `/api/regions`, `/api/city-categories` and `/api/locations` requests on
+  // landing-page cold starts.
+  const { data: tree, isLoading: treeLoading } = useQuery<{
+    regions: Region[];
+    cityCategories: CityCategory[];
+    locations: Location[];
+  }>({
+    queryKey: ["/api/location-tree"],
+    staleTime: 5 * 60_000,
   });
 
-  const { data: regions = [], isLoading: regionsLoading } = useQuery({
-    queryKey: ["/api/regions"],
-    queryFn: () => getRegions(),
-  });
-
-  const { data: cityCategories = [], isLoading: cityCategoriesLoading } = useQuery<CityCategory[]>({
-    queryKey: ["/api/city-categories"],
-  });
-
-  const isInitialLoading = regionsLoading || locationsLoading || cityCategoriesLoading;
+  const locations = tree?.locations ?? [];
+  const regions = tree?.regions ?? [];
+  const cityCategories = tree?.cityCategories ?? [];
+  const isInitialLoading = treeLoading;
 
   useEffect(() => {
     if (regions.length > 0 && !initialRegionApplied) {

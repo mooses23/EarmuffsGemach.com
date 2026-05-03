@@ -23,12 +23,14 @@ function withAdminLayout(Component: React.ComponentType<any>) {
 
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
-import Locations from "@/pages/locations";
-import Apply from "@/pages/apply";
-import Contact from "@/pages/contact";
-import Borrow from "@/pages/borrow";
-import AuthPage from "@/pages/auth-page";
-import Rules from "@/pages/rules";
+
+// Non-Home public routes are lazy so the landing page payload stays minimal.
+const Locations = lazy(() => import("@/pages/locations"));
+const Apply = lazy(() => import("@/pages/apply"));
+const Contact = lazy(() => import("@/pages/contact"));
+const Borrow = lazy(() => import("@/pages/borrow"));
+const AuthPage = lazy(() => import("@/pages/auth-page"));
+const Rules = lazy(() => import("@/pages/rules"));
 
 const SelfDepositPage = lazy(() => import("@/pages/self-deposit"));
 const StatusPage = lazy(() => import("@/pages/status"));

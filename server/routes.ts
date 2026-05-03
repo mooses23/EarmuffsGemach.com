@@ -370,6 +370,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Combined regions + city-categories + locations payload so the public
+  // landing page only does a single round-trip on cold start instead of
+  // three. Sanitised exactly like the individual endpoints. Cached for 5
+  // minutes with a generous stale-while-revalidate window — the underlying
+  // data only changes when an admin edits a location.
+  app.get("/api/location-tree", async (req, res) => {
+    try {
+      const [regions, cityCategories, locations] = await Promise.all([
+        storage.getAllRegions(),
+        storage.getAllCityCategories(),
+        storage.getAllLocations(),
+      ]);
+      const admin = viewerIsAdmin(req);
+      res.setHeader(
+        "Cache-Control",
+        admin
+          ? "private, max-age=0, must-revalidate"
+          : "public, max-age=300, stale-while-revalidate=86400",
+      );
+      res.json({
+        regions,
+        cityCategories,
+        locations: locations.map((l) => sanitizeLocationForViewer(l, admin)),
+      });
+    } catch (error) {
+      console.error("Error fetching location tree:", error);
+      res.status(500).json({ message: "Failed to fetch location tree" });
+    }
+  });
+
   app.get("/api/regions/:slug/locations", async (req, res) => {
     try {
       const { slug } = req.params;

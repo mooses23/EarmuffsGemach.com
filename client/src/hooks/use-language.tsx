@@ -1,7 +1,5 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useLayoutEffect } from "react";
-import { translations, TranslationKey } from "@/lib/translations";
-
-type Language = 'en' | 'he';
+import { getDict, loadLanguage, type TranslationKey, type Language } from "@/lib/translations";
 
 interface LanguageContextType {
   language: Language;
@@ -26,25 +24,47 @@ if (typeof document !== 'undefined') {
   const initial = getInitialLanguage();
   document.documentElement.lang = initial;
   document.documentElement.dir = initial === 'he' ? 'rtl' : 'ltr';
+  // Kick off HE chunk load early if HE is the persisted language so the
+  // first paint isn't stuck on EN strings.
+  if (initial === 'he') {
+    void loadLanguage('he');
+  }
 }
 
 const useIsoLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>(getInitialLanguage);
+  // Bumped whenever a previously-missing dictionary finishes loading so all
+  // consumers re-render with the correct strings.
+  const [, setRevision] = useState(0);
 
   useIsoLayoutEffect(() => {
     document.documentElement.lang = language;
     document.documentElement.dir = language === 'he' ? 'rtl' : 'ltr';
     localStorage.setItem('language', language);
+
+    if (!getDict(language)) {
+      let cancelled = false;
+      void loadLanguage(language).then(() => {
+        if (!cancelled) setRevision((r) => r + 1);
+      });
+      return () => { cancelled = true; };
+    }
   }, [language]);
 
   const toggleLanguage = () => {
-    setLanguage(prev => prev === 'en' ? 'he' : 'en');
+    setLanguage((prev) => {
+      const next: Language = prev === 'en' ? 'he' : 'en';
+      // Pre-warm the chunk so toggling feels instant.
+      if (!getDict(next)) void loadLanguage(next).then(() => setRevision((r) => r + 1));
+      return next;
+    });
   };
 
   const t = useCallback((key: TranslationKey): string => {
-    return translations[language][key] || key;
+    const dict = getDict(language) ?? getDict('en');
+    return (dict && dict[key]) || key;
   }, [language]);
 
   const isHebrew = language === 'he';

@@ -2,7 +2,12 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { HierarchicalLocationSearch } from "@/components/locations/hierarchical-location-search";
 import { useLanguage } from "@/hooks/use-language";
-import heroImage from "@assets/baby_1769929839890.jpg";
+import heroJpg384 from "@assets/optimized/hero-384.jpg";
+import heroJpg640 from "@assets/optimized/hero-640.jpg";
+import heroJpg1024 from "@assets/optimized/hero-1024.jpg";
+import heroWebp384 from "@assets/optimized/hero-384.webp";
+import heroWebp640 from "@assets/optimized/hero-640.webp";
+import heroWebp1024 from "@assets/optimized/hero-1024.webp";
 import { MapPin, Phone, RotateCcw } from "lucide-react";
 
 export default function Home() {
@@ -122,12 +127,25 @@ export default function Home() {
                 <div className="relative inline-block">
                   <div className="absolute inset-0 bg-slate-800 blur-2xl rounded-full scale-150"></div>
                   <div className="relative w-36 h-36 md:w-48 md:h-48 mx-auto rounded-2xl overflow-hidden" style={{ backgroundColor: '#1e293b' }}>
-                    <img 
-                      src={heroImage} 
-                      alt="Baby with earmuffs" 
-                      className="w-full h-full object-contain mix-blend-multiply"
-                      style={{ filter: 'brightness(1.1) contrast(1.05)' }}
-                    />
+                    <picture>
+                      <source
+                        type="image/webp"
+                        srcSet={`${heroWebp384} 384w, ${heroWebp640} 640w, ${heroWebp1024} 1024w`}
+                        sizes="(max-width: 768px) 144px, 192px"
+                      />
+                      <img
+                        src={heroJpg640}
+                        srcSet={`${heroJpg384} 384w, ${heroJpg640} 640w, ${heroJpg1024} 1024w`}
+                        sizes="(max-width: 768px) 144px, 192px"
+                        width={1094}
+                        height={1094}
+                        alt="Baby with earmuffs"
+                        className="w-full h-full object-contain mix-blend-multiply"
+                        style={{ filter: 'brightness(1.1) contrast(1.05)' }}
+                        decoding="async"
+                        {...({ fetchpriority: "high" } as any)}
+                      />
+                    </picture>
                   </div>
                 </div>
               </div>
