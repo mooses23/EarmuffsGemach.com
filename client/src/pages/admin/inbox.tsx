@@ -1,5 +1,31 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient, useInfiniteQuery } from "@tanstack/react-query";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
+import {
+  type SourceFilter,
+  type ReadFilter,
+  type ReplyFilter,
+  type Folder,
+  type GmailEmail,
+  type EmailsResponse,
+  type UnifiedItem,
+  type InboxThread,
+  type ThreadEntry,
+  type ThreadResponse,
+} from "./inbox/types";
+import {
+  parseEmailAddress,
+  formatDate,
+  safeDate,
+  sanitizeHtml,
+  groupKey,
+  extractUrls,
+} from "./inbox/utils";
+import { useInboxFilters } from "./inbox/useInboxFilters";
+import { useInboxKeyboardShortcuts } from "./inbox/useKeyboardShortcuts";
+import { ShortcutsHelp } from "./inbox/ShortcutsHelp";
+import { SuggestedDraftCard } from "./inbox/SuggestedDraftCard";
+import { Keyboard } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -72,280 +98,59 @@ import type { Contact, Location } from "@shared/schema";
 import { groupFormContacts } from "@shared/form-thread-grouping";
 import type { TranslationKey } from "@/lib/translations";
 
-type SourceFilter = "all" | "email" | "form";
-type ReadFilter = "all" | "unread" | "read";
-type ReplyFilter = "all" | "unreplied" | "replied";
-type Folder = "inbox" | "spam" | "trash" | "sent";
-
-// Persisted-filter state (Task #36). Saved to localStorage so an admin who
-// leaves the inbox to open a transaction or refresh the page returns to the
-// SAME triage view (e.g. "Needs reply" filter still active) instead of
-// resetting to All / All / All every time. The bump suffix lets us safely
-// invalidate stale shapes if the persisted format ever changes.
-const FILTER_STORAGE_KEY = "admin-inbox-filters-v1";
-
-interface PersistedFilterState {
-  folder: Folder;
-  sourceFilter: SourceFilter;
-  readFilter: ReadFilter;
-  replyFilter: ReplyFilter;
-  search: string;
-}
-
-const DEFAULT_FILTER_STATE: PersistedFilterState = {
-  folder: "inbox",
-  sourceFilter: "all",
-  readFilter: "all",
-  replyFilter: "all",
-  search: "",
-};
-
-// Read once on mount. Defensive against missing localStorage (SSR/private
-// mode), malformed JSON, and out-of-range enum values from older builds —
-// any unrecognized field falls back to its default. Strings (search) are
-// length-capped so a malicious/legacy huge value can't blow up state.
-function loadPersistedFilters(): PersistedFilterState {
-  if (typeof window === "undefined") return DEFAULT_FILTER_STATE;
-  try {
-    const raw = window.localStorage.getItem(FILTER_STORAGE_KEY);
-    if (!raw) return DEFAULT_FILTER_STATE;
-    const parsed = JSON.parse(raw) as Partial<PersistedFilterState>;
-    const folder: Folder =
-      parsed.folder === "inbox" || parsed.folder === "spam" || parsed.folder === "trash" || parsed.folder === "sent"
-        ? parsed.folder
-        : DEFAULT_FILTER_STATE.folder;
-    const sourceFilter: SourceFilter =
-      parsed.sourceFilter === "all" || parsed.sourceFilter === "email" || parsed.sourceFilter === "form"
-        ? parsed.sourceFilter
-        : DEFAULT_FILTER_STATE.sourceFilter;
-    const readFilter: ReadFilter =
-      parsed.readFilter === "all" || parsed.readFilter === "unread" || parsed.readFilter === "read"
-        ? parsed.readFilter
-        : DEFAULT_FILTER_STATE.readFilter;
-    const replyFilter: ReplyFilter =
-      parsed.replyFilter === "all" || parsed.replyFilter === "unreplied" || parsed.replyFilter === "replied"
-        ? parsed.replyFilter
-        : DEFAULT_FILTER_STATE.replyFilter;
-    const search = typeof parsed.search === "string" ? parsed.search.slice(0, 500) : DEFAULT_FILTER_STATE.search;
-    // If the persisted folder is Sent, normalize secondary filters to the same
-    // state that handleFolderChange would produce, so stale filter values from
-    // an older session don't produce an empty-looking Sent view on reload.
-    const normalizedSource: SourceFilter = folder === "sent" ? "email" : sourceFilter;
-    const normalizedRead: ReadFilter = folder === "sent" ? "all" : readFilter;
-    const normalizedReply: ReplyFilter = folder === "sent" ? "all" : replyFilter;
-    return { folder, sourceFilter: normalizedSource, readFilter: normalizedRead, replyFilter: normalizedReply, search };
-  } catch {
-    return DEFAULT_FILTER_STATE;
-  }
-}
-
-interface GmailEmail {
-  id: string;
-  threadId: string;
-  from: string;
-  to: string;
-  subject: string;
-  snippet: string;
-  body: string;
-  date: string;
-  isRead: boolean;
-  labels: string[];
-  // Server-authoritative thread totals (from /api/admin/emails/threads).
-  messageCount?: number;
-  unreadCount?: number;
-  // Lowercased concat of from+subject+body across every message in the thread,
-  // populated only by /api/admin/emails/threads. Used by inbox search to match
-  // tokens that only appear in older messages of a Gmail conversation.
-  searchText?: string;
-}
-
-interface EmailsResponse {
-  // `threads` from the new thread-grouped endpoint; `emails` from the legacy one.
-  threads?: GmailEmail[];
-  emails?: GmailEmail[];
-  nextPageToken?: string;
-}
-
-interface UnifiedItem {
-  key: string;
-  source: "email" | "form";
-  id: string | number;
-  threadId?: string;
-  fromName: string;
-  fromEmail: string;
-  subject: string;
-  body: string;
-  snippet: string;
-  date: string;
-  isRead: boolean;
-  isArchived?: boolean;
-  isSpam?: boolean;
-  // Server-authoritative thread counts; preferred over client-derived counts when set.
-  serverMessageCount?: number;
-  serverUnreadCount?: number;
-  // Recipient address — populated for outbound (SENT) Gmail items so the
-  // Sent folder can display "To: …" instead of "From: …".
-  toAddress?: string;
-  // Raw Gmail label IDs on the latest thread message (e.g. ['SENT', 'INBOX']).
-  // Used to detect outbound threads in any folder (not just the Sent folder).
-  labels?: string[];
-  // Lowercased concat of from+subject+body across EVERY message in this
-  // Gmail thread (set only on email items by /api/admin/emails/threads).
-  // Lets the inbox search match a token that only appears in an older
-  // message — without it, search would only see this row's "latest" body.
-  // Form items don't need this: every contact in a form thread is a
-  // standalone UnifiedItem already, so per-item body search already
-  // covers the whole conversation via `g.members.some(...)`.
-  searchText?: string;
-}
-
-function parseEmailAddress(from: string): { name: string; email: string } {
-  const m = from.match(/^\s*"?([^"<]+?)"?\s*<([^>]+)>\s*$/);
-  if (m) return { name: m[1].trim(), email: m[2].trim() };
-  if (from.includes("@")) return { name: from.split("@")[0], email: from.trim() };
-  return { name: from || "Unknown", email: "" };
-}
-
-function formatDate(dateStr: string | Date): string {
-  try {
-    const date = new Date(dateStr);
-    const now = new Date();
-    const isToday = date.toDateString() === now.toDateString();
-    if (isToday) {
-      return date.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
-    }
-    const sameYear = date.getFullYear() === now.getFullYear();
-    return date.toLocaleDateString(undefined, sameYear
-      ? { month: "short", day: "numeric" }
-      : { month: "short", day: "numeric", year: "numeric" });
-  } catch {
-    return String(dateStr);
-  }
-}
-
-function safeDate(input: string | Date | null | undefined): string {
-  if (!input) return new Date().toISOString();
-  const d = input instanceof Date ? input : new Date(input);
-  return isNaN(d.getTime()) ? new Date().toISOString() : d.toISOString();
-}
-
-function sanitizeHtml(body: string): string {
-  const html = body.includes("<") ? body : body.replace(/\n/g, "<br/>");
-  return DOMPurify.sanitize(html);
-}
-
-// Strip leading "Re:" / "Fwd:" / "Aw:" / "Tr:" prefixes and collapse
-// whitespace so two messages with the same underlying subject group together
-// in the thread view. Mirrors the server-side helper in openai-client.ts /
-// the /api/admin/inbox/thread endpoint so client and server agree on what
-// counts as "the same conversation".
-function normalizeSubject(s: string): string {
-  return String(s || "")
-    .replace(/^\s*((re|fw|fwd|aw|tr)\s*:\s*)+/i, "")
-    .replace(/\s+/g, " ")
-    .trim()
-    .toLowerCase();
-}
-
-// Stable per-conversation key. Email items thread by Gmail's native threadId
-// (with id fallback when threadId is missing). Form items thread loosely:
-// same sender + (identical | fuzzy-similar subject | empty subject within a
-// time window | any subject within a tight time window). The clustering
-// happens up front in `buildGroups` via `groupFormContacts` so this lookup
-// just maps a single item to its precomputed canonical key.
-function groupKey(item: UnifiedItem, formKeys: Map<string, string>): string {
-  if (item.source === "email") return `email::${item.threadId || item.id}`;
-  const precomputed = formKeys.get(String(item.id));
-  if (precomputed) return precomputed;
-  // Fallback (shouldn't normally hit): old key shape so the row still renders.
-  const email = (item.fromEmail || "").toLowerCase();
-  return `form::${email}::${normalizeSubject(item.subject)}`;
-}
-
-interface InboxThread {
-  key: string;
-  latest: UnifiedItem;
-  members: UnifiedItem[];
-  messageCount: number;
-  unreadCount: number;
-}
-
-interface ThreadEntry {
-  id: string;
-  direction: "inbound" | "outbound";
-  from: string;
-  to?: string;
-  subject: string;
-  body: string;
-  date: string;
-  isRead?: boolean;
-  source: "gmail" | "form" | "saved";
-  messageRef?: string;
-}
-
-interface ThreadResponse {
-  source: "email" | "form";
-  threadKey: string;
-  messages: ThreadEntry[];
-}
-
 export default function AdminInbox() {
   const { toast } = useToast();
   const { t, language } = useLanguage();
   const queryClient = useQueryClient();
 
   const [selected, setSelected] = useState<UnifiedItem | null>(null);
-  // Seed every filter from the persisted snapshot using LAZY useState
-  // initializers — React invokes these functions exactly once per state
-  // slot (on the very first render, never again), so localStorage is read
-  // only on mount and never on subsequent re-renders even though the
-  // surrounding component re-renders dozens of times as queries resolve.
-  const [search, setSearch] = useState<string>(() => loadPersistedFilters().search);
-  const [sourceFilter, setSourceFilter] = useState<SourceFilter>(() => loadPersistedFilters().sourceFilter);
-  const [readFilter, setReadFilter] = useState<ReadFilter>(() => {
-    if (typeof window !== "undefined") {
-      try {
-        const sp = new URLSearchParams(window.location.search);
-        const s = sp.get("status");
-        if (s === "unread" || s === "read" || s === "all") return s as ReadFilter;
-      } catch {}
-    }
-    return loadPersistedFilters().readFilter;
-  });
-  const [replyFilter, setReplyFilter] = useState<ReplyFilter>(() => loadPersistedFilters().replyFilter);
-  const [folder, setFolder] = useState<Folder>(() => loadPersistedFilters().folder);
-
-  // Reset secondary filters on every folder change so stale read/source/
-  // reply state from one folder doesn't produce a confusing empty list
-  // in another folder. Entering Sent pins source="email" (no form
-  // submissions exist there); all other folders default to source="all".
-  const handleFolderChange = (next: Folder) => {
-    setSourceFilter(next === "sent" ? "email" : "all");
-    setReadFilter("all");
-    setReplyFilter("all");
-    setFolder(next);
-  };
-
-  // Mirror filter state to localStorage on every change. Whenever the admin
-  // toggles a filter — including the clear-filters button (which calls the
-  // setters and so flows through this effect) — the new snapshot is written.
-  // Quietly swallows errors: storage may be full or unavailable in private
-  // browsing, and a failure here should never break the inbox.
+  // ===== Focus management =====
+  // When the admin opens a thread we move keyboard focus into the detail
+  // pane (the Back button) so keyboard/screen-reader users land in the new
+  // context. When they close it we restore focus to the row that opened it
+  // so j/k navigation continues from the same position.
+  const backButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lastOpenedRowKeyRef = useRef<string | null>(null);
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      const snapshot: PersistedFilterState = {
-        folder,
-        sourceFilter,
-        readFilter,
-        replyFilter,
-        search,
-      };
-      window.localStorage.setItem(FILTER_STORAGE_KEY, JSON.stringify(snapshot));
-    } catch {
-      // localStorage write failed — non-fatal, ignore.
+    if (selected) {
+      // Defer to the next tick so the detail pane has actually mounted.
+      const id = window.setTimeout(() => backButtonRef.current?.focus(), 0);
+      return () => window.clearTimeout(id);
     }
-  }, [folder, sourceFilter, readFilter, replyFilter, search]);
+    if (lastOpenedRowKeyRef.current) {
+      const key = lastOpenedRowKeyRef.current;
+      const id = window.setTimeout(() => {
+        document.querySelector<HTMLButtonElement>(`[data-testid="row-${key}-button"]`)?.focus();
+      }, 0);
+      return () => window.clearTimeout(id);
+    }
+  }, [selected]);
+  // All filter state lives in the dedicated hook — it reads localStorage
+  // exactly once on mount, debounces the search input, and mirrors changes
+  // back to storage. The handler on folder change resets secondary filters
+  // so stale state from one folder doesn't yield a confusingly-empty list
+  // elsewhere; entering Sent pins source="email" (no form submissions exist).
+  const filters = useInboxFilters();
+  const {
+    folder,
+    setFolder: handleFolderChange,
+    sourceFilter,
+    setSourceFilter,
+    readFilter,
+    setReadFilter,
+    replyFilter,
+    setReplyFilter,
+    search,
+    setSearch,
+    debouncedSearch,
+    clearAll: clearAllFilters,
+  } = filters;
+  // Help-overlay (?) and search-input ref (used by "/" keyboard shortcut).
+  const [helpOpen, setHelpOpen] = useState(false);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Suggested AI draft — stored separately from the user's reply text so
+  // generating a draft never clobbers in-progress typing.
+  const [suggestedDraft, setSuggestedDraft] = useState<string | null>(null);
   // Bulk-select mode lets the admin tick multiple rows and apply a single
   // batch action (Archive / Trash / Report-spam / Mark read) instead of
   // swiping each row individually.
@@ -647,7 +452,9 @@ export default function AdminInbox() {
   // collapsing it to just the matching message.
   const threadGroups: InboxThread[] = useMemo(() => {
     const allGroups = buildGroups(filtered);
-    const q = search.trim().toLowerCase();
+    // Use the debounced search value so each keystroke doesn't re-run the
+    // full filter chain over a long unified list.
+    const q = debouncedSearch.trim().toLowerCase();
     return allGroups.filter((g) => {
       // Read filter — a thread is "unread" if any sibling is unread, "read"
       // when every sibling has been read.
@@ -689,7 +496,7 @@ export default function AdminInbox() {
     // when the replied-refs query loads or refreshes — without it, an admin
     // who switches to "Needs reply" before the refs query resolves would see
     // stale results until another listed dep changed.
-  }, [filtered, readFilter, replyFilter, search, repliedRefMap]);
+  }, [filtered, readFilter, replyFilter, debouncedSearch, repliedRefMap]);
 
   // Canonical thread map across ALL loaded messages (no filters
   // applied). Mutation handlers — bulk actions, swipe gestures, detail
@@ -812,49 +619,171 @@ export default function AdminInbox() {
     (c) => c.isArchived
   ).length;
 
+  // ===== Optimistic-update helpers (Task #185) =====
+  // Both helpers follow the standard React-Query optimistic pattern:
+  //   1) cancel in-flight refetches so they can't clobber the optimistic state
+  //   2) snapshot current cache so onError can roll back
+  //   3) mutate the cache so the UI updates instantly
+  //   4) onError restores the snapshot
+  //   5) onSettled invalidates so server truth eventually wins
+  const EMAIL_THREADS_KEY = ["/api/admin/emails/threads", "infinite"] as const;
+  const CONTACT_KEY = ["/api/contact"] as const;
+
+  // Patch (or remove) a single Gmail email across every page of the
+  // infinite-query cache. `patch` returns the new email or null to drop it.
+  const patchEmailCache = async (
+    id: string,
+    patch: (e: GmailEmail) => GmailEmail | null,
+  ) => {
+    await qc.cancelQueries({ queryKey: EMAIL_THREADS_KEY });
+    const prev = qc.getQueryData<{ pages: EmailsResponse[] }>(EMAIL_THREADS_KEY);
+    qc.setQueryData<{ pages: EmailsResponse[] }>(EMAIL_THREADS_KEY, (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((p) => {
+          const list = p.threads ?? p.emails ?? [];
+          const next: GmailEmail[] = [];
+          for (const e of list) {
+            if (e.id === id) {
+              const patched = patch(e);
+              if (patched) next.push(patched);
+            } else next.push(e);
+          }
+          return p.threads ? { ...p, threads: next } : { ...p, emails: next };
+        }),
+      };
+    });
+    return prev;
+  };
+  const patchContactCache = async (
+    id: number,
+    patch: (c: Contact) => Contact | null,
+  ) => {
+    await qc.cancelQueries({ queryKey: CONTACT_KEY });
+    const prev = qc.getQueryData<Contact[]>(CONTACT_KEY);
+    qc.setQueryData<Contact[]>(CONTACT_KEY, (old) => {
+      if (!old) return old;
+      const next: Contact[] = [];
+      for (const c of old) {
+        if (c.id === id) {
+          const patched = patch(c);
+          if (patched) next.push(patched);
+        } else next.push(c);
+      }
+      return next;
+    });
+    return prev;
+  };
+
   // Mutations
   const markEmailRead = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/read`),
+    onMutate: async (id: string) => ({
+      prev: await patchEmailCache(id, (e) => ({ ...e, isRead: true, unreadCount: 0 })),
+    }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const markContactRead = useMutation({
     mutationFn: async ({ id, isRead }: { id: number; isRead: boolean }) =>
       apiRequest("PATCH", `/api/contact/${id}`, { isRead }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/contact"] }),
+    onMutate: async ({ id, isRead }) => ({
+      prev: await patchContactCache(id, (c) => ({ ...c, isRead })),
+    }),
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(CONTACT_KEY, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: CONTACT_KEY }),
   });
 
   // ===== Folder/spam/archive/trash mutations (emails + contacts) =====
+  // Each destructive email mutation removes the row from the current cached
+  // list immediately (so the inbox feels snappy on slow networks) and rolls
+  // back if the server rejects.
+  const optimisticRemoveEmail = (id: string) => patchEmailCache(id, () => null);
+
   const markEmailUnread = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/unread`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({
+      prev: await patchEmailCache(id, (e) => ({ ...e, isRead: false, unreadCount: Math.max(1, e.unreadCount ?? 1) })),
+    }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const archiveEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/archive`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({ prev: await optimisticRemoveEmail(id) }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const trashEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/trash`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({ prev: await optimisticRemoveEmail(id) }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const untrashEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/untrash`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({ prev: await optimisticRemoveEmail(id) }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const unarchiveEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/unarchive`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({ prev: await optimisticRemoveEmail(id) }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const spamEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/spam`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({ prev: await optimisticRemoveEmail(id) }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const notSpamEmailMut = useMutation({
     mutationFn: async (id: string) => apiRequest("POST", `/api/admin/emails/${id}/not-spam`),
-    onSuccess: () => invalidateEmailLists(),
+    onMutate: async (id: string) => ({ prev: await optimisticRemoveEmail(id) }),
+    onError: (_err, _id, ctx) => {
+      if (ctx?.prev) qc.setQueryData(EMAIL_THREADS_KEY, ctx.prev);
+    },
+    onSettled: () => invalidateEmailLists(),
   });
   const updateContactFlags = useMutation({
     mutationFn: async ({ id, ...flags }: { id: number; isRead?: boolean; isArchived?: boolean; isSpam?: boolean }) =>
       apiRequest("PATCH", `/api/contact/${id}`, flags),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["/api/contact"] }),
+    onMutate: async (vars) => {
+      // Read/unread is a flag flip; archive/spam removes the row from the
+      // visible list (it'll re-appear in Trash/Spam after the refetch).
+      const removes = vars.isArchived === true || vars.isSpam === true;
+      const prev = await patchContactCache(vars.id, (c) => {
+        if (removes) return null;
+        const next: Contact = { ...c };
+        if (vars.isRead !== undefined) next.isRead = vars.isRead;
+        if (vars.isArchived !== undefined) next.isArchived = vars.isArchived;
+        if (vars.isSpam !== undefined) next.isSpam = vars.isSpam;
+        return next;
+      });
+      return { prev };
+    },
+    onError: (_err, _vars, ctx) => {
+      if (ctx?.prev) qc.setQueryData(CONTACT_KEY, ctx.prev);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: CONTACT_KEY }),
   });
 
   // Generic swipe-action handlers — work for both sources.
@@ -1162,12 +1091,6 @@ export default function AdminInbox() {
       toast({ title: t("error"), description: err instanceof Error ? err.message : t("failedToSendReply"), variant: "destructive" }),
   });
 
-  function extractUrls(text: string): string[] {
-    const re = /https?:\/\/[^\s"'<>)\]]+/gi;
-    const matches = text.match(re) ?? [];
-    return Array.from(new Set(matches.map((u) => u.replace(/[.,;:!?]+$/, ""))));
-  }
-
   async function handleSendClick(item: UnifiedItem) {
     const urls = extractUrls(replyText);
     // Always send rawText so the backend can scan for bare-domain blocklist hits
@@ -1259,7 +1182,10 @@ export default function AdminInbox() {
       return (await res.json()) as GenerateResponse;
     },
     onSuccess: (data: GenerateResponse) => {
-      setReplyText(data.response);
+      // Render the AI draft as a "Suggested draft" card instead of
+      // overwriting whatever the admin has already typed in the reply
+      // textarea. The admin chooses to Use, Append, or Discard it.
+      setSuggestedDraft(data.response);
       setAiDraftSnapshot(data.response);
       setDraftClassification(data.classification ?? null);
       setDraftMeta({
@@ -1309,12 +1235,21 @@ export default function AdminInbox() {
   });
 
   const openItem = (item: UnifiedItem) => {
-    setSelected(item);
+    // Remember which row the admin opened so we can restore focus to it
+    // when the detail pane closes (a11y: keyboard nav continues smoothly).
+    lastOpenedRowKeyRef.current = item.key;
+    // Optimistically flip isRead before the request resolves so the detail
+    // header / row state updates instantly. The mutation invalidates the
+    // list query on success, reconciling the optimistic state with the
+    // server snapshot. On failure the next refetch reverts the row.
+    const optimistic = item.isRead ? item : { ...item, isRead: true };
+    setSelected(optimistic);
     setReplyText("");
     setReviewWarning(null);
     setMatchedLocation(null);
     setForwardNote("");
     setAiDraftSnapshot(null);
+    setSuggestedDraft(null);
     setDraftClassification(null);
     setDraftMeta(null);
     setShowWhyPanel(false);
@@ -1333,7 +1268,6 @@ export default function AdminInbox() {
       } else {
         markContactRead.mutate({ id: Number(item.id), isRead: true });
       }
-      setSelected({ ...item, isRead: true });
     }
   };
 
@@ -1415,6 +1349,100 @@ export default function AdminInbox() {
     onError: () => toast({ title: t("error"), description: t("msgUpdateFailed"), variant: "destructive" }),
   });
 
+  // ===== List virtualization =====
+  // useWindowVirtualizer mounts only the rows currently in the viewport (plus
+  // a small overscan). On a typical inbox with hundreds of threads this keeps
+  // scroll smooth and prevents every row from re-rendering on cache updates.
+  // We measure each row dynamically because thread rows have variable height
+  // (subjects wrap, badges/preview lines toggle).
+  const listContainerRef = useRef<HTMLDivElement | null>(null);
+  const rowVirtualizer = useWindowVirtualizer({
+    count: threadGroups.length,
+    estimateSize: () => 88,
+    overscan: 6,
+    // Offset from the top of the document — needed for window-virtualizer to
+    // line up scrollTop with row offsets.
+    scrollMargin: listContainerRef.current?.offsetTop ?? 0,
+  });
+
+  // ===== Keyboard navigation =====
+  // Tracks the cursor position in the visible list. Falls back to 0 when
+  // the user has not yet pressed j/k or when the list re-orders.
+  const [cursorIndex, setCursorIndex] = useState<number>(-1);
+  // Reset cursor when the visible list changes shape (folder/filter).
+  useEffect(() => {
+    setCursorIndex(-1);
+  }, [folder, sourceFilter, readFilter, replyFilter, debouncedSearch]);
+  // aria-live announcement for assistive tech (status badges + counts).
+  const [liveMessage, setLiveMessage] = useState<string>("");
+  useEffect(() => {
+    setLiveMessage(`Showing ${threadGroups.length} ${threadGroups.length === 1 ? "conversation" : "conversations"}`);
+  }, [threadGroups.length]);
+
+  useInboxKeyboardShortcuts({
+    onMoveDown: () => {
+      if (selected) return;
+      setCursorIndex((i) => Math.min(threadGroups.length - 1, (i < 0 ? -1 : i) + 1));
+    },
+    onMoveUp: () => {
+      if (selected) return;
+      setCursorIndex((i) => Math.max(0, (i < 0 ? 0 : i) - 1));
+    },
+    onOpen: () => {
+      if (selected) return;
+      const idx = cursorIndex;
+      if (idx >= 0 && idx < threadGroups.length) openItem(threadGroups[idx].latest);
+    },
+    onArchive: () => {
+      const target = selected ?? (cursorIndex >= 0 ? threadGroups[cursorIndex]?.latest : undefined);
+      if (!target || folder !== "inbox") return;
+      const members = groupMembersFor(target);
+      performThreadAction(members, "archive", t("inboxArchiveSuccess"), t("inboxArchiveFailed"), "unarchive", t("inboxRestoreSuccess"), t("inboxRestoreFailed"));
+      if (selected) setSelected(null);
+    },
+    onTrash: () => {
+      const target = selected ?? (cursorIndex >= 0 ? threadGroups[cursorIndex]?.latest : undefined);
+      if (!target || folder === "trash") return;
+      const members = groupMembersFor(target);
+      performThreadAction(members, "trash", t("inboxTrashSuccess"), t("inboxTrashFailed"), members.every((m) => m.source === "email") ? "untrash" : undefined, t("inboxRestoreSuccess"), t("inboxRestoreFailed"));
+      if (selected) setSelected(null);
+    },
+    onSpam: () => {
+      const target = selected ?? (cursorIndex >= 0 ? threadGroups[cursorIndex]?.latest : undefined);
+      if (!target || folder === "spam") return;
+      const members = groupMembersFor(target);
+      performThreadAction(members, "spam", t("inboxSpamSuccess"), t("inboxSpamFailed"), "notSpam", t("inboxNotSpamSuccess"), t("inboxNotSpamFailed"));
+      if (selected) setSelected(null);
+    },
+    onReply: () => {
+      if (selected) {
+        // Focus the reply textarea
+        const ta = document.querySelector<HTMLTextAreaElement>('[data-testid="textarea-reply-body"]');
+        ta?.focus();
+        return;
+      }
+      if (cursorIndex >= 0 && cursorIndex < threadGroups.length) openItem(threadGroups[cursorIndex].latest);
+    },
+    onToggleRead: () => {
+      const target = selected ?? (cursorIndex >= 0 ? threadGroups[cursorIndex]?.latest : undefined);
+      if (target) toggleReadStatus(target);
+    },
+    onFocusSearch: () => {
+      searchInputRef.current?.focus();
+      searchInputRef.current?.select();
+    },
+    onToggleSelect: () => {
+      if (selected) return;
+      if (selectMode) exitSelectMode(); else setSelectMode(true);
+    },
+    onShowHelp: () => setHelpOpen(true),
+    onEscape: () => {
+      if (helpOpen) setHelpOpen(false);
+      else if (selected) setSelected(null);
+      else if (selectMode) exitSelectMode();
+    },
+  });
+
   // ============ DETAIL VIEW ============
   // Resolve the full conversation members for the selected message
   // against the unfiltered thread map so detail-view actions
@@ -1427,7 +1455,7 @@ export default function AdminInbox() {
       <div className="py-10">
         <div className="container mx-auto px-4 max-w-4xl">
           <div className="flex items-center gap-4 mb-6">
-            <Button variant="ghost" size="sm" onClick={() => setSelected(null)} data-testid="button-back-to-inbox">
+            <Button ref={backButtonRef} variant="ghost" size="sm" onClick={() => setSelected(null)} data-testid="button-back-to-inbox" aria-label={t("backToInbox")}>
               <ArrowLeft className="h-4 w-4 mr-2" />
               {t("backToInbox")}
             </Button>
@@ -1686,6 +1714,21 @@ export default function AdminInbox() {
                   </div>
                 </div>
               )}
+              {suggestedDraft && (
+                <SuggestedDraftCard
+                  draft={suggestedDraft}
+                  hasUserText={!!replyText.trim()}
+                  onUse={() => {
+                    setReplyText(suggestedDraft);
+                    setSuggestedDraft(null);
+                  }}
+                  onAppend={() => {
+                    setReplyText((prev) => (prev.trim() ? `${prev}\n\n${suggestedDraft}` : suggestedDraft));
+                    setSuggestedDraft(null);
+                  }}
+                  onDiscard={() => setSuggestedDraft(null)}
+                />
+              )}
               <Textarea
                 placeholder={t("writeYourReply")}
                 value={replyText}
@@ -1693,7 +1736,59 @@ export default function AdminInbox() {
                 rows={10}
                 className="resize-none"
                 data-testid="textarea-reply-body"
+                aria-label={t("writeYourReply")}
               />
+              {/* Inline broken-link notice — replaces the prior blocking
+                  modal. Stays anchored above the Send button so the admin
+                  can either fix the link in the textarea above or click
+                  Send Anyway without losing context. */}
+              {brokenLinkWarning && (
+                <div
+                  className="rounded-md border border-destructive/40 bg-destructive/5 p-3 space-y-2"
+                  data-testid="notice-broken-link-warning"
+                  role="alert"
+                  aria-live="polite"
+                >
+                  <div className="flex items-start gap-2 text-sm">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                    <div className="flex-1 space-y-1">
+                      <div className="font-semibold">
+                        {brokenLinkWarning.links.length > 1 ? "Some links" : "A link"} in your reply could not be verified
+                      </div>
+                      <ul className="space-y-1">
+                        {brokenLinkWarning.links.map(({ url, reason }) => (
+                          <li key={url} className="rounded border border-destructive/30 bg-background px-2 py-1">
+                            <span className="break-all font-mono text-xs">{url}</span>
+                            {reason && <span className="block text-xs text-muted-foreground">{reason}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => setBrokenLinkWarning(null)}
+                      data-testid="button-broken-link-go-back"
+                    >
+                      Fix link
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => {
+                        const itemToSend = brokenLinkWarning.item;
+                        setBrokenLinkWarning(null);
+                        sendReplyMutation.mutate(itemToSend);
+                      }}
+                      data-testid="button-broken-link-send-anyway"
+                    >
+                      Send anyway
+                    </Button>
+                  </div>
+                </div>
+              )}
               <div className="flex flex-wrap justify-between items-center gap-2">
                 <div className="flex flex-wrap gap-2">
                   <Button
@@ -1899,43 +1994,6 @@ export default function AdminInbox() {
             </AlertDialogContent>
           </AlertDialog>
 
-          <AlertDialog open={brokenLinkWarning !== null} onOpenChange={(o) => !o && setBrokenLinkWarning(null)}>
-            <AlertDialogContent data-testid="dialog-broken-link-warning">
-              <AlertDialogHeader>
-                <AlertDialogTitle className="flex items-center gap-2">
-                  <AlertCircle className="h-5 w-5 text-destructive" />
-                  Potentially broken link detected
-                </AlertDialogTitle>
-                <AlertDialogDescription asChild>
-                  <div className="space-y-2 text-sm">
-                    <p>The following link{(brokenLinkWarning?.links.length ?? 0) > 1 ? "s" : ""} in your reply could not be verified:</p>
-                    <ul className="space-y-1">
-                      {(brokenLinkWarning?.links ?? []).map(({ url, reason }) => (
-                        <li key={url} className="flex flex-col gap-0.5 rounded border border-destructive/30 bg-destructive/5 px-2 py-1.5">
-                          <span className="break-all font-mono text-xs text-foreground">{url}</span>
-                          {reason && <span className="text-xs text-muted-foreground">{reason}</span>}
-                        </li>
-                      ))}
-                    </ul>
-                    <p className="text-muted-foreground">You can go back to fix the link, or send the reply anyway.</p>
-                  </div>
-                </AlertDialogDescription>
-              </AlertDialogHeader>
-              <AlertDialogFooter>
-                <AlertDialogCancel data-testid="button-broken-link-go-back">Go back to edit</AlertDialogCancel>
-                <AlertDialogAction
-                  data-testid="button-broken-link-send-anyway"
-                  onClick={() => {
-                    const itemToSend = brokenLinkWarning?.item;
-                    setBrokenLinkWarning(null);
-                    if (itemToSend) sendReplyMutation.mutate(itemToSend);
-                  }}
-                >
-                  Send anyway
-                </AlertDialogAction>
-              </AlertDialogFooter>
-            </AlertDialogContent>
-          </AlertDialog>
         </div>
       </div>
     );
@@ -1953,6 +2011,17 @@ export default function AdminInbox() {
 
   return (
     <>
+        <ShortcutsHelp open={helpOpen} onOpenChange={setHelpOpen} />
+        {/* Visually-hidden polite live region — announces filter/result
+            changes for screen readers without disrupting sighted users. */}
+        <div
+          role="status"
+          aria-live="polite"
+          className="sr-only"
+          data-testid="inbox-live-region"
+        >
+          {liveMessage}
+        </div>
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold flex items-center gap-3">
@@ -1987,6 +2056,16 @@ export default function AdminInbox() {
                 <GlossaryContent />
               </DialogContent>
             </Dialog>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setHelpOpen(true)}
+              data-testid="button-show-shortcuts"
+              aria-label="Show keyboard shortcuts"
+              title="Keyboard shortcuts (?)"
+            >
+              <Keyboard className="h-4 w-4" />
+            </Button>
             <Button variant="outline" size="sm" onClick={handleRefresh} disabled={emailQueries.isFetching} data-testid="button-refresh">
               <RefreshCw className={`h-4 w-4 mr-2 ${emailQueries.isFetching ? "animate-spin" : ""}`} />
               {t("refresh")}
@@ -2044,11 +2123,13 @@ export default function AdminInbox() {
             <div className="relative flex-1 min-w-[180px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
+                ref={searchInputRef}
                 placeholder={t("inboxSearchPlaceholder")}
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 className="pl-10"
                 data-testid="input-search"
+                aria-label={t("inboxSearchPlaceholder")}
               />
             </div>
             <div className="flex gap-2 flex-wrap items-center" data-testid="filters-secondary">
@@ -2102,17 +2183,7 @@ export default function AdminInbox() {
                 <Button
                   variant="ghost"
                   size="sm"
-                  onClick={() => {
-                    // Reset every persisted filter dimension so the admin
-                    // returns to the default view (Inbox / All / All / All
-                    // / empty search) in one click. The persist effect
-                    // mirrors these defaults to localStorage immediately.
-                    setFolder("inbox");
-                    setSourceFilter("all");
-                    setReadFilter("all");
-                    setReplyFilter("all");
-                    setSearch("");
-                  }}
+                  onClick={clearAllFilters}
                   data-testid="button-clear-filters"
                 >
                   {t("inboxClearFilters")}
@@ -2200,26 +2271,63 @@ export default function AdminInbox() {
                 ))}
               </div>
             ) : threadGroups.length === 0 ? (
-              <div className="p-12 text-center">
-                {folder === "sent" ? (
-                  <Send className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                ) : (
-                  <InboxIcon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                )}
-                <h3 className="text-lg font-medium">
-                  {folder === "sent"
-                    ? t("inboxSentEmpty")
-                    : folder === "spam"
-                    ? t("inboxSpamEmpty")
-                    : folder === "trash"
-                    ? t("inboxTrashEmpty")
-                    : t("inboxEmpty")}
-                </h3>
-                <p className="text-muted-foreground">{t("inboxEmptyDesc")}</p>
-              </div>
+              (() => {
+                // Highest-priority empty state: Gmail isn't connected at all,
+                // so there's nothing the admin can do until they fix the
+                // connection. Surface that explicitly above the bland copy.
+                if (gmailNotConfigured) {
+                  return (
+                    <div className="p-12 text-center" data-testid="empty-state-gmail-not-configured">
+                      <AlertCircle className="h-12 w-12 mx-auto text-amber-500 mb-4" />
+                      <h3 className="text-lg font-medium">Gmail isn't connected</h3>
+                      <p className="text-muted-foreground max-w-md mx-auto">
+                        Connect Gmail to start receiving and replying to email from this inbox.
+                      </p>
+                    </div>
+                  );
+                }
+                // Distinct empty states. When the user has narrowed with
+                // filters/search we surface a different message + a "clear
+                // filters" CTA instead of the bland generic empty copy.
+                const hasNarrowed = !!(debouncedSearch.trim() || sourceFilter !== "all" || readFilter !== "all" || replyFilter !== "all");
+                if (hasNarrowed) {
+                  return (
+                    <div className="p-12 text-center" data-testid="empty-state-no-results">
+                      <Search className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <h3 className="text-lg font-medium">No results match your filters</h3>
+                      <p className="text-muted-foreground">Try clearing the filters or searching for a different term.</p>
+                      <Button variant="outline" size="sm" className="mt-4" onClick={clearAllFilters} data-testid="button-empty-clear-filters">
+                        {t("inboxClearFilters")}
+                      </Button>
+                    </div>
+                  );
+                }
+                const map: Record<Folder, { icon: typeof InboxIcon; title: string; desc: string }> = {
+                  inbox: { icon: InboxIcon, title: t("inboxEmpty"), desc: t("inboxEmptyDesc") },
+                  sent: { icon: Send, title: t("inboxSentEmpty"), desc: "Replies you send will appear here." },
+                  spam: { icon: ShieldAlert, title: t("inboxSpamEmpty"), desc: "Spam-flagged messages land here so you can review them." },
+                  trash: { icon: Trash2, title: t("inboxTrashEmpty"), desc: "Trashed messages stay here until permanently deleted." },
+                };
+                const { icon: Icon, title, desc } = map[folder];
+                return (
+                  <div className="p-12 text-center" data-testid={`empty-state-${folder}`}>
+                    <Icon className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                    <h3 className="text-lg font-medium">{title}</h3>
+                    <p className="text-muted-foreground">{desc}</p>
+                  </div>
+                );
+              })()
             ) : (
-              <div className="divide-y">
-                {threadGroups.map((g) => {
+              <div
+                ref={listContainerRef}
+                role="list"
+                data-testid="inbox-list"
+                className="relative"
+                style={{ height: `${rowVirtualizer.getTotalSize()}px` }}
+              >
+                {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+                  const gIdx = virtualRow.index;
+                  const g = threadGroups[gIdx];
                   // One row per conversation; latest message is the preview.
                   const it = g.latest;
                   const isThreadUnread = g.unreadCount > 0;
@@ -2294,9 +2402,18 @@ export default function AdminInbox() {
                             ),
                         };
                   const isChecked = selectedKeys.has(it.key);
+                  const isCursor = cursorIndex === gIdx;
                   return (
-                    <SwipeableRow
+                    <div
                       key={g.key}
+                      data-index={gIdx}
+                      ref={rowVirtualizer.measureElement}
+                      className="absolute left-0 top-0 w-full border-b"
+                      style={{
+                        transform: `translateY(${virtualRow.start - rowVirtualizer.options.scrollMargin}px)`,
+                      }}
+                    >
+                    <SwipeableRow
                       testId={`row-${it.key}`}
                       rightAction={rightAction}
                       leftAction={leftAction}
@@ -2305,15 +2422,20 @@ export default function AdminInbox() {
                       // checkbox click target isn't fighting drag handlers.
                       disabled={selectMode}
                     >
+                      <div role="listitem">
                       <button
                         type="button"
                         onClick={() => (selectMode ? toggleRowSelection(it.key) : openItem(it))}
                         className={`w-full p-4 text-left hover-elevate active-elevate-2 transition-colors flex items-start gap-3 ${
                           isThreadUnread ? "bg-primary/10 dark:bg-primary/15" : ""
-                        } ${selectMode && isChecked ? "bg-primary/20" : ""}`}
+                        } ${selectMode && isChecked ? "bg-primary/20" : ""} ${
+                          isCursor ? "ring-2 ring-inset ring-primary/60" : ""
+                        }`}
                         data-testid={`row-${it.key}-button`}
                         data-unread={isThreadUnread ? "true" : "false"}
+                        data-cursor={isCursor ? "true" : undefined}
                         aria-pressed={selectMode ? isChecked : undefined}
+                        aria-label={`${isSentRow ? "Sent to" : "From"} ${it.fromName || it.toAddress || "Unknown"}: ${it.subject || "(no subject)"}${isThreadUnread ? ", unread" : ""}`}
                       >
                         {selectMode && (
                           // Visual-only checkbox — the outer <button> handles
@@ -2450,7 +2572,9 @@ export default function AdminInbox() {
                         </div>
                         {isThreadUnread && <div className="w-2.5 h-2.5 rounded-full bg-primary mt-2 flex-shrink-0 ring-2 ring-primary/30" />}
                       </button>
+                      </div>
                     </SwipeableRow>
+                    </div>
                   );
                 })}
               </div>
