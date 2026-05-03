@@ -1,4 +1,4 @@
-import React, { lazy, Suspense } from "react";
+import React, { lazy, Suspense, type ComponentType } from "react";
 import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -10,6 +10,24 @@ import { AdminLayout } from "@/components/admin/admin-layout";
 import { AuthProvider } from "@/hooks/use-auth";
 import { LanguageProvider } from "@/hooks/use-language";
 import { OperatorAuthProvider } from "@/hooks/use-operator-auth";
+import { ensureRest, type Language } from "@/lib/translations";
+
+// Resolves the persisted language synchronously so route chunks can wait
+// for the matching dictionary before mounting.
+function detectLang(): Language {
+  if (typeof localStorage !== "undefined" && localStorage.getItem("language") === "he") return "he";
+  return "en";
+}
+
+// Wrap React.lazy so non-Home routes don't resolve until the *rest*
+// translation dictionary for the active language is loaded. That guarantees
+// `t()` inside those pages never returns a raw key on first paint.
+function lazyWithRest<P extends object>(factory: () => Promise<{ default: ComponentType<P> }>) {
+  return lazy(async () => {
+    await ensureRest(detectLang());
+    return factory();
+  });
+}
 
 function withAdminLayout(Component: React.ComponentType<any>) {
   return function AdminLayoutWrapper(props: any) {
@@ -25,31 +43,33 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 
 // Non-Home public routes are lazy so the landing page payload stays minimal.
-const Locations = lazy(() => import("@/pages/locations"));
-const Apply = lazy(() => import("@/pages/apply"));
-const Contact = lazy(() => import("@/pages/contact"));
-const Borrow = lazy(() => import("@/pages/borrow"));
-const AuthPage = lazy(() => import("@/pages/auth-page"));
-const Rules = lazy(() => import("@/pages/rules"));
+// Each lazy module also waits on `ensureRest` so the rest translation chunk
+// is resolved before the page renders.
+const Locations = lazyWithRest(() => import("@/pages/locations"));
+const Apply = lazyWithRest(() => import("@/pages/apply"));
+const Contact = lazyWithRest(() => import("@/pages/contact"));
+const Borrow = lazyWithRest(() => import("@/pages/borrow"));
+const AuthPage = lazyWithRest(() => import("@/pages/auth-page"));
+const Rules = lazyWithRest(() => import("@/pages/rules"));
 
-const SelfDepositPage = lazy(() => import("@/pages/self-deposit"));
-const StatusPage = lazy(() => import("@/pages/status"));
-const WelcomePage = lazy(() => import("@/pages/welcome"));
+const SelfDepositPage = lazyWithRest(() => import("@/pages/self-deposit"));
+const StatusPage = lazyWithRest(() => import("@/pages/status"));
+const WelcomePage = lazyWithRest(() => import("@/pages/welcome"));
 
-const AdminDashboard = lazy(() => import("@/pages/admin/dashboard"));
-const AdminLocations = lazy(() => import("@/pages/admin/locations"));
-const AdminTransactions = lazy(() => import("@/pages/admin/transactions"));
-const AdminApplications = lazy(() => import("@/pages/admin/applications"));
-const AdminPaymentMethods = lazy(() => import("@/pages/admin/payment-methods"));
-const PaymentStatusMonitor = lazy(() => import("@/pages/admin/payment-status-monitor"));
-const AdminInbox = lazy(() => import("@/pages/admin/inbox"));
-const AdminGlossary = lazy(() => import("@/pages/admin/glossary"));
-const AdminAnalytics = lazy(() => import("@/pages/admin/analytics"));
+const AdminDashboard = lazyWithRest(() => import("@/pages/admin/dashboard"));
+const AdminLocations = lazyWithRest(() => import("@/pages/admin/locations"));
+const AdminTransactions = lazyWithRest(() => import("@/pages/admin/transactions"));
+const AdminApplications = lazyWithRest(() => import("@/pages/admin/applications"));
+const AdminPaymentMethods = lazyWithRest(() => import("@/pages/admin/payment-methods"));
+const PaymentStatusMonitor = lazyWithRest(() => import("@/pages/admin/payment-status-monitor"));
+const AdminInbox = lazyWithRest(() => import("@/pages/admin/inbox"));
+const AdminGlossary = lazyWithRest(() => import("@/pages/admin/glossary"));
+const AdminAnalytics = lazyWithRest(() => import("@/pages/admin/analytics"));
 
-const OperatorIndex = lazy(() => import("@/pages/operator/index"));
-const OperatorLogin = lazy(() => import("@/pages/operator/login"));
-const OperatorDashboard = lazy(() => import("@/pages/operator/dashboard"));
-const OperatorDepositDashboard = lazy(() => import("@/pages/operator/deposit-dashboard"));
+const OperatorIndex = lazyWithRest(() => import("@/pages/operator/index"));
+const OperatorLogin = lazyWithRest(() => import("@/pages/operator/login"));
+const OperatorDashboard = lazyWithRest(() => import("@/pages/operator/dashboard"));
+const OperatorDepositDashboard = lazyWithRest(() => import("@/pages/operator/deposit-dashboard"));
 
 function PageLoader() {
   return (

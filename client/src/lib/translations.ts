@@ -1,53 +1,116 @@
-// Translations registry. EN ships in the initial bundle so the landing page
-// renders instantly in the default language; HE is dynamically imported the
-// first time the user switches to Hebrew. While HE is loading we transparently
-// fall back to the EN string for the same key, so no rendered text ever
-// disappears.
-import enTranslations, { type TranslationKey } from "./translations-en";
+// Translations registry — split four ways for landing-page perf.
+//
+//   translations-en-core.ts  (eager)  — strings used by Home, Header, Layout,
+//                                       MobileMenu, location search, and the
+//                                       founder's tribute. ~70 keys.
+//   translations-en-rest.ts  (lazy)   — every other EN string. ~1.1k keys.
+//   translations-he-core.ts  (lazy)   — HE counterpart of EN core.
+//   translations-he-rest.ts  (lazy)   — HE counterpart of EN rest.
+//
+// The Home page only needs *-core to render. Non-Home pages call
+// `ensureRest(language)` on import so their lazy chunk waits for the rest
+// dictionary before the route mounts; that keeps `t()` from ever returning
+// a raw key inside a rendered page.
+import enCore, { type CoreTranslationKey } from "./translations-en-core";
+import type { RestTranslationKey } from "./translations-en-rest";
 
-export type { TranslationKey };
+export type TranslationKey = CoreTranslationKey | RestTranslationKey;
 export type Language = "en" | "he";
 
-const dicts: Partial<Record<Language, Readonly<Record<TranslationKey, string>>>> = {
-  en: enTranslations as Readonly<Record<TranslationKey, string>>,
+type Dict = Readonly<Record<string, string>>;
+
+interface LangBuckets {
+  core?: Dict;
+  rest?: Dict;
+}
+
+const dicts: Record<Language, LangBuckets> = {
+  en: { core: enCore as Dict },
+  he: {},
 };
 
-const inflight: Partial<Record<Language, Promise<Readonly<Record<TranslationKey, string>>>>> = {};
+const inflight: { [K in Language]?: { core?: Promise<Dict>; rest?: Promise<Dict> } } = { en: {}, he: {} };
 
-export function getDict(lang: Language): Readonly<Record<TranslationKey, string>> | undefined {
-  return dicts[lang];
+function ensureInflight(lang: Language) {
+  return (inflight[lang] ??= {});
 }
 
-export function loadLanguage(lang: Language): Promise<Readonly<Record<TranslationKey, string>>> {
-  const cached = dicts[lang];
+export function loadCore(lang: Language): Promise<Dict> {
+  const cached = dicts[lang].core;
   if (cached) return Promise.resolve(cached);
-  const pending = inflight[lang];
-  if (pending) return pending;
-  let p: Promise<Readonly<Record<TranslationKey, string>>>;
-  if (lang === "he") {
-    p = import("./translations-he").then((m) => {
-      const d = m.default as Readonly<Record<TranslationKey, string>>;
-      dicts.he = d;
-      return d;
-    });
-  } else {
-    p = Promise.resolve(enTranslations as Readonly<Record<TranslationKey, string>>);
-  }
-  inflight[lang] = p;
-  return p;
+  const slot = ensureInflight(lang);
+  if (slot.core) return slot.core;
+  slot.core = (async () => {
+    const mod = lang === "he"
+      ? await import("./translations-he-core")
+      : await import("./translations-en-core");
+    const d = (mod.default as unknown) as Dict;
+    dicts[lang].core = d;
+    return d;
+  })();
+  return slot.core;
 }
 
-// Back-compat: a few call sites historically imported `translations[lang][key]`
-// directly. The Proxy preserves that synchronous shape while still allowing
-// the HE chunk to load lazily — until HE is ready we return the EN value.
-export const translations = new Proxy({} as Record<Language, Readonly<Record<TranslationKey, string>>>, {
+export function loadRest(lang: Language): Promise<Dict> {
+  const cached = dicts[lang].rest;
+  if (cached) return Promise.resolve(cached);
+  const slot = ensureInflight(lang);
+  if (slot.rest) return slot.rest;
+  slot.rest = (async () => {
+    const mod = lang === "he"
+      ? await import("./translations-he-rest")
+      : await import("./translations-en-rest");
+    const d = (mod.default as unknown) as Dict;
+    dicts[lang].rest = d;
+    return d;
+  })();
+  return slot.rest;
+}
+
+export function ensureRest(lang: Language): Promise<unknown> {
+  // Used as a side-effect import by every lazy non-Home page so the route's
+  // chunk doesn't resolve until the full dictionary is in memory.
+  return Promise.all([loadCore(lang), loadRest(lang)]);
+}
+
+export function lookup(lang: Language, key: TranslationKey): string | undefined {
+  const buckets = dicts[lang];
+  return (
+    buckets.core?.[key as string] ??
+    buckets.rest?.[key as string] ??
+    dicts.en.core?.[key as string] ??
+    dicts.en.rest?.[key as string]
+  );
+}
+
+export function isRestLoaded(lang: Language): boolean {
+  return !!dicts[lang].rest;
+}
+
+export function isCoreLoaded(lang: Language): boolean {
+  return !!dicts[lang].core;
+}
+
+// Back-compat: a few historical call sites do `translations[lang][key]`.
+// The Proxy preserves that synchronous shape; until the requested chunk is
+// loaded, falls back to whatever EN bucket has the key.
+export const translations = new Proxy({} as Record<Language, Dict>, {
   get(_t, prop: string) {
     const lang = prop as Language;
-    const d = dicts[lang];
-    if (d) return d;
-    if (lang === "he") {
-      void loadLanguage("he");
+    const buckets = dicts[lang];
+    if (buckets.core || buckets.rest) {
+      // Merge views; lazy at access time.
+      return new Proxy({} as Dict, {
+        get(_x, key: string) {
+          return lookup(lang, key as TranslationKey) ?? key;
+        },
+      });
     }
-    return enTranslations as Readonly<Record<TranslationKey, string>>;
+    if (lang === "he") void loadCore("he");
+    return new Proxy({} as Dict, {
+      get(_x, key: string) {
+        return (dicts.en.core?.[key] as string | undefined) ?? key;
+      },
+    });
   },
 });

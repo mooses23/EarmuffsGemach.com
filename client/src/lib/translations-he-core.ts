@@ -1,0 +1,85 @@
+import { rulesContent } from "@shared/rules-content";
+
+import type { CoreTranslationKey } from "./translations-en-core";
+
+const dict: Record<CoreTranslationKey, string> = {
+    home: "בית",
+    selfDeposit: "הפקדה עצמית",
+    ourRules: "התקנון שלנו",
+    openLocation: "פתיחת סניף",
+    contact: "צור קשר",
+    operatorPin: "קוד מפעיל",
+    adminLogin: "כניסת מנהל",
+    logOut: "התנתק",
+    operatorDashboard: "לוח בקרה למפעיל",
+    adminDashboard: "לוח בקרה למנהל",
+    switchToHebrew: "עברית",
+    switchToEnglish: "English",
+    login: "התחברות",
+    babyBanzGemach: "גמ״ח בייבי בנז",
+    babyBanz: "בייבי בנז",
+    babyBanzEarmuffsGemach: "גמ״ח אוזניות בייבי בנז",
+    babyBanzEarmuffs: "אוזניות בייבי בנז",
+
+    // Home page
+    findBabyEarmuffsNearYou: "מצא אוזניות לתינוק בקרבתך",
+    homeHeroDescription: "הגן על שמיעת התינוק שלך עם רשת הגמ״ח העולמית שלנו. חפש לפי מיקוד, עיר או קוד מיקום כדי למצוא את הסניף הקרוב.",
+    howItWorks: "איך זה עובד",
+    howItWorksDescription: "רשת הגמ״ח שלנו מקלה על הגנת שמיעת התינוק באירועים ושמחות.",
+    findALocation: "מצא מיקום",
+    findLocationDescription: "חפש את סניף הגמ״ח הקרוב אליך באמצעות כלי החיפוש למעלה.",
+    contactAndReserve: "צור קשר והזמן",
+    contactReserveDescription: "התקשר או שלח הודעה לרכז הסניף כדי להזמין אוזניות לאירוע שלך.",
+    protectAndReturn: "הגן והחזר",
+    protectReturnDescription: "השתמש באוזניות כדי להגן על שמיעת התינוק והחזר אותן בסיום.",
+    wantToOpenLocation: "רוצה לפתוח סניף?",
+    wantToOpenLocationDescription: "עזור להרחיב את הרשת שלנו על ידי פתיחת סניף גמ״ח בקהילה שלך.",
+    applyToOpenLocation: "הגש בקשה לפתיחת סניף",
+
+    // Rules page — sourced from shared/rules-content.ts (single source of truth with AI seed docs)
+    searchPlaceholder: "חפש בכל המיקומים או בחר יבשת למטה...",
+    chooseYourContinent: "בחר את היבשת שלך",
+    selectContinentBrowse: "בחר יבשת לצפייה בערים פופולריות ומיקומים",
+    backToContinents: "חזרה ליבשות",
+    locationsAvailable: "מיקומים זמינים",
+    noLocationsFound: "לא נמצאו מיקומים",
+    tryAdjustingSearch: "נסה לשנות את החיפוש או עיין בערים אחרות",
+    showing: "מציג",
+    locations: "מיקומים",
+    searchLocationsIn: "חפש מיקומים ב",
+    choosePopularCity: "בחר עיר פופולרית או עיין בכל המיקומים",
+    allStates: "כל המדינות",
+    all: "הכל",
+    communities: "קהילות",
+    cities: "ערים",
+    more: "עוד",
+    active: "פעיל",
+    inactive: "לא פעיל",
+    contactLabel: "איש קשר:",
+    depositLabel: "פיקדון:",
+    noStockInfo: "אין מידע על מלאי",
+    preferred: "מועדף",
+    callAction: "התקשר",
+    smsAction: "הודעה",
+    whatsappAction: "וואטסאפ",
+    prefillBorrowMessage: "שלום, אשמח לשאול אוזניות Baby Banz מ{location}. האם יש זמין?",
+    switchToHebrewMobile: "עבור לעברית",
+    switchToEnglishMobile: "עבור לאנגלית",
+
+    // Form Labels
+    region: "אזור",
+    earmuffsGemach: "גמ\"ח אוזניות",
+    tapToReadStory: "· הקש כדי לקרוא את הסיפור שלה ·",
+    tributeAriaLabel: "לקרוא את הסיפור מאחורי הארגון",
+    tributePara1Lead: "הגמ״ח הזה התחיל מ",
+    tributeFounderName: "רבקה",
+    tributeFounderHonor: "ע״ה",
+    tributePara1Tail: " — מרעיון פשוט אחד, להגן על שמיעתם של תינוקות — וצמח לרשת עולמית.",
+    tributePara2: "היא מעולם לא הסתפקה ברעיון על הנייר. מסניף יחיד היא הרחיבה אותו ליותר ממאה סניפים ברחבי העולם, ועזרה למשפחות בצורה מוחשית ומעשית.",
+    tributePara3: "במקביל היא ייסדה ארגון נוסף, המוקדש לילדים בעלי צרכים מיוחדים — אחת מני דרכים רבות שבהן חיה חיים של עשייה למען הזולת.",
+    tributePara4: "המורשת שלה ממשיכה לעשות שינוי בכל יום מחדש.",
+
+    // Refund / pay-later refund flow (Task #38)
+};
+
+export default dict;

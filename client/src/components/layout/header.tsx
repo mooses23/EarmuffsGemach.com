@@ -1,10 +1,10 @@
 import React, { useState, createContext, useContext } from "react";
 import { Link, useLocation } from "wouter";
 import { ChevronDown, User, LogOut, LayoutDashboard, Languages, Menu, X } from "lucide-react";
-import logoJpg80 from "@assets/optimized/logo-80.jpg";
-import logoJpg160 from "@assets/optimized/logo-160.jpg";
-import logoWebp80 from "@assets/optimized/logo-80.webp";
-import logoWebp160 from "@assets/optimized/logo-160.webp";
+const logoJpg80 = "/img/logo-80.jpg";
+const logoJpg160 = "/img/logo-160.jpg";
+const logoWebp80 = "/img/logo-80.webp";
+const logoWebp160 = "/img/logo-160.webp";
 import { MobileMenu } from "./mobile-menu";
 import { Button } from "@/components/ui/button";
 import {
@@ -53,7 +53,7 @@ export function Header() {
                     alt={t("earmuffsGemach")}
                     className="h-8 w-8 md:h-10 md:w-10 rounded-full object-cover"
                     decoding="async"
-                    {...({ fetchpriority: "high" } as any)}
+                    fetchpriority="high"
                   />
                 </picture>
               </div>

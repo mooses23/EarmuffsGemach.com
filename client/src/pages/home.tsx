@@ -2,12 +2,14 @@ import { useState } from "react";
 import { Link } from "wouter";
 import { HierarchicalLocationSearch } from "@/components/locations/hierarchical-location-search";
 import { useLanguage } from "@/hooks/use-language";
-import heroJpg384 from "@assets/optimized/hero-384.jpg";
-import heroJpg640 from "@assets/optimized/hero-640.jpg";
-import heroJpg1024 from "@assets/optimized/hero-1024.jpg";
-import heroWebp384 from "@assets/optimized/hero-384.webp";
-import heroWebp640 from "@assets/optimized/hero-640.webp";
-import heroWebp1024 from "@assets/optimized/hero-1024.webp";
+// Stable URLs from /public — match the <link rel="preload"> in index.html
+// so the browser doesn't download a hashed duplicate.
+const heroJpg384 = "/img/hero-384.jpg";
+const heroJpg640 = "/img/hero-640.jpg";
+const heroJpg1024 = "/img/hero-1024.jpg";
+const heroWebp384 = "/img/hero-384.webp";
+const heroWebp640 = "/img/hero-640.webp";
+const heroWebp1024 = "/img/hero-1024.webp";
 import { MapPin, Phone, RotateCcw } from "lucide-react";
 
 export default function Home() {
@@ -143,7 +145,7 @@ export default function Home() {
                         className="w-full h-full object-contain mix-blend-multiply"
                         style={{ filter: 'brightness(1.1) contrast(1.05)' }}
                         decoding="async"
-                        {...({ fetchpriority: "high" } as any)}
+                        fetchpriority="high"
                       />
                     </picture>
                   </div>

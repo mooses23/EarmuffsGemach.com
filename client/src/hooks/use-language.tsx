@@ -1,11 +1,21 @@
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useLayoutEffect } from "react";
-import { getDict, loadLanguage, type TranslationKey, type Language } from "@/lib/translations";
+import {
+  ensureRest,
+  isCoreLoaded,
+  loadCore,
+  loadRest,
+  lookup,
+  type TranslationKey,
+  type Language,
+} from "@/lib/translations";
 
 interface LanguageContextType {
   language: Language;
   toggleLanguage: () => void;
   isHebrew: boolean;
-  t: (key: TranslationKey) => string;
+  // Accepts any string for back-compat with pages that reference keys not
+  // present in the dictionary; missing keys fall through to the key itself.
+  t: (key: TranslationKey | (string & {})) => string;
 }
 
 const LanguageContext = createContext<LanguageContextType | null>(null);
@@ -24,14 +34,26 @@ if (typeof document !== 'undefined') {
   const initial = getInitialLanguage();
   document.documentElement.lang = initial;
   document.documentElement.dir = initial === 'he' ? 'rtl' : 'ltr';
-  // Kick off HE chunk load early if HE is the persisted language so the
-  // first paint isn't stuck on EN strings.
+  // Pre-warm the HE core chunk if HE is the persisted language so the very
+  // first paint shows Hebrew strings instead of an EN flash.
   if (initial === 'he') {
-    void loadLanguage('he');
+    void loadCore('he');
   }
 }
 
 const useIsoLayoutEffect = typeof window !== 'undefined' ? useLayoutEffect : useEffect;
+
+type IdleScheduler = (cb: () => void, opts?: { timeout?: number }) => number;
+interface MaybeIdleWindow {
+  requestIdleCallback?: IdleScheduler;
+}
+
+function schedule(cb: () => void) {
+  if (typeof window === 'undefined') return;
+  const ric = (window as unknown as MaybeIdleWindow).requestIdleCallback;
+  if (ric) ric(cb, { timeout: 2000 });
+  else setTimeout(cb, 1500);
+}
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>(getInitialLanguage);
@@ -44,27 +66,38 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     document.documentElement.dir = language === 'he' ? 'rtl' : 'ltr';
     localStorage.setItem('language', language);
 
-    if (!getDict(language)) {
-      let cancelled = false;
-      void loadLanguage(language).then(() => {
+    let cancelled = false;
+    const tasks: Promise<unknown>[] = [];
+    if (!isCoreLoaded(language)) tasks.push(loadCore(language));
+    if (tasks.length) {
+      void Promise.all(tasks).then(() => {
         if (!cancelled) setRevision((r) => r + 1);
       });
-      return () => { cancelled = true; };
     }
+    return () => { cancelled = true; };
+  }, [language]);
+
+  // After mount, when the browser is idle, preload the rest dictionary for
+  // the active language so navigating to non-Home routes feels instant.
+  useEffect(() => {
+    schedule(() => {
+      void ensureRest(language).then(() => setRevision((r) => r + 1));
+    });
   }, [language]);
 
   const toggleLanguage = () => {
     setLanguage((prev) => {
       const next: Language = prev === 'en' ? 'he' : 'en';
-      // Pre-warm the chunk so toggling feels instant.
-      if (!getDict(next)) void loadLanguage(next).then(() => setRevision((r) => r + 1));
+      // Pre-warm both core and rest for the new language so the toggle and
+      // any subsequent navigation are immediate.
+      if (!isCoreLoaded(next)) void loadCore(next).then(() => setRevision((r) => r + 1));
+      void loadRest(next).then(() => setRevision((r) => r + 1));
       return next;
     });
   };
 
-  const t = useCallback((key: TranslationKey): string => {
-    const dict = getDict(language) ?? getDict('en');
-    return (dict && dict[key]) || key;
+  const t = useCallback((key: TranslationKey | (string & {})): string => {
+    return lookup(language, key as TranslationKey) ?? (key as string);
   }, [language]);
 
   const isHebrew = language === 'he';

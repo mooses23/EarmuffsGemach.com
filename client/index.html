@@ -8,6 +8,25 @@
     <meta property="og:description" content="Find Baby Banz earmuffs near you — a free borrow-and-return gemach with locations worldwide." />
     <meta property="og:type" content="website" />
     <title>Baby Banz Earmuffs Gemach</title>
+
+    <!-- Preconnect / DNS-prefetch for the Stripe origin (used by lazy /self-deposit
+         flow) and Replit's dev banner script so handshake costs are paid early. -->
+    <link rel="preconnect" href="https://api.stripe.com" crossorigin />
+    <link rel="dns-prefetch" href="https://js.stripe.com" />
+    <link rel="dns-prefetch" href="https://replit.com" />
+
+    <!-- Preload the responsive hero so the browser starts the highest-priority
+         download in parallel with parsing the HTML, before any JS executes.
+         Stable /img/* paths come from client/public. -->
+    <link
+      rel="preload"
+      as="image"
+      type="image/webp"
+      href="/img/hero-640.webp"
+      imagesrcset="/img/hero-384.webp 384w, /img/hero-640.webp 640w, /img/hero-1024.webp 1024w"
+      imagesizes="(max-width: 768px) 144px, 192px"
+      fetchpriority="high"
+    />
   </head>
   <body>
     <div id="root"></div>

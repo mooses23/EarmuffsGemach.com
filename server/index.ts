@@ -1,23 +1,127 @@
 import express, { type Request, Response, NextFunction } from "express";
 import compression from "compression";
+import zlib from "node:zlib";
 import { setupVite, serveStatic, log } from "./vite.js";
 import { runStartupChecks } from "./startup-checks.js";
 
 const app = express();
 
-// Gzip/deflate every text-like response (HTML, JS, CSS, JSON). Keeps the
-// landing page payload small without changing any markup. Express picks the
-// best encoding the client's Accept-Encoding supports.
-app.use(
-  compression({
-    threshold: 1024,
-    filter: (req, res) => {
-      // Stripe webhook needs the raw body — don't ever transform it.
-      if (req.path === "/api/stripe/webhook") return false;
-      return compression.filter(req, res);
+// --- Response compression -----------------------------------------------
+// Per request we pick the best encoding the client supports:
+//   * Brotli  (Accept-Encoding: br)  — implemented inline below
+//   * Gzip    (everything else that compression() supports)
+// The Stripe webhook path is always passthrough so the raw body stays intact
+// for signature verification.
+const COMPRESSIBLE_TYPE = /\b(text|json|javascript|css|svg|xml|html|wasm)\b/i;
+const MIN_BYTES_FOR_BROTLI = 1024;
+
+// Node's res.write/end accept (chunk, encoding?, cb?) where chunk may be
+// string | Buffer | Uint8Array and the optional second arg may be either
+// a BufferEncoding or a callback. These narrow types describe exactly that
+// surface so we don't have to fall back to `any`.
+type ChunkInput = string | Buffer | Uint8Array | null | undefined;
+type WriteEncOrCb = BufferEncoding | ((err?: Error | null) => void) | undefined;
+type WriteCb = ((err?: Error | null) => void) | undefined;
+
+function toBuffer(chunk: ChunkInput, encOrCb: WriteEncOrCb): Buffer | undefined {
+  if (chunk == null) return undefined;
+  if (Buffer.isBuffer(chunk)) return chunk;
+  if (typeof chunk === "string") {
+    const enc: BufferEncoding = typeof encOrCb === "string" ? encOrCb : "utf8";
+    return Buffer.from(chunk, enc);
+  }
+  return Buffer.from(chunk);
+}
+
+function brotliMiddleware(req: Request, res: Response, next: NextFunction) {
+  if (req.method === "HEAD" || req.method === "OPTIONS") return next();
+
+  const stream = zlib.createBrotliCompress({
+    params: {
+      [zlib.constants.BROTLI_PARAM_QUALITY]: 4,
+      [zlib.constants.BROTLI_PARAM_MODE]: zlib.constants.BROTLI_MODE_TEXT,
     },
-  }),
-);
+  });
+  const _write = res.write.bind(res);
+  const _end = res.end.bind(res);
+  let initialized = false;
+  let passthrough = false;
+  let buffered = 0;
+
+  const init = (sample?: Buffer) => {
+    if (initialized) return;
+    initialized = true;
+    const ct = String(res.getHeader("content-type") || "");
+    const existing = res.getHeader("content-encoding");
+    const tooSmall = sample ? sample.length < MIN_BYTES_FOR_BROTLI : false;
+    if (existing || !COMPRESSIBLE_TYPE.test(ct) || tooSmall) {
+      passthrough = true;
+      return;
+    }
+    res.setHeader("Content-Encoding", "br");
+    res.setHeader("Vary", "Accept-Encoding");
+    res.removeHeader("Content-Length");
+    stream.on("data", (d: Buffer) => _write(d));
+    stream.on("end", () => _end());
+  };
+
+  const wrappedWrite = function (
+    chunk: ChunkInput,
+    encOrCb?: WriteEncOrCb,
+    cb?: WriteCb,
+  ): boolean {
+    const buf = toBuffer(chunk, encOrCb);
+    init(buf);
+    if (passthrough) return _write(chunk as Parameters<typeof _write>[0], encOrCb as Parameters<typeof _write>[1], cb);
+    if (buf) {
+      buffered += buf.length;
+      return stream.write(buf, typeof encOrCb === "function" ? encOrCb : cb);
+    }
+    return true;
+  };
+  res.write = wrappedWrite as typeof res.write;
+
+  const wrappedEnd = function (
+    chunk?: ChunkInput,
+    encOrCb?: WriteEncOrCb,
+    cb?: WriteCb,
+  ): Response {
+    const buf = toBuffer(chunk, encOrCb);
+    init(buf);
+    if (passthrough) return _end(chunk as Parameters<typeof _end>[0], encOrCb as Parameters<typeof _end>[1], cb);
+    if (buf) {
+      buffered += buf.length;
+      stream.write(buf);
+    }
+    if (buffered === 0) {
+      // Nothing to compress; drop brotli headers and end cleanly.
+      res.removeHeader("Content-Encoding");
+      stream.removeAllListeners();
+      stream.end();
+      return _end();
+    }
+    stream.end();
+    return res;
+  };
+  res.end = wrappedEnd as typeof res.end;
+
+  next();
+}
+
+const gzipMiddleware = compression({
+  threshold: MIN_BYTES_FOR_BROTLI,
+  filter: (req, res) => {
+    if (req.path === "/api/stripe/webhook") return false;
+    return compression.filter(req, res);
+  },
+});
+
+app.use((req, res, next) => {
+  if (req.path === "/api/stripe/webhook") return next();
+  const accept = String(req.headers["accept-encoding"] || "");
+  if (/\bbr\b/i.test(accept)) return brotliMiddleware(req, res, next);
+  return gzipMiddleware(req, res, next);
+});
 
 // Cache headers for fingerprinted Vite assets. Anything served out of /assets/
 // has a content-hash in the filename, so we can mark it immutable and let the
