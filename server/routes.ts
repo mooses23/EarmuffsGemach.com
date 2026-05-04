@@ -5460,11 +5460,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   /**
    * Rewrites bare `earmuffsgemach.com` occurrences (not already prefixed with
-   * `www.`) to `www.earmuffsgemach.com` in the given string.
-   * Only rewrites URLs/mentions that were already present — never injects new ones.
+   * `www.`, a subdomain dot, or an email `@`) to `www.earmuffsgemach.com`.
+   *
+   * Lookbehind logic:
+   *   - `(?<![.@\w])` — do NOT match when preceded by `.` (www.earmuffsgemach or
+   *     subdomain.earmuffsgemach), `@` (email address), or a word char (mid-word).
+   *   - `/` is intentionally NOT in the exclusion set, so `https://earmuffsgemach.com`
+   *     is correctly matched and rewritten to `https://www.earmuffsgemach.com`.
+   *
+   * Only rewrites occurrences already present — never injects new links.
    */
   function ensureWww(text: string): string {
-    return text.replace(/(?<![/\w])(?<!www\.)earmuffsgemach\.com/g, "www.earmuffsgemach.com");
+    return text.replace(/(?<![.@\w])earmuffsgemach\.com/g, "www.earmuffsgemach.com");
   }
 
   app.get("/api/admin/settings/domain", async (req, res) => {
