@@ -1209,6 +1209,30 @@ const enRest = {
     searchBorrowerOrId: "Borrower name or #ID",
     noChargedTransactionsFound: "No matching charged transactions.",
 
+    // Restocking overhaul (Task #198)
+    reorderNow: "Reorder Now",
+    internationalOrders: "International orders",
+    packageForwardingService: "Package forwarding service",
+    alternativeMethod: "Alternative method",
+    myUsDescription: "Use MyUS.com as a universal package-forwarding service — order from the USA Banz World site and ship internationally.",
+    australiaOrdersDesc: "Order directly from the Australian Baby Banz site:",
+    ukEuropeOrdersDesc: "Order directly from the UK / Europe Baby Banz site:",
+    sendRestockEmail: "Send Restock Email",
+    restockEmailConfirmTitle: "Send restock email?",
+    restockEmailConfirmDesc: "This will send region-appropriate restocking instructions to {email}.",
+    restockEmailSent: "Restock email sent",
+    restockEmailSentDesc: "Restock instructions sent to {name}.",
+    restockEmailFailed: "Failed to send restock email",
+    copyValue: "Copy",
+    valueCopied: "Copied!",
+    emailFieldTo: "To:",
+    emailFieldLocation: "Location:",
+    emailFieldSubject: "Subject:",
+    emailPreviewLabel: "Email preview:",
+    emailOrderLinkLabel: "Order link:",
+    emailLoginLabel: "Login:",
+    emailDiscountCodesLabel: "Discount codes:",
+    emailIntlNote: "Also includes: MyUS.com forwarding info for international shipping",
 
 } as const;
 

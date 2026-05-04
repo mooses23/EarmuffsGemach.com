@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { driver } from "driver.js";
 import type { Side } from "driver.js";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { Loader2, Home, LogOut, Package, ArrowRight, ArrowLeft, Phone, User, DollarSign, Check, AlertTriangle, Plus, Search, RotateCcw, CreditCard, CheckCircle, XCircle, Trash2, Clock, KeyRound, ShieldCheck, BellRing, Mail, MessageSquare } from "lucide-react";
+import { Loader2, Home, LogOut, Package, ArrowRight, ArrowLeft, Phone, User, DollarSign, Check, AlertTriangle, Plus, Search, RotateCcw, CreditCard, CheckCircle, XCircle, Trash2, Clock, KeyRound, ShieldCheck, BellRing, Mail, MessageSquare, Copy, ShoppingCart, ExternalLink, Globe } from "lucide-react";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { Link, useLocation } from "wouter";
@@ -10,7 +10,7 @@ import { useOperatorAuth } from "@/hooks/use-operator-auth";
 import { queryClient, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
-import { Transaction, Location, HEADBAND_COLORS, InventoryByColor, ReturnReminderEventWithSender } from "@shared/schema";
+import { Transaction, Location, Region, HEADBAND_COLORS, InventoryByColor, ReturnReminderEventWithSender } from "@shared/schema";
 import { isPhoneSendableViaSms } from "@shared/phone";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -127,8 +127,111 @@ function StockOverview({ inventory, totalStock, onAddStock, onEditStock }: { inv
   );
 }
 
-function RestockingInstructions() {
+function getShippingRegion(slug = '', name = ''): 'us-canada' | 'international' {
+  const s = slug.toLowerCase();
+  const n = name.toLowerCase();
+  if (
+    s.includes('united-states') || s === 'usa' || s === 'us' || s.includes('canada') ||
+    n.includes('united states') || n.includes('usa') || n.includes('canada')
+  ) {
+    return 'us-canada';
+  }
+  return 'international';
+}
+
+function getRegionalBanzInfo(slug = '', name = ''): { url: string; label: string } | null {
+  const s = slug.toLowerCase();
+  const n = name.toLowerCase();
+  if (s.includes('australia') || n.includes('australia')) {
+    return { url: 'https://banzworld.com.au', label: 'banzworld.com.au' };
+  }
+  if (
+    s.includes('uk') || s.includes('europe') || s.includes('united-kingdom') ||
+    n.includes('uk') || n.includes('europe') || n.includes('united kingdom')
+  ) {
+    return { url: 'https://banzworld.co.uk', label: 'banzworld.co.uk' };
+  }
+  return null;
+}
+
+function CopyableCredential({ value, copyKey, copiedKey, onCopy }: {
+  value: string;
+  copyKey: string;
+  copiedKey: string | null;
+  onCopy: (value: string, key: string) => void;
+}) {
   const { t } = useLanguage();
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <code className="text-white bg-white/10 px-1.5 py-0.5 rounded text-xs font-mono">{value}</code>
+      <button
+        type="button"
+        onClick={() => onCopy(value, copyKey)}
+        className="text-slate-400 hover:text-white transition-colors"
+        title={copiedKey === copyKey ? t('valueCopied') : t('copyValue')}
+      >
+        {copiedKey === copyKey
+          ? <Check className="h-3.5 w-3.5 text-green-400" />
+          : <Copy className="h-3.5 w-3.5" />}
+      </button>
+    </span>
+  );
+}
+
+function RestockingInstructions({ location }: { location: Location }) {
+  const { t } = useLanguage();
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const { data: regions = [] } = useQuery<Region[]>({
+    queryKey: ['/api/regions'],
+    staleTime: 5 * 60 * 1000,
+  });
+
+  const region = regions.find(r => r.id === location.regionId);
+  const shippingRegion = getShippingRegion(region?.slug, region?.name);
+  const regionalBanz = getRegionalBanzInfo(region?.slug, region?.name);
+  const isUsCanada = shippingRegion === 'us-canada';
+
+  const handleCopy = (value: string, key: string) => {
+    navigator.clipboard.writeText(value).then(() => {
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    }).catch(() => {});
+  };
+
+  const credentialsBlock = (
+    <ul className="list-disc list-inside ml-6 mt-1 space-y-1.5">
+      <li>
+        <strong className="text-white">{t('emailLabel')}</strong>{' '}
+        <CopyableCredential value="earmuffsgemach@gmail.com" copyKey="email" copiedKey={copiedKey} onCopy={handleCopy} />
+      </li>
+      <li>
+        <strong className="text-white">{t('passwordLabel')}</strong>{' '}
+        <CopyableCredential value="Babybanz" copyKey="password" copiedKey={copiedKey} onCopy={handleCopy} />
+      </li>
+    </ul>
+  );
+
+  const discountCodesBlock = (
+    <div className="border-t border-white/10 pt-4">
+      <h4 className="font-semibold mb-2 text-white">{t('ifDiscountsNoPopulate')}</h4>
+      <p className="mb-2">{t('useDiscountCodes')}</p>
+      <div className="space-y-2 ml-2">
+        <div className="flex items-center gap-2">
+          <CopyableCredential value="GEMACHSHIP" copyKey="code1" copiedKey={copiedKey} onCopy={handleCopy} />
+          <span>{t('forFreeShipping')}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-white">{t('combineWith')}</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <CopyableCredential value="GEMACH" copyKey="code2" copiedKey={copiedKey} onCopy={handleCopy} />
+          <span>{t('for50Off')}</span>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <Card className="glass-card">
       <CardHeader className="pb-3">
@@ -140,40 +243,110 @@ function RestockingInstructions() {
       </CardHeader>
       <CardContent>
         <div className="space-y-4 text-sm text-slate-300">
-          <div>
-            <h4 className="font-semibold mb-2 text-white">{t('usCanadaOrders')}</h4>
-            <ol className="list-decimal list-inside space-y-2 ml-2">
-              <li>{t('goTo')} <a href="https://usa.banzworld.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline" aria-label={t('visitBabyBanzWebsite')}>usa.banzworld.com</a></li>
-              <li>{t('clickOnAccount')}</li>
-              <li>{t('logInWith')}
-                <ul className="list-disc list-inside ml-6 mt-1 space-y-1">
-                  <li><strong className="text-white">{t('emailLabel')}</strong> earmuffsgemach@gmail.com</li>
-                  <li><strong className="text-white">{t('passwordLabel')}</strong> Babybanz</li>
-                </ul>
-              </li>
-              <li>{t('discountAutoApply')}</li>
-              <li>{t('enterShippingPayment')}</li>
-            </ol>
-          </div>
-          
-          <div className="border-t border-white/10 pt-4">
-            <h4 className="font-semibold mb-2 text-white">{t('ifDiscountsNoPopulate')}</h4>
-            <p className="mb-2">{t('useDiscountCodes')}</p>
-            <div className="space-y-2 ml-2">
-              <div className="flex items-start gap-2">
-                <Badge variant="outline" className="font-mono border-white/20 text-slate-300">GEMACHSHIP</Badge>
-                <span>{t('forFreeShipping')}</span>
+
+          {isUsCanada ? (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-white">{t('usCanadaOrders')}</h4>
+                <a
+                  href="https://usa.banzworld.com"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-blue-300 text-xs font-medium transition-colors"
+                >
+                  <ShoppingCart className="h-3.5 w-3.5" />
+                  {t('reorderNow')}
+                  <ExternalLink className="h-3 w-3" />
+                </a>
               </div>
-              <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-white">{t('combineWith')}</span>
+              <ol className="list-decimal list-inside space-y-2 ml-2">
+                <li>{t('goTo')} <a href="https://usa.banzworld.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">usa.banzworld.com</a></li>
+                <li>{t('clickOnAccount')}</li>
+                <li>
+                  {t('logInWith')}
+                  {credentialsBlock}
+                </li>
+                <li>{t('discountAutoApply')}</li>
+                <li>{t('enterShippingPayment')}</li>
+              </ol>
+            </div>
+          ) : (
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-semibold text-white">{t('internationalOrders')}</h4>
+                {regionalBanz ? (
+                  <a
+                    href={regionalBanz.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-blue-300 text-xs font-medium transition-colors"
+                  >
+                    <ShoppingCart className="h-3.5 w-3.5" />
+                    {t('reorderNow')}
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                ) : (
+                  <a
+                    href="https://www.myus.com"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-blue-300 text-xs font-medium transition-colors"
+                  >
+                    <ShoppingCart className="h-3.5 w-3.5" />
+                    {t('reorderNow')} (MyUS.com)
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                )}
               </div>
-              <div className="flex items-start gap-2">
-                <Badge variant="outline" className="font-mono border-white/20 text-slate-300">GEMACH</Badge>
-                <span>{t('for50Off')}</span>
+
+              {regionalBanz ? (
+                <div className="mb-3 space-y-2">
+                  <p>
+                    {regionalBanz.label.includes('.au') ? t('australiaOrdersDesc') : t('ukEuropeOrdersDesc')}
+                    {' '}<a href={regionalBanz.url} target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">{regionalBanz.label}</a>
+                  </p>
+                  <div className="p-2.5 bg-white/5 border border-white/10 rounded-lg">
+                    <div className="flex items-start gap-2">
+                      <Globe className="h-3.5 w-3.5 text-slate-400 mt-0.5 flex-shrink-0" />
+                      <div>
+                        <p className="text-xs text-slate-400">{t('myUsDescription')}</p>
+                        <a href="https://www.myus.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline text-xs mt-0.5 inline-block">myus.com</a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mb-3 p-3 bg-white/5 border border-white/10 rounded-lg">
+                  <div className="flex items-start gap-2">
+                    <Globe className="h-4 w-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="font-medium text-white text-xs mb-1">{t('packageForwardingService')}</p>
+                      <p className="text-xs text-slate-400">{t('myUsDescription')}</p>
+                      <a href="https://www.myus.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline text-xs mt-1 inline-block">myus.com</a>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="border-t border-white/10 pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">{t('alternativeMethod')}</p>
+                <h4 className="font-semibold mb-2 text-white">{t('usCanadaOrders')}</h4>
+                <ol className="list-decimal list-inside space-y-2 ml-2">
+                  <li>{t('goTo')} <a href="https://usa.banzworld.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">usa.banzworld.com</a></li>
+                  <li>{t('clickOnAccount')}</li>
+                  <li>
+                    {t('logInWith')}
+                    {credentialsBlock}
+                  </li>
+                  <li>{t('discountAutoApply')}</li>
+                  <li>{t('enterShippingPayment')}</li>
+                </ol>
               </div>
             </div>
-          </div>
-          
+          )}
+
+          {discountCodesBlock}
+
           <div className="border-t border-white/10 pt-4">
             <p className="text-xs text-slate-400 italic">
               {t('restockingNote')}
@@ -2992,7 +3165,7 @@ export default function OperatorDashboard() {
               onAddStock={() => setShowAddStock(true)} 
               onEditStock={(color, qty) => { setEditStockColor(color); setEditStockQty(qty); }}
             />
-            <div id="tour-restocking"><RestockingInstructions /></div>
+            <div id="tour-restocking"><RestockingInstructions location={operatorLocation} /></div>
             <RecentActivity transactions={transactions} locationId={operatorLocation.id} locationCode={operatorLocation.locationCode} />
           </TabsContent>
 

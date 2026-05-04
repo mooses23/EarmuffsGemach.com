@@ -586,6 +586,9 @@ export default function AdminLocations() {
   const [phoneEditLocation, setPhoneEditLocation] = useState<Location | null>(null);
   const [phoneEditValue, setPhoneEditValue] = useState("");
 
+  // ===== Restock email =====
+  const [restockEmailTarget, setRestockEmailTarget] = useState<Location | null>(null);
+
   // ===== Bulk selection (for the main table) =====
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
@@ -626,6 +629,23 @@ export default function AdminLocations() {
     queryKey: ["/api/admin/message-send-logs"],
     enabled: sendHistoryOpen,
     refetchInterval: sendHistoryOpen ? 10000 : false,
+  });
+
+  const sendRestockEmailMutation = useMutation({
+    mutationFn: (locationId: number) =>
+      apiRequest("POST", `/api/admin/locations/${locationId}/send-restock-email`),
+    onSuccess: (_, locationId) => {
+      const loc = restockEmailTarget;
+      setRestockEmailTarget(null);
+      toast({
+        title: t('restockEmailSent'),
+        description: t('restockEmailSentDesc').replace('{name}', loc?.name || String(locationId)),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/message-send-logs"] });
+    },
+    onError: (err) => {
+      toast({ title: t('restockEmailFailed'), description: err instanceof Error ? err.message : '', variant: "destructive" });
+    },
   });
 
   // Wraps all ADMIN-initiated edits to the message body (textarea onChanges).
@@ -1909,6 +1929,10 @@ export default function AdminLocations() {
                                             <Send className="mr-2 h-4 w-4" />
                                             Send Message
                                           </DropdownMenuItem>
+                                          <DropdownMenuItem onClick={() => setRestockEmailTarget(location)} disabled={!location.email}>
+                                            <Mail className="mr-2 h-4 w-4" />
+                                            {t('sendRestockEmail')}
+                                          </DropdownMenuItem>
                                           <DropdownMenuItem onClick={() => handleEditLocation(location)}>
                                             <Edit className="mr-2 h-4 w-4" />
                                             {t('editLocation')}
@@ -2040,7 +2064,9 @@ export default function AdminLocations() {
                                       {timeStr}
                                     </div>
                                     {isNewBatch && log.batchId && (
-                                      <span className="text-[10px] text-muted-foreground/60 block mt-0.5">batch</span>
+                                      <span className="text-[10px] text-muted-foreground/60 block mt-0.5">
+                                        {log.batchId === 'restock' ? 'restock' : 'batch'}
+                                      </span>
                                     )}
                                   </TableCell>
                                   <TableCell className="py-1.5 font-medium">
@@ -2801,6 +2827,65 @@ export default function AdminLocations() {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Restock Email Confirmation Dialog */}
+        <AlertDialog open={!!restockEmailTarget} onOpenChange={(open) => { if (!open) setRestockEmailTarget(null); }}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5 text-primary" />
+                {t('restockEmailConfirmTitle')}
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div className="space-y-3">
+                  <p>
+                    {t('restockEmailConfirmDesc').replace('{email}', restockEmailTarget?.email || '')}
+                  </p>
+                  {restockEmailTarget && (() => {
+                    const targetRegion = regions.find(r => r.id === restockEmailTarget.regionId);
+                    const rSlug = (targetRegion?.slug || '').toLowerCase();
+                    const rName = (targetRegion?.name || '').toLowerCase();
+                    const isUS = rSlug.includes('united-states') || rSlug === 'usa' || rSlug === 'us' || rSlug.includes('canada') || rName.includes('united states') || rName.includes('canada');
+                    const isAU = !isUS && (rSlug.includes('australia') || rName.includes('australia'));
+                    const isUK = !isUS && !isAU && (rSlug.includes('uk') || rSlug.includes('europe') || rSlug.includes('united-kingdom') || rName.includes('uk') || rName.includes('europe') || rName.includes('united kingdom'));
+                    const orderSite = isUS ? 'usa.banzworld.com' : isAU ? 'banzworld.com.au' : isUK ? 'banzworld.co.uk' : 'usa.banzworld.com via MyUS.com';
+                    return (
+                      <div className="space-y-2">
+                        <div className="rounded-md border bg-muted/50 px-3 py-2 text-sm space-y-0.5">
+                          <div><span className="font-medium">{t('emailFieldTo')}</span> {restockEmailTarget.email}</div>
+                          <div><span className="font-medium">{t('emailFieldLocation')}</span> {restockEmailTarget.name} ({restockEmailTarget.locationCode})</div>
+                          <div><span className="font-medium">{t('emailFieldSubject')}</span> Baby Banz Earmuffs Gemach — Restocking Instructions</div>
+                        </div>
+                        <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
+                          <p className="font-medium text-foreground">{t('emailPreviewLabel')}</p>
+                          <p>{t('emailOrderLinkLabel')} <span className="font-mono">{orderSite}</span></p>
+                          <p>{t('emailLoginLabel')} earmuffsgemach@gmail.com / Babybanz</p>
+                          <p>{t('emailDiscountCodesLabel')} GEMACHSHIP (free shipping) + GEMACH (50% off)</p>
+                          {!isUS && <p>{t('emailIntlNote')}</p>}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={sendRestockEmailMutation.isPending}>
+                {t('cancel')}
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={() => restockEmailTarget && sendRestockEmailMutation.mutate(restockEmailTarget.id)}
+                disabled={sendRestockEmailMutation.isPending}
+              >
+                {sendRestockEmailMutation.isPending
+                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />{t('sending')}…</>
+                  : <><Mail className="h-4 w-4 mr-2" />{t('sendRestockEmail')}</>
+                }
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
     </TooltipProvider>
   );
 }

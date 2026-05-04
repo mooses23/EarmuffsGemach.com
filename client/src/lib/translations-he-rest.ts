@@ -1210,6 +1210,30 @@ const dict: Record<RestTranslationKey, string> = {
     searchBorrowerOrId: "שם שואל או #מזהה",
     noChargedTransactionsFound: "לא נמצאו עסקאות שחויבו תואמות.",
 
+    // Restocking overhaul (Task #198)
+    reorderNow: "הזמן עכשיו",
+    internationalOrders: "הזמנות בינלאומיות",
+    packageForwardingService: "שירות העברת חבילות",
+    alternativeMethod: "שיטה חלופית",
+    myUsDescription: "השתמש ב-MyUS.com כשירות העברת חבילות אוניברסלי — הזמן מאתר Banz World בארה\"ב ושלח לחו\"ל.",
+    australiaOrdersDesc: "הזמן ישירות מאתר Baby Banz האוסטרלי:",
+    ukEuropeOrdersDesc: "הזמן ישירות מאתר Baby Banz הבריטי/אירופאי:",
+    sendRestockEmail: "שלח מייל הזמנה מחדש",
+    restockEmailConfirmTitle: "לשלוח מייל הזמנה מחדש?",
+    restockEmailConfirmDesc: "פעולה זו תשלח הוראות הזמנה מחדש מותאמות לאזור אל {email}.",
+    restockEmailSent: "מייל הזמנה מחדש נשלח",
+    restockEmailSentDesc: "הוראות הזמנה מחדש נשלחו ל-{name}.",
+    restockEmailFailed: "שליחת מייל הזמנה מחדש נכשלה",
+    copyValue: "העתק",
+    valueCopied: "הועתק!",
+    emailFieldTo: "אל:",
+    emailFieldLocation: "מיקום:",
+    emailFieldSubject: "נושא:",
+    emailPreviewLabel: "תצוגת מייל:",
+    emailOrderLinkLabel: "קישור להזמנה:",
+    emailLoginLabel: "התחברות:",
+    emailDiscountCodesLabel: "קודי הנחה:",
+    emailIntlNote: "כולל גם: מידע על שירות העברת חבילות MyUS.com למשלוח בינלאומי",
 
 };
 

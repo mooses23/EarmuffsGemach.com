@@ -19,7 +19,7 @@ import { PayLaterService, prepareBorrowerStatusToken, commitBorrowerStatusToken,
 import { computeFeeForPaymentMethod } from "./depositFees.js";
 import { buildCanonicalConsentText, resolveConsentLocale } from "./consentHelper.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
-import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, getLabelUnreadCounts, sendReply, sendNewEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
+import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, getLabelUnreadCounts, sendReply, sendNewEmail, sendNewHtmlEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
 import { getTwilioConfigStatus, sendReturnReminderSMS, normalizePhoneForSms, validateTwilioSignature } from "./twilio-client.js";
 import {
   buildWelcomePreview,
@@ -5852,6 +5852,159 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (err: any) {
       console.error("admin/transactions/export.csv error:", err);
       res.status(500).json({ message: err.message || "Export failed" });
+    }
+  });
+
+  // ============================================================
+  // ADMIN: Send restock email to a single location (Task #198)
+  // ============================================================
+  app.post("/api/admin/locations/:id/send-restock-email", async (req, res) => {
+    if (!requireAdminDash(req, res)) return;
+    const locationId = parseInt(req.params.id, 10);
+    if (Number.isNaN(locationId)) return res.status(400).json({ message: "Invalid location ID" });
+
+    const location = await storage.getLocation(locationId);
+    if (!location) return res.status(404).json({ message: "Location not found" });
+    if (!location.email) return res.status(422).json({ message: "Location has no email address" });
+
+    const userId = req.isAuthenticated() ? ((req.user as { id?: number })?.id ?? null) : null;
+
+    try {
+      const regions = await storage.getAllRegions();
+      const region = regions.find(r => r.id === location.regionId);
+      const slug = (region?.slug || '').toLowerCase();
+      const rname = (region?.name || '').toLowerCase();
+
+      const isUsCanada =
+        slug.includes('united-states') || slug === 'usa' || slug === 'us' ||
+        slug.includes('canada') || rname.includes('united states') || rname.includes('canada');
+
+      let regionalBanzUrl: string | null = null;
+      let regionalBanzLabel: string | null = null;
+      if (!isUsCanada) {
+        if (slug.includes('australia') || rname.includes('australia')) {
+          regionalBanzUrl = 'https://banzworld.com.au';
+          regionalBanzLabel = 'banzworld.com.au';
+        } else if (
+          slug.includes('uk') || slug.includes('europe') || slug.includes('united-kingdom') ||
+          rname.includes('uk') || rname.includes('europe') || rname.includes('united kingdom')
+        ) {
+          regionalBanzUrl = 'https://banzworld.co.uk';
+          regionalBanzLabel = 'banzworld.co.uk';
+        }
+      }
+
+      const sanitizeStr = (s: string) => String(s || '').replace(/[\r\n]+/g, ' ').trim();
+      const htmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+      const locationDisplayName = htmlEsc(sanitizeStr(location.nameHe || location.name));
+      const subject = `Baby Banz Earmuffs Gemach — Restocking Instructions`;
+
+      const credentialTable = `
+        <table style="border-collapse:collapse;margin:12px 0;">
+          <tr>
+            <td style="padding:4px 16px 4px 0;font-weight:bold;color:#334155;">Email:</td>
+            <td style="padding:4px 0;"><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:13px;">earmuffsgemach@gmail.com</code></td>
+          </tr>
+          <tr>
+            <td style="padding:4px 16px 4px 0;font-weight:bold;color:#334155;">Password:</td>
+            <td style="padding:4px 0;"><code style="background:#f1f5f9;padding:2px 8px;border-radius:4px;font-size:13px;">Babybanz</code></td>
+          </tr>
+        </table>`;
+
+      const discountSection = `
+        <p style="margin:12px 0 4px;">If the discounts don't apply automatically, use these codes at checkout:</p>
+        <ul style="margin:4px 0;padding-left:20px;">
+          <li><strong>GEMACHSHIP</strong> — free shipping</li>
+          <li><strong>GEMACH</strong> — 50% off</li>
+        </ul>`;
+
+      const usaOrderSection = `
+        <p>Log in to <a href="https://usa.banzworld.com" style="color:#2563eb;">usa.banzworld.com</a> using the gemach account:</p>
+        ${credentialTable}
+        <p>The 50% discount and free shipping should apply automatically.</p>
+        ${discountSection}
+        <p style="margin-top:16px;">
+          <a href="https://usa.banzworld.com" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">Order Now on usa.banzworld.com →</a>
+        </p>`;
+
+      let orderingSection = '';
+      if (isUsCanada) {
+        orderingSection = `
+          <h2 style="color:#1e3a5f;margin:0 0 12px;">US &amp; Canada Orders</h2>
+          ${usaOrderSection}`;
+      } else if (regionalBanzUrl) {
+        orderingSection = `
+          <h2 style="color:#1e3a5f;margin:0 0 12px;">International Orders</h2>
+          <p>Order directly from your regional Baby Banz website:</p>
+          <p style="margin-top:12px;">
+            <a href="${regionalBanzUrl}" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">Order Now on ${regionalBanzLabel} →</a>
+          </p>
+          <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0;" />
+          <h3 style="color:#1e3a5f;margin:0 0 8px;">Alternative: order from the USA site</h3>
+          <p>You can also order via <a href="https://usa.banzworld.com" style="color:#2563eb;">usa.banzworld.com</a> and use <a href="https://www.myus.com" style="color:#2563eb;">MyUS.com</a> as a package-forwarding service to ship internationally.</p>
+          ${credentialTable}
+          ${discountSection}`;
+      } else {
+        orderingSection = `
+          <h2 style="color:#1e3a5f;margin:0 0 12px;">International Orders</h2>
+          <p>To order Baby Banz earmuffs from your region, use <a href="https://www.myus.com" style="color:#2563eb;">MyUS.com</a> as a package-forwarding service — order from the US site and MyUS ships it to you internationally.</p>
+          <p style="margin-top:12px;">
+            <a href="https://www.myus.com" style="display:inline-block;background:#2563eb;color:#fff;padding:10px 22px;border-radius:6px;text-decoration:none;font-weight:bold;">Get Started with MyUS.com →</a>
+          </p>
+          <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0;" />
+          <h3 style="color:#1e3a5f;margin:0 0 8px;">US Website Login</h3>
+          <p>When ordering from <a href="https://usa.banzworld.com" style="color:#2563eb;">usa.banzworld.com</a>, log in with:</p>
+          ${credentialTable}
+          ${discountSection}`;
+      }
+
+      const htmlBody = `
+        <div style="font-family:system-ui,sans-serif;max-width:600px;margin:0 auto;color:#334155;">
+          <div style="background:#1e3a5f;padding:28px 24px;border-radius:8px 8px 0 0;text-align:center;">
+            <h1 style="color:#fff;margin:0;font-size:20px;">Baby Banz Earmuffs Gemach</h1>
+            <p style="color:#94a3b8;margin:6px 0 0;font-size:14px;">Restocking Instructions</p>
+          </div>
+          <div style="padding:28px 24px;background:#fff;border:1px solid #e2e8f0;border-top:0;">
+            <p>Hello, <strong>${locationDisplayName}</strong> gemach!</p>
+            <p>Here are your restocking instructions for ordering new Baby Banz earmuffs.</p>
+            <hr style="border:0;border-top:1px solid #e2e8f0;margin:20px 0;" />
+            ${orderingSection}
+            <hr style="border:0;border-top:1px solid #e2e8f0;margin:24px 0;" />
+            <p style="color:#64748b;font-size:13px;">If you have any questions, please reply to this email. Thank you for running your gemach!</p>
+          </div>
+          <div style="padding:12px 24px;background:#f8fafc;border:1px solid #e2e8f0;border-top:0;border-radius:0 0 8px 8px;text-align:center;">
+            <p style="color:#94a3b8;font-size:12px;margin:0;">Baby Banz Earmuffs Gemach Network</p>
+          </div>
+        </div>`;
+
+      await sendNewHtmlEmail(sanitizeStr(location.email), subject, htmlBody);
+
+      await storage.createMessageSendLog({
+        locationId: location.id,
+        locationName: location.name,
+        locationCode: location.locationCode,
+        channel: 'email',
+        status: 'sent',
+        sentByUserId: userId,
+        batchId: 'restock',
+      });
+
+      return res.json({ ok: true });
+    } catch (err: unknown) {
+      console.error("admin/locations/send-restock-email error:", err);
+      try {
+        await storage.createMessageSendLog({
+          locationId: location.id,
+          locationName: location.name,
+          locationCode: location.locationCode,
+          channel: 'email',
+          status: 'failed',
+          error: err instanceof Error ? err.message : 'Unknown error',
+          sentByUserId: userId,
+          batchId: 'restock',
+        });
+      } catch (_) {}
+      return res.status(500).json({ message: err instanceof Error ? err.message : "Failed to send restock email" });
     }
   });
 

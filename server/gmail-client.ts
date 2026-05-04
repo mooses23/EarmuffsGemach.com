@@ -902,6 +902,36 @@ function extractEmailAddress(value: string): string {
   return cleaned;
 }
 
+export async function sendNewHtmlEmail(toEmail: string, subject: string, htmlBody: string): Promise<void> {
+  const recipient = extractEmailAddress(toEmail);
+  assertValidEmail(recipient);
+  const safeTo = sanitizeHeaderValue(recipient);
+  const safeSubject = sanitizeHeaderValue(subject);
+  const gmail = await getUncachableGmailClient();
+
+  const rawMessage = [
+    `To: ${safeTo}`,
+    `Subject: ${safeSubject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    htmlBody
+  ].join('\r\n');
+
+  const encodedMessage = Buffer.from(rawMessage)
+    .toString('base64')
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+
+  await gmail.users.messages.send({
+    userId: 'me',
+    requestBody: {
+      raw: encodedMessage
+    }
+  });
+}
+
 export async function sendNewEmail(toEmail: string, subject: string, body: string): Promise<void> {
   const recipient = extractEmailAddress(toEmail);
   assertValidEmail(recipient);
