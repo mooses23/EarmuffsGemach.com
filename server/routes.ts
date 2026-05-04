@@ -2163,7 +2163,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
         ? customSubject.trim()
         : contact.subject;
       const replySubject = baseSubject.startsWith('Re:') ? baseSubject : `Re: ${baseSubject}`;
-      await sendNewEmail(sanitize(contact.email), sanitize(replySubject), replyText.trim());
+      const contactReplyBody = (await getForceWwwDomain()) ? ensureWww(replyText.trim()) : replyText.trim();
+      await sendNewEmail(sanitize(contact.email), sanitize(replySubject), contactReplyBody);
       await storage.markContactRead(id);
 
       try {
@@ -3578,8 +3579,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         email.threadId,
         email.id,
       );
+      const forceWwwDraft = await getForceWwwDomain();
+      const emailDraft = forceWwwDraft ? ensureWww(result.draft) : result.draft;
       res.json({
-        response: result.draft,
+        response: emailDraft,
         classification: result.classification,
         needsHumanReview: result.needsHumanReview,
         reviewReason: result.reviewReason,
@@ -4641,10 +4644,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const subjectToUse = (typeof customSubject === 'string' && customSubject.trim())
         ? customSubject.trim()
         : email.subject;
+      const replyTextFinal = (await getForceWwwDomain()) ? ensureWww(replyText) : replyText;
       await sendReply(
         email.id,
         email.threadId,
-        replyText,
+        replyTextFinal,
         email.from,
         subjectToUse
       );
@@ -4705,8 +4709,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
         undefined,
         String(contact.id),
       );
+      const forceWwwContact = await getForceWwwDomain();
+      const contactDraft = forceWwwContact ? ensureWww(result.draft) : result.draft;
       res.json({
-        response: result.draft,
+        response: contactDraft,
         classification: result.classification,
         needsHumanReview: result.needsHumanReview,
         reviewReason: result.reviewReason,
@@ -5435,6 +5441,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+
+  // ===========================================================================
+  // Domain rewrite helper — temporarily forces www prefix on outgoing links.
+  // Controlled by the force_www_domain global setting toggled from admin UI.
+  // ===========================================================================
+
+  const FORCE_WWW_DOMAIN_KEY = "force_www_domain";
+
+  async function getForceWwwDomain(): Promise<boolean> {
+    const row = await storage.getGlobalSetting(FORCE_WWW_DOMAIN_KEY);
+    return row?.value === "true";
+  }
+
+  async function setForceWwwDomain(value: boolean): Promise<void> {
+    await storage.setGlobalSetting(FORCE_WWW_DOMAIN_KEY, value ? "true" : "false");
+  }
+
+  /**
+   * Rewrites bare `earmuffsgemach.com` occurrences (not already prefixed with
+   * `www.`) to `www.earmuffsgemach.com` in the given string.
+   * Only rewrites URLs/mentions that were already present — never injects new ones.
+   */
+  function ensureWww(text: string): string {
+    return text.replace(/(?<![/\w])(?<!www\.)earmuffsgemach\.com/g, "www.earmuffsgemach.com");
+  }
+
+  app.get("/api/admin/settings/domain", async (req, res) => {
+    if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    const forceWww = await getForceWwwDomain();
+    res.json({ forceWww });
+  });
+
+  app.patch("/api/admin/settings/domain", async (req, res) => {
+    if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    const { forceWww } = req.body || {};
+    if (typeof forceWww !== "boolean") {
+      return res.status(400).json({ message: "forceWww must be a boolean" });
+    }
+    await setForceWwwDomain(forceWww);
+    res.json({ forceWww });
+  });
 
   // ===========================================================================
   // Admin notification settings — configurable admin alert email address.

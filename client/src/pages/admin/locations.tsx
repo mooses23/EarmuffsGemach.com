@@ -489,6 +489,100 @@ function NotificationSettingsPanel() {
   );
 }
 
+const DOMAIN_PANEL_KEY = "gemachhub:domainSettingsPanelOpen";
+
+function DomainSettingsPanel() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+
+  const [panelOpen, setPanelOpen] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(DOMAIN_PANEL_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+
+  const { data, isLoading } = useQuery<{ forceWww: boolean }>({
+    queryKey: ["/api/admin/settings/domain"],
+  });
+
+  const [forceWww, setForceWww] = useState<boolean>(false);
+  const [seeded, setSeeded] = useState(false);
+
+  useEffect(() => {
+    if (data && !seeded) {
+      setForceWww(data.forceWww);
+      setSeeded(true);
+    }
+  }, [data, seeded]);
+
+  const saveMutation = useMutation({
+    mutationFn: async (value: boolean) => {
+      const res = await apiRequest("PATCH", "/api/admin/settings/domain", { forceWww: value });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Failed to save");
+      }
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["/api/admin/settings/domain"] });
+      setSeeded(false);
+      toast({ title: "Saved", description: "Domain link setting updated." });
+    },
+    onError: (err: Error) => toast({ title: "Error", description: err.message, variant: "destructive" }),
+  });
+
+  function handleToggle(value: boolean) {
+    setForceWww(value);
+    saveMutation.mutate(value);
+  }
+
+  return (
+    <details
+      className="mb-6 group"
+      open={panelOpen}
+      onToggle={(e) => {
+        const next = (e.currentTarget as HTMLDetailsElement).open;
+        setPanelOpen(next);
+        try { localStorage.setItem(DOMAIN_PANEL_KEY, String(next)); } catch {}
+      }}
+    >
+      <summary className="flex items-center gap-2 cursor-pointer list-none rounded-lg border bg-card px-4 py-3 text-sm font-medium select-none hover:bg-muted/50 transition-colors">
+        <Globe className="h-4 w-4 text-muted-foreground" />
+        <span>Domain link settings</span>
+        <ChevronDown className="ml-auto h-4 w-4 text-muted-foreground transition-transform group-open:rotate-180" />
+      </summary>
+      <Card className="mt-0 rounded-t-none border-t-0">
+        <CardContent className="pt-4 space-y-4">
+          {isLoading ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <div>
+              <label className="block text-xs font-medium mb-1">Force www prefix on outgoing links</label>
+              <div className="flex items-center gap-2 mt-2">
+                <Switch
+                  checked={forceWww}
+                  onCheckedChange={handleToggle}
+                  disabled={saveMutation.isPending}
+                  data-testid="switch-force-www"
+                />
+                <span className="text-sm">
+                  {saveMutation.isPending ? "Saving…" : forceWww ? "On — rewriting to www.earmuffsgemach.com" : "Off — links sent as-is"}
+                </span>
+              </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                When on, any link to earmuffsgemach.com in AI drafts and outbound replies is automatically rewritten to www.earmuffsgemach.com before sending. Turn off once DNS is fixed.
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </details>
+  );
+}
+
 function ServiceStatusBar({
   status,
   loading,
@@ -1404,6 +1498,7 @@ export default function AdminLocations() {
 
         <GlobalStripeSettingsPanel />
         <NotificationSettingsPanel />
+        <DomainSettingsPanel />
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
