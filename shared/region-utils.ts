@@ -29,10 +29,14 @@ export function getRegionalBanzInfo(slug = '', name = ''): { url: string; label:
   if (s.includes('australia') || n.includes('australia')) {
     return { url: 'https://banzworld.com.au', label: 'banzworld.com.au' };
   }
-  if (
-    s.includes('uk') || s.includes('europe') || s.includes('united-kingdom') ||
-    n.includes('uk') || n.includes('europe') || n.includes('united kingdom')
-  ) {
+  // Match 'uk' as a whole word/segment to avoid false positives like 'ukraine'.
+  // Slug: 'uk', 'uk-east', 'europe', 'united-kingdom', etc.
+  // Name: 'UK', 'United Kingdom', 'Europe', etc. — but NOT 'Ukraine'.
+  const slugIsUkEurope =
+    /(^|-)uk(-|$)/.test(s) || s.includes('europe') || s.includes('united-kingdom');
+  const nameIsUkEurope =
+    /\buk\b/.test(n) || n.includes('europe') || n.includes('united kingdom');
+  if (slugIsUkEurope || nameIsUkEurope) {
     return { url: 'https://banzworld.co.uk', label: 'banzworld.co.uk' };
   }
   return null;
