@@ -31,6 +31,7 @@ import {
 } from "./operatorOnboardingService.js";
 import { OPERATOR_WELCOME_CHANNELS, OPERATOR_CONTACT_PREFERENCES, type PayLaterStatus } from "../shared/schema.js";
 import { buildScenariosSeedBody, SCENARIOS_RESETTABLE_TITLES } from "../shared/scenarios-content.js";
+import { getShippingRegion, getRegionalBanzInfo } from "../shared/region-utils.js";
 import { scoreContactSpam } from "./spam-heuristic.js";
 import { groupContactsByThread } from "./inbox-threading.js";
 import {
@@ -5872,27 +5873,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const regions = await storage.getAllRegions();
       const region = regions.find(r => r.id === location.regionId);
-      const slug = (region?.slug || '').toLowerCase();
-      const rname = (region?.name || '').toLowerCase();
 
-      const isUsCanada =
-        slug.includes('united-states') || slug === 'usa' || slug === 'us' ||
-        slug.includes('canada') || rname.includes('united states') || rname.includes('canada');
-
-      let regionalBanzUrl: string | null = null;
-      let regionalBanzLabel: string | null = null;
-      if (!isUsCanada) {
-        if (slug.includes('australia') || rname.includes('australia')) {
-          regionalBanzUrl = 'https://banzworld.com.au';
-          regionalBanzLabel = 'banzworld.com.au';
-        } else if (
-          slug.includes('uk') || slug.includes('europe') || slug.includes('united-kingdom') ||
-          rname.includes('uk') || rname.includes('europe') || rname.includes('united kingdom')
-        ) {
-          regionalBanzUrl = 'https://banzworld.co.uk';
-          regionalBanzLabel = 'banzworld.co.uk';
-        }
-      }
+      const isUsCanada = getShippingRegion(region?.slug, region?.name) === 'us-canada';
+      const regionalBanz = isUsCanada ? null : getRegionalBanzInfo(region?.slug, region?.name);
+      const regionalBanzUrl = regionalBanz?.url ?? null;
+      const regionalBanzLabel = regionalBanz?.label ?? null;
 
       const sanitizeStr = (s: string) => String(s || '').replace(/[\r\n]+/g, ' ').trim();
       const htmlEsc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');

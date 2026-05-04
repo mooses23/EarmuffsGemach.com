@@ -12,6 +12,7 @@ import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 import { Transaction, Location, Region, HEADBAND_COLORS, InventoryByColor, ReturnReminderEventWithSender } from "@shared/schema";
 import { isPhoneSendableViaSms } from "@shared/phone";
+import { getShippingRegion, getRegionalBanzInfo } from "@shared/region-utils";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -127,32 +128,6 @@ function StockOverview({ inventory, totalStock, onAddStock, onEditStock }: { inv
   );
 }
 
-function getShippingRegion(slug = '', name = ''): 'us-canada' | 'international' {
-  const s = slug.toLowerCase();
-  const n = name.toLowerCase();
-  if (
-    s.includes('united-states') || s === 'usa' || s === 'us' || s.includes('canada') ||
-    n.includes('united states') || n.includes('usa') || n.includes('canada')
-  ) {
-    return 'us-canada';
-  }
-  return 'international';
-}
-
-function getRegionalBanzInfo(slug = '', name = ''): { url: string; label: string } | null {
-  const s = slug.toLowerCase();
-  const n = name.toLowerCase();
-  if (s.includes('australia') || n.includes('australia')) {
-    return { url: 'https://banzworld.com.au', label: 'banzworld.com.au' };
-  }
-  if (
-    s.includes('uk') || s.includes('europe') || s.includes('united-kingdom') ||
-    n.includes('uk') || n.includes('europe') || n.includes('united kingdom')
-  ) {
-    return { url: 'https://banzworld.co.uk', label: 'banzworld.co.uk' };
-  }
-  return null;
-}
 
 function CopyableCredential({ value, copyKey, copiedKey, onCopy }: {
   value: string;
