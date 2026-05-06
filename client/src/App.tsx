@@ -12,16 +12,11 @@ import { LanguageProvider } from "@/hooks/use-language";
 import { OperatorAuthProvider } from "@/hooks/use-operator-auth";
 import { ensureRest, type Language } from "@/lib/translations";
 
-// Resolves the persisted language synchronously so route chunks can wait
-// for the matching dictionary before mounting.
 function detectLang(): Language {
   if (typeof localStorage !== "undefined" && localStorage.getItem("language") === "he") return "he";
   return "en";
 }
 
-// Wrap React.lazy so non-Home routes don't resolve until the *rest*
-// translation dictionary for the active language is loaded. That guarantees
-// `t()` inside those pages never returns a raw key on first paint.
 function lazyWithRest<P extends object>(factory: () => Promise<{ default: ComponentType<P> }>) {
   return lazy(async () => {
     await ensureRest(detectLang());
@@ -42,9 +37,6 @@ function withAdminLayout(Component: React.ComponentType<any>) {
 import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 
-// Non-Home public routes are lazy so the landing page payload stays minimal.
-// Each lazy module also waits on `ensureRest` so the rest translation chunk
-// is resolved before the page renders.
 const Locations = lazyWithRest(() => import("@/pages/locations"));
 const Apply = lazyWithRest(() => import("@/pages/apply"));
 const Contact = lazyWithRest(() => import("@/pages/contact"));
@@ -60,11 +52,8 @@ const AdminDashboard = lazyWithRest(() => import("@/pages/admin/dashboard"));
 const AdminLocations = lazyWithRest(() => import("@/pages/admin/locations"));
 const AdminTransactions = lazyWithRest(() => import("@/pages/admin/transactions"));
 const AdminApplications = lazyWithRest(() => import("@/pages/admin/applications"));
-const AdminPaymentMethods = lazyWithRest(() => import("@/pages/admin/payment-methods"));
-const PaymentStatusMonitor = lazyWithRest(() => import("@/pages/admin/payment-status-monitor"));
 const AdminInbox = lazyWithRest(() => import("@/pages/admin/inbox"));
 const AdminGlossary = lazyWithRest(() => import("@/pages/admin/glossary"));
-const AdminAnalytics = lazyWithRest(() => import("@/pages/admin/analytics"));
 
 const OperatorIndex = lazyWithRest(() => import("@/pages/operator/index"));
 const OperatorLogin = lazyWithRest(() => import("@/pages/operator/login"));
@@ -105,28 +94,30 @@ function LayoutRouter() {
         <Route path="/self-deposit" component={SelfDepositPage} />
         <Route path="/rules" component={Rules} />
         <Route path="/status/:transactionId" component={StatusPage} />
-        
-        {/* Protected Admin Routes — all wrapped in AdminLayout via withAdminLayout HOC */}
+
+        {/* Protected Admin Routes */}
         <ProtectedRoute path="/admin" component={withAdminLayout(AdminDashboard)} requiredRole="admin" />
         <ProtectedRoute path="/admin/dashboard" component={withAdminLayout(AdminDashboard)} requiredRole="admin" />
         <ProtectedRoute path="/admin/locations" component={withAdminLayout(AdminLocations)} requiredRole="admin" />
         <ProtectedRoute path="/admin/transactions" component={withAdminLayout(AdminTransactions)} requiredRole="admin" />
         <ProtectedRoute path="/admin/applications" component={withAdminLayout(AdminApplications)} requiredRole="admin" />
-        <ProtectedRoute path="/admin/payment-methods" component={withAdminLayout(AdminPaymentMethods)} requiredRole="admin" />
-        <ProtectedRoute path="/admin/payment-status" component={withAdminLayout(PaymentStatusMonitor)} requiredRole="admin" />
         <ProtectedRoute path="/admin/inbox" component={withAdminLayout(AdminInbox)} requiredRole="admin" />
         <ProtectedRoute path="/admin/glossary" component={withAdminLayout(AdminGlossary)} requiredRole="admin" />
-        <ProtectedRoute path="/admin/analytics" component={withAdminLayout(AdminAnalytics)} requiredRole="admin" />
+
+        {/* Redirects — merged pages now live inside /admin/transactions */}
+        <Route path="/admin/payment-methods">{() => <Redirect to="/admin/transactions" />}</Route>
+        <Route path="/admin/payment-status">{() => <Redirect to="/admin/transactions" />}</Route>
+        <Route path="/admin/analytics">{() => <Redirect to="/admin/transactions" />}</Route>
         <Route path="/admin/emails">{() => <Redirect to="/admin/inbox" />}</Route>
         <Route path="/admin/messages">{() => <Redirect to="/admin/inbox" />}</Route>
         <Route path="/admin/payment-confirmations">{() => <Redirect to="/admin/transactions" />}</Route>
-        
-        {/* Operator Routes - Use localStorage-based auth via useOperatorAuth hook */}
+
+        {/* Operator Routes */}
         <Route path="/operator/login" component={OperatorLogin} />
         <Route path="/operator" component={OperatorDashboard} />
         <Route path="/operator/dashboard" component={OperatorDashboard} />
         <Route path="/operator/deposits" component={OperatorDepositDashboard} />
-        
+
         <Route component={NotFound} />
       </Switch>
     </Layout>

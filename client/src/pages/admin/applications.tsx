@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -77,6 +77,17 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { Textarea } from "@/components/ui/textarea";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Users, TrendingUp, BarChart3 } from "lucide-react";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip as RechartsTooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { z } from "zod";
 
 const locationFormSchema = insertLocationSchema.omit({ locationCode: true }).extend({
@@ -325,6 +336,29 @@ export default function AdminApplications() {
     rejected: applications.filter(a => a.status === "rejected").length,
   };
   const hiddenNonPendingCount = statusCounts.approved + statusCounts.rejected;
+
+  const appsByMonth = useMemo(() => {
+    const now = new Date();
+    const months: string[] = [];
+    for (let i = 11; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      months.push(key);
+    }
+    const counts: Record<string, number> = {};
+    months.forEach(m => { counts[m] = 0; });
+    applications.forEach(app => {
+      if (!app.submittedAt) return;
+      const d = new Date(app.submittedAt);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      if (counts[key] !== undefined) counts[key]++;
+    });
+    return months.map(key => {
+      const [year, month] = key.split("-");
+      const label = new Date(Number(year), Number(month) - 1).toLocaleString("default", { month: "short", year: "2-digit" });
+      return { month: label, Applications: counts[key] };
+    });
+  }, [applications]);
 
   return (
     <>
@@ -1003,6 +1037,81 @@ export default function AdminApplications() {
             </div>
           </DialogContent>
         </Dialog>
+
+        {/* ── Applications Analytics ── */}
+        <div className="mt-10 space-y-4">
+          <div>
+            <h2 className="text-xl font-semibold flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-muted-foreground" />
+              {t('analyticsNewApplications')}
+            </h2>
+            <p className="text-sm text-muted-foreground mt-1">{t('analyticsMonthlyApplications')}</p>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <Card>
+              <CardContent className="p-5 flex items-start gap-4">
+                <div className="p-2.5 rounded-lg bg-primary/10 shrink-0">
+                  <Users className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('total')}</p>
+                  <p className="text-2xl font-bold mt-0.5">{statusCounts.all}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5 flex items-start gap-4">
+                <div className="p-2.5 rounded-lg bg-amber-100 shrink-0">
+                  <TrendingUp className="h-5 w-5 text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('pending')}</p>
+                  <p className="text-2xl font-bold mt-0.5">{statusCounts.pending}</p>
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-5 flex items-start gap-4">
+                <div className="p-2.5 rounded-lg bg-green-100 shrink-0">
+                  <Check className="h-5 w-5 text-green-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{t('approved')}</p>
+                  <p className="text-2xl font-bold mt-0.5">{statusCounts.approved}</p>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <TrendingUp className="h-4 w-4 text-muted-foreground" />
+                {t('analyticsNewApplications')}
+              </CardTitle>
+              <CardDescription>{t('analyticsLast12Months')}</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={200}>
+                <LineChart data={appsByMonth} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="month" tick={{ fontSize: 11 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11 }} />
+                  <RechartsTooltip contentStyle={{ fontSize: 12, borderRadius: 8, border: "1px solid hsl(var(--border))" }} />
+                  <Line
+                    type="monotone"
+                    dataKey="Applications"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2}
+                    dot={{ r: 3, fill: "hsl(var(--primary))" }}
+                    activeDot={{ r: 5 }}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        </div>
     </>
   );
 }
