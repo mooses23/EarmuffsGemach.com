@@ -522,13 +522,19 @@ function LocationSettingsSheet({
             <Settings className="h-5 w-5" /> Settings
           </SheetTitle>
           <SheetDescription>
-            Stripe charge limits, notification email, domain link rewriting, and region/community taxonomy.
+            Stripe charge limits, notification email, domain link rewriting, region taxonomy, payment methods, and payment status.
           </SheetDescription>
         </SheetHeader>
         <Tabs defaultValue={initialTab ?? "stripe"} className="mt-4">
-          <TabsList className="grid grid-cols-4 w-full">
+          <TabsList className="grid grid-cols-3 sm:grid-cols-6 w-full gap-1 h-auto">
             <TabsTrigger value="stripe" className="text-xs">
               <CreditCard className="h-3.5 w-3.5 mr-1" /> Stripe
+            </TabsTrigger>
+            <TabsTrigger value="payments" className="text-xs">
+              <DollarSign className="h-3.5 w-3.5 mr-1" /> Payments
+            </TabsTrigger>
+            <TabsTrigger value="status" className="text-xs">
+              <BarChart3 className="h-3.5 w-3.5 mr-1" /> Status
             </TabsTrigger>
             <TabsTrigger value="notifications" className="text-xs">
               <Bell className="h-3.5 w-3.5 mr-1" /> Notify
@@ -542,6 +548,37 @@ function LocationSettingsSheet({
           </TabsList>
           <TabsContent value="stripe" className="mt-4">
             <StripeSettingsForm />
+          </TabsContent>
+          <TabsContent value="payments" className="mt-4">
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Manage the global list of payment methods (Stripe, PayPal, cash, etc.), enable/disable, and configure credentials.
+              </p>
+              <Button
+                asChild
+                data-testid="button-open-payment-methods-from-settings"
+              >
+                <a href="/admin/payment-methods">
+                  <DollarSign className="h-4 w-4 mr-2" /> Open Payment Methods
+                </a>
+              </Button>
+            </div>
+          </TabsContent>
+          <TabsContent value="status" className="mt-4">
+            <div className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Live monitor of pending deposits, completion rates, and payment-detection diagnostics.
+              </p>
+              <Button
+                asChild
+                variant="outline"
+                data-testid="button-open-payment-status-from-settings"
+              >
+                <a href="/admin/payment-status">
+                  <BarChart3 className="h-4 w-4 mr-2" /> Open Payment Status Monitor
+                </a>
+              </Button>
+            </div>
           </TabsContent>
           <TabsContent value="notifications" className="mt-4">
             <NotificationSettingsForm />
@@ -1461,10 +1498,26 @@ export default function AdminLocations() {
 
         {/* Hidden controlled dialogs (triggered from Card header / Settings sheet) */}
         <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
-          <DialogContent className="sm:max-w-[550px] max-h-[90vh] overflow-y-auto">
+          <DialogContent
+            className="sm:max-w-[550px] max-h-[92vh] overflow-y-auto top-[2vh] sm:top-[50%] translate-y-0 sm:translate-y-[-50%]"
+          >
             <DialogHeader>
-              <DialogTitle>{t('createNewLocation')}</DialogTitle>
-              <DialogDescription>{t('addNewLocationDescription')}</DialogDescription>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <DialogTitle>{t('createNewLocation')}</DialogTitle>
+                  <DialogDescription>{t('addNewLocationDescription')}</DialogDescription>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => setIsCreateDialogOpen(false)}
+                  data-testid="button-cancel-create-location"
+                  className="shrink-0"
+                >
+                  {t('cancel')}
+                </Button>
+              </div>
             </DialogHeader>
             <LocationForm regions={regions} onSuccess={() => setIsCreateDialogOpen(false)} />
           </DialogContent>

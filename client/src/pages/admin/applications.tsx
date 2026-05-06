@@ -311,21 +311,28 @@ export default function AdminApplications() {
     }
   };
 
-  const filteredApplications = applications.filter(application => {
-    if (filterStatus !== "all" && application.status !== filterStatus) return false;
-    
-    if (!searchTerm) return true;
-    
-    const searchLower = searchTerm.toLowerCase();
-    return (
-      application.firstName.toLowerCase().includes(searchLower) ||
-      application.lastName.toLowerCase().includes(searchLower) ||
-      application.email.toLowerCase().includes(searchLower) ||
-      application.city.toLowerCase().includes(searchLower) ||
-      application.state.toLowerCase().includes(searchLower) ||
-      application.country.toLowerCase().includes(searchLower)
-    );
-  });
+  const filteredApplications = applications
+    .filter(application => {
+      if (filterStatus !== "all" && application.status !== filterStatus) return false;
+
+      if (!searchTerm) return true;
+
+      const searchLower = searchTerm.toLowerCase();
+      return (
+        application.firstName.toLowerCase().includes(searchLower) ||
+        application.lastName.toLowerCase().includes(searchLower) ||
+        application.email.toLowerCase().includes(searchLower) ||
+        application.city.toLowerCase().includes(searchLower) ||
+        application.state.toLowerCase().includes(searchLower) ||
+        application.country.toLowerCase().includes(searchLower)
+      );
+    })
+    .slice()
+    .sort((a, b) => {
+      const ad = a.submittedAt ? new Date(a.submittedAt).getTime() : 0;
+      const bd = b.submittedAt ? new Date(b.submittedAt).getTime() : 0;
+      return bd - ad;
+    });
 
   // Per-status counts shown on the filter buttons so admins can see at a
   // glance how many approved/rejected applications are hidden behind a filter.
@@ -385,39 +392,45 @@ export default function AdminApplications() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
               </div>
-              <div className="flex flex-wrap gap-2">
-                <Button 
-                  variant={filterStatus === "all" ? "default" : "outline"} 
-                  size="sm"
-                  onClick={() => setFilterStatus("all")}
-                  data-testid="filter-status-all"
-                >
-                  {t('all')} ({statusCounts.all})
-                </Button>
-                <Button 
-                  variant={filterStatus === "pending" ? "default" : "outline"} 
-                  size="sm"
-                  onClick={() => setFilterStatus("pending")}
-                  data-testid="filter-status-pending"
-                >
-                  {t('pending')} ({statusCounts.pending})
-                </Button>
-                <Button 
-                  variant={filterStatus === "approved" ? "default" : "outline"} 
-                  size="sm"
-                  onClick={() => setFilterStatus("approved")}
-                  data-testid="filter-status-approved"
-                >
-                  {t('approved')} ({statusCounts.approved})
-                </Button>
-                <Button 
-                  variant={filterStatus === "rejected" ? "default" : "outline"} 
-                  size="sm"
-                  onClick={() => setFilterStatus("rejected")}
-                  data-testid="filter-status-rejected"
-                >
-                  {t('rejected')} ({statusCounts.rejected})
-                </Button>
+              <div className="-mx-1 px-1 overflow-x-auto sm:overflow-visible">
+                <div className="flex gap-2 min-w-max sm:min-w-0 sm:flex-wrap">
+                  <Button
+                    variant={filterStatus === "all" ? "default" : "outline"}
+                    size="sm"
+                    className="whitespace-nowrap"
+                    onClick={() => setFilterStatus("all")}
+                    data-testid="filter-status-all"
+                  >
+                    {t('all')} ({statusCounts.all})
+                  </Button>
+                  <Button
+                    variant={filterStatus === "pending" ? "default" : "outline"}
+                    size="sm"
+                    className="whitespace-nowrap"
+                    onClick={() => setFilterStatus("pending")}
+                    data-testid="filter-status-pending"
+                  >
+                    {t('pending')} ({statusCounts.pending})
+                  </Button>
+                  <Button
+                    variant={filterStatus === "approved" ? "default" : "outline"}
+                    size="sm"
+                    className="whitespace-nowrap"
+                    onClick={() => setFilterStatus("approved")}
+                    data-testid="filter-status-approved"
+                  >
+                    {t('approved')} ({statusCounts.approved})
+                  </Button>
+                  <Button
+                    variant={filterStatus === "rejected" ? "default" : "outline"}
+                    size="sm"
+                    className="whitespace-nowrap"
+                    onClick={() => setFilterStatus("rejected")}
+                    data-testid="filter-status-rejected"
+                  >
+                    {t('rejected')} ({statusCounts.rejected})
+                  </Button>
+                </div>
               </div>
             </div>
             {filterStatus === "pending" && hiddenNonPendingCount > 0 && (

@@ -30,7 +30,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import {
@@ -85,8 +84,6 @@ import {
   Cell,
   Legend,
 } from "recharts";
-import PaymentMethodsPanel from "@/pages/admin/payment-methods";
-import PaymentStatusPanel from "@/pages/admin/payment-status-monitor";
 
 const CHART_COLORS = ["hsl(var(--primary))", "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6"];
 const PIE_COLORS = ["hsl(var(--primary))", "#94a3b8"];
@@ -307,22 +304,15 @@ export default function AdminTransactions() {
 
   return (
     <>
-      {/* ── Outer page tabs: Records / Payment Config / Payment Monitor ── */}
-      <Tabs defaultValue="records">
-        <div className="flex flex-col md:flex-row md:items-start md:justify-between mb-6 gap-4">
-          <div>
-            <h1 className="text-3xl font-bold">{t('transactionManagement')}</h1>
-            <p className="text-muted-foreground">{t('trackDepositsAndBorrowing')}</p>
-          </div>
-          <TabsList className="shrink-0">
-            <TabsTrigger value="records">{t('transactions')}</TabsTrigger>
-            <TabsTrigger value="payments">{t('paymentMethodsLabel')}</TabsTrigger>
-            <TabsTrigger value="monitor">{t('paymentStatusMonitor')}</TabsTrigger>
-          </TabsList>
-        </div>
+      <div className="mb-6">
+        <h1 className="text-2xl md:text-3xl font-bold">{t('transactionManagement')}</h1>
+        <p className="text-sm md:text-base text-muted-foreground">{t('trackDepositsAndBorrowing')}</p>
+        <p className="text-xs text-muted-foreground mt-1">
+          {t('paymentMethodsLabel')} &amp; {t('paymentStatusMonitor')} now live in <a href="/admin/locations#settings=payments" className="underline hover:text-foreground">Settings</a>.
+        </p>
+      </div>
 
-        {/* ── Lending Records tab ── */}
-        <TabsContent value="records">
+      <div>
           <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
             <DialogContent className="sm:max-w-[550px]">
               <DialogHeader>
@@ -509,56 +499,40 @@ export default function AdminTransactions() {
               </div>
             </CardContent>
           </Card>
-        </TabsContent>
+      </div>
 
-        {/* ── Payment Config tab ── */}
-        <TabsContent value="payments">
-          <PaymentMethodsPanel />
-        </TabsContent>
-
-        {/* ── Payment Monitor tab ── */}
-        <TabsContent value="monitor">
-          <PaymentStatusPanel />
-        </TabsContent>
-      </Tabs>
-
-      {/* ── Analytics section ───────────────────────────────────────── */}
-      <div className="mt-10 space-y-6">
-        <div>
-          <h2 className="text-xl font-semibold flex items-center gap-2">
-            <BarChart3 className="h-5 w-5 text-muted-foreground" />
+      {/* ── Analytics section (compact, collapsible) ────────────────── */}
+      <details className="mt-8 group" open>
+        <summary className="cursor-pointer list-none flex items-center justify-between gap-2 py-2 border-b border-border/40">
+          <h2 className="text-base font-semibold flex items-center gap-2">
+            <BarChart3 className="h-4 w-4 text-muted-foreground" />
             {t('analyticsReports')}
           </h2>
-          <p className="text-sm text-muted-foreground mt-1">{t('comprehensiveAnalytics')}</p>
+          <span className="text-xs text-muted-foreground group-open:hidden">{t('show') || 'Show'}</span>
+          <span className="text-xs text-muted-foreground hidden group-open:inline">{t('hide') || 'Hide'}</span>
+        </summary>
+
+        {/* Compact KPI strip */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
+          <div className="rounded-md border bg-card p-2.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('analyticsTotalBorrows')}</div>
+            <div className="text-lg font-semibold mt-0.5">{txLoading ? '…' : transactions.length}</div>
+          </div>
+          <div className="rounded-md border bg-card p-2.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('analyticsActiveLoans')}</div>
+            <div className="text-lg font-semibold mt-0.5">{txLoading ? '…' : activeBorrows}</div>
+          </div>
+          <div className="rounded-md border bg-card p-2.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('analyticsReturnRate')}</div>
+            <div className="text-lg font-semibold mt-0.5">{txLoading ? '…' : (transactions.length > 0 ? `${returnRate}%` : '—')}</div>
+          </div>
+          <div className="rounded-md border bg-card p-2.5">
+            <div className="text-[10px] uppercase tracking-wide text-muted-foreground">{t('analyticsDepositsCollected')}</div>
+            <div className="text-lg font-semibold mt-0.5">{txLoading ? '…' : `$${totalDeposits.toLocaleString('en-US', { maximumFractionDigits: 0 })}`}</div>
+          </div>
         </div>
 
-        {/* KPI cards */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-          <StatCard icon={Package} title={t('analyticsTotalBorrows')} value={transactions.length} loading={txLoading} />
-          <StatCard
-            icon={TrendingUp}
-            title={t('analyticsActiveLoans')}
-            value={activeBorrows}
-            sub={transactions.length > 0 ? `${Math.round((activeBorrows / transactions.length) * 100)}% ${t('analyticsOfAllBorrows')}` : undefined}
-            loading={txLoading}
-          />
-          <StatCard
-            icon={RotateCcw}
-            title={t('analyticsReturnRate')}
-            value={transactions.length > 0 ? `${returnRate}%` : "—"}
-            sub={transactions.length > 0 ? `${returnedCount} ${t('analyticsReturned')}` : undefined}
-            loading={txLoading}
-          />
-          <StatCard
-            icon={DollarSign}
-            title={t('analyticsDepositsCollected')}
-            value={`$${totalDeposits.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`}
-            sub={transactions.length > 0 ? `${t('analyticsAcrossTransactions')} ${transactions.length}` : undefined}
-            loading={txLoading}
-          />
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-4">
           {/* Monthly volume bar chart */}
           <Card className="lg:col-span-2">
             <CardHeader>
@@ -665,7 +639,7 @@ export default function AdminTransactions() {
             </CardContent>
           </Card>
         </div>
-      </div>
+      </details>
 
       {/* ── Shared dialogs ─────────────────────────────────────────────── */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
