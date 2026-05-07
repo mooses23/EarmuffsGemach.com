@@ -77,6 +77,8 @@ import {
   type Contact,
   type Location as LocationRow,
   type Transaction,
+  type GemachApplication,
+  type GlobalSetting,
 } from "../shared/schema.js";
 import { setupAuth, requireRole, requireOperatorForLocation, createTestUsers } from "./auth.js";
 
@@ -5771,8 +5773,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         await withTimeout(storage.getRegion(1));
         return { ok: true, latencyMs: Date.now() - t0 };
-      } catch (err: any) {
-        return { ok: false, error: err?.message || "DB unreachable" };
+      } catch (err) {
+        return { ok: false, error: err instanceof Error ? err.message : "DB unreachable" };
       }
     })();
 
@@ -5780,10 +5782,10 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const t0 = Date.now();
       try {
         const stripe = getStripeClient();
-        await withTimeout(stripe.balance.retrieve() as Promise<any>);
+        await withTimeout(Promise.resolve(stripe.balance.retrieve()));
         return { ok: true, configured: true, latencyMs: Date.now() - t0 };
-      } catch (err: any) {
-        const msg = err?.message || "";
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "";
         const configured = !/not configured|missing|STRIPE_SECRET/i.test(msg);
         return { ok: false, configured, error: msg || "Stripe unreachable" };
       }
@@ -5793,8 +5795,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       try {
         const gs = await withTimeout(getGmailConfigStatus());
         return { ok: !!gs.configured, configured: !!gs.configured, message: gs.message };
-      } catch (err: any) {
-        return { ok: false, configured: false, message: err?.message };
+      } catch (err) {
+        return { ok: false, configured: false, message: err instanceof Error ? err.message : "" };
       }
     })();
 
@@ -5805,11 +5807,40 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Aggregated dashboard summary — replaces ~7 parallel client requests with a
   // single server-side fan-out. Massively cuts cold-start fan-out on Vercel
   // serverless (where each /api/* triggers its own lambda warm-up).
+  type DisputeStat = { locationId: number; disputeCount: number; chargedCount: number; rate: number };
+  type GmailStatusShape = { configured: boolean; environment: string; message: string };
+  interface DashboardSummaryResponse {
+    counts: {
+      totalLocations: number;
+      activeLocations: number;
+      phonelessCount: number;
+      pendingReturns: number;
+      depositTotal: number;
+      pendingApplications: number;
+      unreadContacts: number;
+    };
+    gmail: GmailStatusShape;
+    notifications: { adminEmail: string; effectiveEmail: string; source: 'db' | 'env' | 'none' };
+    disputes: {
+      warnThreshold: number;
+      windowDays: number;
+      rows: (DisputeStat & { locationName: string; flagged: boolean })[];
+    };
+  }
+
   app.get("/api/admin/dashboard/summary", async (req, res) => {
     if (!requireAdminDash(req, res)) return;
     try {
       const WARN_THRESHOLD = 0.005;
-      const settled = await Promise.allSettled([
+      const [
+        locationsR,
+        transactionsR,
+        applicationsR,
+        contactsR,
+        disputeStatsR,
+        gmailStatusR,
+        notifRowR,
+      ] = await Promise.allSettled([
         storage.getAllLocations(),
         storage.getAllTransactions(),
         storage.getAllApplications(),
@@ -5818,44 +5849,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         getGmailConfigStatus(),
         storage.getGlobalSetting(ADMIN_NOTIFICATION_EMAIL_KEY),
       ]);
-      const pick = <T,>(i: number, fallback: T): T =>
-        settled[i].status === 'fulfilled' ? (settled[i] as PromiseFulfilledResult<T>).value : fallback;
+      const pick = <T,>(r: PromiseSettledResult<T>, fallback: T): T =>
+        r.status === 'fulfilled' ? r.value : fallback;
 
-      const locations = pick<any[]>(0, []);
-      const transactions = pick<any[]>(1, []);
-      const applications = pick<any[]>(2, []);
-      const contacts = pick<any[]>(3, []);
-      const disputeStats = pick<any[]>(4, []);
-      const gmailStatus = pick<any>(5, { configured: false, environment: '', message: '' });
-      const notifRow = pick<any>(6, null);
+      const locations: LocationRow[] = pick(locationsR, []);
+      const transactions: Transaction[] = pick(transactionsR, []);
+      const applications: GemachApplication[] = pick(applicationsR, []);
+      const contacts: Contact[] = pick(contactsR, []);
+      const disputeStats: DisputeStat[] = pick(disputeStatsR, []);
+      const gmailStatus: GmailStatusShape = pick(gmailStatusR, { configured: false, environment: '', message: '' });
+      const notifRow: GlobalSetting | undefined = pick(notifRowR, undefined);
 
       const totalLocations = locations.length;
-      const activeLocations = locations.filter((l: any) => l.isActive).length;
+      const activeLocations = locations.filter(l => l.isActive).length;
       const phonelessCount = locations.filter(
-        (l: any) => l.isActive !== false && !l.phone && !l.onboardedAt
+        l => l.isActive !== false && !l.phone && !l.onboardedAt
       ).length;
-      const pendingReturns = transactions.filter((tx: any) => !tx.isReturned).length;
+      const pendingReturns = transactions.filter(tx => !tx.isReturned).length;
       const depositTotal = transactions
-        .filter((tx: any) => !tx.isReturned)
-        .reduce((acc: number, tx: any) => acc + (tx.depositAmount || 0), 0);
-      const pendingApplications = applications.filter((a: any) => a.status === 'pending').length;
-      const unreadContacts = contacts.filter((c: any) => !c.isRead).length;
+        .filter(tx => !tx.isReturned)
+        .reduce((acc, tx) => acc + (tx.depositAmount || 0), 0);
+      const pendingApplications = applications.filter(a => a.status === 'pending').length;
+      const unreadContacts = contacts.filter(c => !c.isRead).length;
 
-      const locById = new Map(locations.map((l: any) => [l.id, l]));
-      const disputeRows = disputeStats.map((s: any) => ({
+      const locById = new Map<number, LocationRow>(locations.map(l => [l.id, l]));
+      const disputeRows = disputeStats.map(s => ({
         ...s,
-        locationName: (locById.get(s.locationId) as any)?.name || `Location #${s.locationId}`,
+        locationName: locById.get(s.locationId)?.name || `Location #${s.locationId}`,
         flagged: s.rate >= WARN_THRESHOLD,
-      })).sort((a: any, b: any) => b.rate - a.rate);
+      })).sort((a, b) => b.rate - a.rate);
 
       // Best-effort notif source — mirrors /api/admin/settings/notifications.
       const dbValue = (notifRow?.value || '').trim();
       const envValue = (process.env.ADMIN_EMAIL || process.env.GMAIL_USER || '').trim();
       const notifSource: 'db' | 'env' | 'none' = dbValue ? 'db' : envValue ? 'env' : 'none';
-      const adminEmail = dbValue;
-      const effectiveEmail = dbValue || envValue || '';
 
-      res.json({
+      const response: DashboardSummaryResponse = {
         counts: {
           totalLocations,
           activeLocations,
@@ -5870,12 +5899,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
           environment: gmailStatus.environment || '',
           message: gmailStatus.message || '',
         },
-        notifications: { adminEmail, effectiveEmail, source: notifSource },
+        notifications: { adminEmail: dbValue, effectiveEmail: dbValue || envValue || '', source: notifSource },
         disputes: { warnThreshold: WARN_THRESHOLD, windowDays: 30, rows: disputeRows },
-      });
-    } catch (err: any) {
+      };
+      res.json(response);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to load summary";
       console.error("admin/dashboard/summary error:", err);
-      res.status(500).json({ message: err.message || "Failed to load summary" });
+      res.status(500).json({ message: msg });
     }
   });
 
