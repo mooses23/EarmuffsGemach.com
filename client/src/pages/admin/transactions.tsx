@@ -762,7 +762,7 @@ export default function AdminTransactions() {
             </div>
           )}
 
-          <DialogFooter className="gap-2">
+          <DialogFooter className="gap-2 sticky bottom-0 -mx-6 -mb-6 px-6 py-4 bg-background border-t z-10">
             {!confirmStep ? (
               <>
                 <Button variant="outline" onClick={closeRefundDialog}>{t('cancel')}</Button>

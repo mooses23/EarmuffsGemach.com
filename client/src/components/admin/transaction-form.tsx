@@ -340,7 +340,7 @@ export function TransactionForm({ transaction, locations, onSuccess }: Transacti
           />
         </div>
 
-        <div className="border-t border-border/60 pt-4">
+        <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-4 border-t border-border/60 bg-background z-10">
           <Button type="submit" className="w-full h-11 text-sm font-medium" disabled={isPending}>
             {isPending ? (
               <>
