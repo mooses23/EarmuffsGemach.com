@@ -5,7 +5,6 @@ import * as _http from 'http';
 import * as _https from 'https';
 import * as _dns from 'dns';
 import { storage } from "./storage.js";
-import { PaymentSyncService } from "./payment-sync.js";
 import { DepositSyncService } from "./deposit-sync.js";
 import { DepositRefundService } from "./deposit-refund.js";
 import { EmailNotificationService, sendOperatorWelcomeEmail, sendReturnReminderEmail, sendApplicationConfirmationEmail, sendAdminNewApplicationAlert } from "./email-notifications.js";
@@ -16,7 +15,7 @@ import { PaymentAnalyticsEngine } from "./analytics-engine.js";
 import { DepositDetectionService } from "./deposit-detection.js";
 import { DepositService, type UserRole } from "./depositService.js";
 import { PayLaterService, prepareBorrowerStatusToken, commitBorrowerStatusToken, getMaxCardAgeDays, setMaxCardAgeDays, getRequirePreChargeNotification, setRequirePreChargeNotification } from "./payLaterService.js";
-import { computeFeeForPaymentMethod } from "./depositFees.js";
+import { computeFeeForStripe, getStripeFeeOverride, setStripeFeeOverride } from "./depositFees.js";
 import { buildCanonicalConsentText, resolveConsentLocale } from "./consentHelper.js";
 import { getStripePublishableKey, getStripeClient } from "./stripeClient.js";
 import { listEmails, listEmailThreads, getEmail, getThreadMessages, listSentThreadIds, markAsRead, markAsUnread, archiveEmail, unarchiveEmail, trashEmail, untrashEmail, markAsSpam, unmarkSpam, getLabelCounts, getLabelUnreadCounts, sendReply, sendNewEmail, sendNewHtmlEmail, getGmailConfigStatus, markThreadAsRead, markThreadAsUnread, archiveThread, unarchiveThread, trashThread, untrashThread, markThreadAsSpam, unmarkThreadSpam, type GmailListMode } from "./gmail-client.js";
@@ -63,8 +62,6 @@ import {
   insertContactSchema,
   insertTransactionSchema,
   insertPaymentSchema,
-  insertPaymentMethodSchema,
-  insertLocationPaymentMethodSchema,
   insertCityCategorySchema,
   insertReplyExampleSchema,
   insertFaqEntrySchema,
@@ -2490,31 +2487,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Payment method analytics
-  app.get("/api/analytics/payment-methods", async (req, res) => {
-    try {
-      if (!req.isAuthenticated()) {
-        return res.status(401).json({ message: "Authentication required" });
-      }
-
-      const locationId = req.query.locationId ? parseInt(req.query.locationId as string) : undefined;
-      const startDate = req.query.startDate ? new Date(req.query.startDate as string) : undefined;
-      const endDate = req.query.endDate ? new Date(req.query.endDate as string) : undefined;
-      
-      const dateRange = startDate && endDate ? { start: startDate, end: endDate } : undefined;
-
-      const analytics = await PaymentAnalyticsEngine.generatePaymentMethodAnalytics(
-        locationId,
-        dateRange
-      );
-
-      res.json(analytics);
-    } catch (error) {
-      console.error("Payment analytics error:", error);
-      res.status(500).json({ message: "Error generating payment analytics" });
-    }
-  });
-
   // Deposit reconciliation report
   app.get("/api/reports/reconciliation", async (req, res) => {
     try {
@@ -2842,135 +2814,6 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error processing cash payment:", error);
       res.status(500).json({ message: "Failed to process cash payment" });
-    }
-  });
-
-  // PAYMENT METHOD MANAGEMENT ROUTES (Admin only)
-  app.get("/api/payment-methods", async (req, res) => {
-    try {
-      const paymentMethods = await storage.getAllPaymentMethods();
-      res.json(paymentMethods);
-    } catch (error) {
-      console.error("Error fetching payment methods:", error);
-      res.status(500).json({ message: "Failed to fetch payment methods" });
-    }
-  });
-
-  app.post("/api/payment-methods", requireRole(["admin"]), async (req, res) => {
-    try {
-      const methodData = insertPaymentMethodSchema.parse(req.body);
-      const method = await storage.createPaymentMethod(methodData);
-      
-      // Sync changes across all locations
-      await PaymentSyncService.syncPaymentMethodChanges(method);
-      
-      res.status(201).json(method);
-    } catch (error) {
-      if (error instanceof z.ZodError) {
-        return res.status(400).json({ message: "Invalid payment method data", errors: error.errors });
-      }
-      console.error("Error creating payment method:", error);
-      res.status(500).json({ message: "Failed to create payment method" });
-    }
-  });
-
-  app.patch("/api/payment-methods/:id", requireRole(["admin"]), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      const updateData = req.body;
-      const method = await storage.updatePaymentMethod(id, updateData);
-      
-      // Sync changes across all locations when admin updates payment methods
-      await PaymentSyncService.syncPaymentMethodChanges(method);
-      
-      res.json(method);
-    } catch (error) {
-      console.error("Error updating payment method:", error);
-      res.status(500).json({ message: "Failed to update payment method" });
-    }
-  });
-
-  app.delete("/api/payment-methods/:id", requireRole(["admin"]), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      await storage.deletePaymentMethod(id);
-      res.sendStatus(204);
-    } catch (error) {
-      console.error("Error deleting payment method:", error);
-      res.status(500).json({ message: "Failed to delete payment method" });
-    }
-  });
-
-  // Configure API credentials for payment methods
-  app.post("/api/payment-methods/:id/configure", requireRole(["admin"]), async (req, res) => {
-    try {
-      const id = parseInt(req.params.id, 10);
-      const { apiKey, apiSecret, webhookSecret } = req.body;
-      
-      // Validate and activate payment method with API credentials
-      const success = await PaymentSyncService.validateAndActivatePaymentMethod(id, {
-        apiKey,
-        apiSecret,
-        webhookSecret
-      });
-      
-      if (success) {
-        const updatedMethod = await storage.getPaymentMethod(id);
-        res.json({ 
-          message: "Payment method configured and activated successfully",
-          method: updatedMethod,
-          synchronized: true
-        });
-      } else {
-        res.status(400).json({ message: "Failed to configure payment method" });
-      }
-    } catch (error) {
-      console.error("Error configuring payment method:", error);
-      res.status(500).json({ message: "Failed to configure payment method" });
-    }
-  });
-
-  // LOCATION PAYMENT METHOD ROUTES
-  app.get("/api/locations/:locationId/payment-methods", async (req, res) => {
-    try {
-      const locationId = parseInt(req.params.locationId, 10);
-      const availableMethods = await storage.getAvailablePaymentMethodsForLocation(locationId);
-      const enabledMethods = await storage.getLocationPaymentMethods(locationId);
-      
-      res.json({
-        available: availableMethods,
-        enabled: enabledMethods
-      });
-    } catch (error) {
-      console.error("Error fetching location payment methods:", error);
-      res.status(500).json({ message: "Failed to fetch location payment methods" });
-    }
-  });
-
-  app.post("/api/locations/:locationId/payment-methods/:methodId", async (req, res) => {
-    try {
-      const locationId = parseInt(req.params.locationId, 10);
-      const methodId = parseInt(req.params.methodId, 10);
-      const { customFee } = req.body;
-      
-      const locationMethod = await storage.enablePaymentMethodForLocation(locationId, methodId, customFee);
-      res.status(201).json(locationMethod);
-    } catch (error) {
-      console.error("Error enabling payment method for location:", error);
-      res.status(500).json({ message: "Failed to enable payment method" });
-    }
-  });
-
-  app.delete("/api/locations/:locationId/payment-methods/:methodId", async (req, res) => {
-    try {
-      const locationId = parseInt(req.params.locationId, 10);
-      const methodId = parseInt(req.params.methodId, 10);
-      
-      await storage.disablePaymentMethodForLocation(locationId, methodId);
-      res.sendStatus(204);
-    } catch (error) {
-      console.error("Error disabling payment method for location:", error);
-      res.status(500).json({ message: "Failed to disable payment method" });
     }
   });
 
@@ -4777,16 +4620,15 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const location = await storage.getLocation(locationId);
       if (!location) return res.status(404).json({ message: "Location not found" });
-      const allPMs = await storage.getAllPaymentMethods();
-      const stripePM = allPMs.find(pm => pm.provider === 'stripe' && pm.isActive);
-      const { feeCents, totalCents } = computeFeeForPaymentMethod(depositCents, stripePM, location);
+      const stripeOverride = await getStripeFeeOverride();
+      const { feeCents, totalCents } = computeFeeForStripe(depositCents, stripeOverride, location);
       const feeQuoteLocale = resolveConsentLocale(req.query.locale as string | undefined);
       return res.json({
         depositCents,
         feeCents,
         totalCents,
-        percentBp: stripePM?.processingFeePercent ?? location?.processingFeePercent ?? 300,
-        fixedCents: stripePM?.fixedFee ?? location?.processingFeeFixed ?? 30,
+        percentBp: stripeOverride.percentBp ?? location?.processingFeePercent ?? 300,
+        fixedCents: stripeOverride.fixedCents ?? location?.processingFeeFixed ?? 30,
         locationName: location.name,
         consentText: buildCanonicalConsentText(location.name, totalCents, feeQuoteLocale),
       });
@@ -5573,6 +5415,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     const maxCardAgeDays = await getMaxCardAgeDays();
     const requirePreChargeNotification = await getRequirePreChargeNotification();
+    const stripeOverride = await getStripeFeeOverride();
     // Return per-location fee config so admin UI can display it.
     const locations = await storage.getAllLocations();
     const locationFees = locations.map((loc: LocationRow) => ({
@@ -5581,7 +5424,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       processingFeePercent: loc.processingFeePercent ?? 300,   // basis points (300 = 3.00%)
       processingFeeFixed: loc.processingFeeFixed ?? 30,        // cents (30 = $0.30)
     }));
-    res.json({ maxCardAgeDays, requirePreChargeNotification, locationFees });
+    res.json({
+      maxCardAgeDays,
+      requirePreChargeNotification,
+      // Task #217: global Stripe-fee override; null means "fall back to per-location".
+      globalFeePercentBp: stripeOverride.percentBp,
+      globalFeeFixedCents: stripeOverride.fixedCents,
+      locationFees,
+    });
   });
 
   // Admin: update Stripe-policy settings.
@@ -5591,7 +5441,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       return res.status(403).json({ message: "Admin access required" });
     }
     try {
-      const { maxCardAgeDays, requirePreChargeNotification, locationFees } = req.body || {};
+      const { maxCardAgeDays, requirePreChargeNotification, locationFees, globalFeePercentBp, globalFeeFixedCents } = req.body || {};
 
       if (maxCardAgeDays !== undefined) {
         const n = Number(maxCardAgeDays);
@@ -5603,6 +5453,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       if (requirePreChargeNotification !== undefined) {
         await setRequirePreChargeNotification(Boolean(requirePreChargeNotification));
+      }
+
+      // Task #217: global Stripe-fee override (replaces dormant payment_methods row).
+      const overridePatch: { percentBp?: number | null; fixedCents?: number | null } = {};
+      if (globalFeePercentBp !== undefined) {
+        const n = Number(globalFeePercentBp);
+        if (!Number.isFinite(n) || n < 0 || n > 10000) {
+          return res.status(400).json({ message: "globalFeePercentBp must be 0-10000 (basis points)" });
+        }
+        overridePatch.percentBp = n;
+      }
+      if (globalFeeFixedCents !== undefined) {
+        const n = Number(globalFeeFixedCents);
+        if (!Number.isFinite(n) || n < 0 || n > 9999) {
+          return res.status(400).json({ message: "globalFeeFixedCents must be 0-9999" });
+        }
+        overridePatch.fixedCents = n;
+      }
+      if (Object.keys(overridePatch).length > 0) {
+        await setStripeFeeOverride(overridePatch);
       }
 
       // Update per-location fee config if provided.
@@ -5625,7 +5495,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updatedMaxCardAgeDays = await getMaxCardAgeDays();
       const updatedRequireNotification = await getRequirePreChargeNotification();
-      res.json({ maxCardAgeDays: updatedMaxCardAgeDays, requirePreChargeNotification: updatedRequireNotification });
+      const updatedOverride = await getStripeFeeOverride();
+      res.json({
+        maxCardAgeDays: updatedMaxCardAgeDays,
+        requirePreChargeNotification: updatedRequireNotification,
+        globalFeePercentBp: updatedOverride.percentBp,
+        globalFeeFixedCents: updatedOverride.fixedCents,
+      });
     } catch (error: any) {
       console.error("admin/settings/stripe PATCH error:", error);
       res.status(500).json({ message: error.message || "Failed to update settings" });

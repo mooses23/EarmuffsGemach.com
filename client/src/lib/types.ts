@@ -7,8 +7,6 @@ export type {
   Transaction, 
   Contact,
   Payment,
-  PaymentMethod,
-  LocationPaymentMethod,
   InsertGemachApplication,
   InsertContact,
   InsertTransaction,

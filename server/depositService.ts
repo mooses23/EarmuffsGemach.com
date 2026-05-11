@@ -1,6 +1,6 @@
 import { getUncachableStripeClient, getStripePublishableKey } from './stripeClient.js';
 import { storage } from './storage.js';
-import { computeFeeForPaymentMethod } from './depositFees.js';
+import { computeFeeForStripe, getStripeFeeOverride } from './depositFees.js';
 import type { Payment, Transaction, Location } from '../shared/schema.js';
 
 export interface DepositRequest {
@@ -67,13 +67,12 @@ export class DepositService {
       }
 
       const depositAmount = location.depositAmount || 20;
-      // Task #39: fee hierarchy: Stripe payment-method config > location defaults > hard defaults.
+      // Task #39 / #217: fee hierarchy: global override (global_settings) > location defaults > hard defaults.
       // Both direct-deposit and pay-later flows use the same source of truth.
-      const allPaymentMethods = await storage.getAllPaymentMethods();
-      const stripePaymentMethod = allPaymentMethods.find(pm => pm.provider === 'stripe' && pm.isActive);
-      const { feeCents: processingFee, totalCents: totalAmount } = computeFeeForPaymentMethod(
+      const stripeOverride = await getStripeFeeOverride();
+      const { feeCents: processingFee, totalCents: totalAmount } = computeFeeForStripe(
         depositAmount * 100,
-        stripePaymentMethod,
+        stripeOverride,
         location
       );
 

@@ -3,7 +3,6 @@
  * Ensures all deposit-related changes propagate across the entire system
  */
 import { storage } from "./storage.js";
-import { PaymentSyncService } from "./payment-sync.js";
 
 export class DepositSyncService {
   /**

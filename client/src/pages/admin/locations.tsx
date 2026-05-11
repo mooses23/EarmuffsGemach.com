@@ -160,6 +160,8 @@ function NoPhoneBadge({ onClick }: { onClick?: () => void }) {
 interface StripeAdminSettings {
   maxCardAgeDays: number;
   requirePreChargeNotification: boolean;
+  globalFeePercentBp: number;
+  globalFeeFixedCents: number;
   locationFees: { locationId: number; name: string; processingFeePercent: number; processingFeeFixed: number }[];
 }
 
@@ -290,22 +292,31 @@ function StripeSettingsForm() {
 
   const [maxCardAgeDays, setMaxCardAgeDays] = useState<string>("");
   const [requireNotify, setRequireNotify] = useState<boolean>(true);
+  const [globalFeePercentBp, setGlobalFeePercentBp] = useState<string>("");
+  const [globalFeeFixedCents, setGlobalFeeFixedCents] = useState<string>("");
   const [seeded, setSeeded] = useState(false);
 
   useEffect(() => {
     if (data && !seeded) {
       setMaxCardAgeDays(String(data.maxCardAgeDays));
       setRequireNotify(data.requirePreChargeNotification);
+      setGlobalFeePercentBp(data.globalFeePercentBp != null ? String(data.globalFeePercentBp) : "");
+      setGlobalFeeFixedCents(data.globalFeeFixedCents != null ? String(data.globalFeeFixedCents) : "");
       setSeeded(true);
     }
   }, [data, seeded]);
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const res = await apiRequest("PATCH", "/api/admin/settings/stripe", {
+      const body: Record<string, unknown> = {
         maxCardAgeDays: Number(maxCardAgeDays),
         requirePreChargeNotification: requireNotify,
-      });
+      };
+      const trimmedPct = globalFeePercentBp.trim();
+      const trimmedFixed = globalFeeFixedCents.trim();
+      if (trimmedPct !== "") body.globalFeePercentBp = Number(trimmedPct);
+      if (trimmedFixed !== "") body.globalFeeFixedCents = Number(trimmedFixed);
+      const res = await apiRequest("PATCH", "/api/admin/settings/stripe", body);
       return res.json();
     },
     onSuccess: () => {
@@ -340,6 +351,40 @@ function StripeSettingsForm() {
             <span className="text-sm">{requireNotify ? "Enforced (default)" : "Best-effort (disabled)"}</span>
           </div>
           <p className="text-xs text-muted-foreground mt-1">When on, charges are blocked if the borrower cannot be notified.</p>
+        </div>
+      </div>
+      <div className="border-t pt-4">
+        <p className="text-sm font-medium mb-1">Global Stripe fee override</p>
+        <p className="text-xs text-muted-foreground mb-3">
+          Applied to every Stripe deposit. When set, takes priority over per-location fee. Leave blank to fall back to per-location config (default 3.00% + $0.30).
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-medium mb-1">Percent fee (basis points)</label>
+            <Input
+              type="number"
+              min={0}
+              max={10000}
+              placeholder="e.g. 290 for 2.9%"
+              value={globalFeePercentBp}
+              onChange={e => setGlobalFeePercentBp(e.target.value)}
+              data-testid="input-global-fee-percent-bp"
+            />
+            <p className="text-xs text-muted-foreground mt-1">100 bp = 1%. Stripe US standard is 290.</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium mb-1">Fixed fee (cents)</label>
+            <Input
+              type="number"
+              min={0}
+              max={9999}
+              placeholder="e.g. 30 for $0.30"
+              value={globalFeeFixedCents}
+              onChange={e => setGlobalFeeFixedCents(e.target.value)}
+              data-testid="input-global-fee-fixed-cents"
+            />
+            <p className="text-xs text-muted-foreground mt-1">Stripe US standard is 30 ($0.30).</p>
+          </div>
         </div>
       </div>
       <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
@@ -524,19 +569,13 @@ function LocationSettingsSheet({
             <Settings className="h-5 w-5" /> Settings
           </SheetTitle>
           <SheetDescription>
-            Stripe charge limits, notification email, domain link rewriting, region taxonomy, payment methods, and payment status.
+            Stripe charge limits + fee override, notification email, domain link rewriting, and region taxonomy.
           </SheetDescription>
         </SheetHeader>
         <Tabs defaultValue={initialTab ?? "stripe"} className="mt-4">
-          <TabsList className="grid grid-cols-3 sm:grid-cols-6 w-full gap-1 h-auto">
+          <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full gap-1 h-auto">
             <TabsTrigger value="stripe" className="text-xs">
               <CreditCard className="h-3.5 w-3.5 mr-1" /> Stripe
-            </TabsTrigger>
-            <TabsTrigger value="payments" className="text-xs">
-              <DollarSign className="h-3.5 w-3.5 mr-1" /> Payments
-            </TabsTrigger>
-            <TabsTrigger value="status" className="text-xs">
-              <BarChart3 className="h-3.5 w-3.5 mr-1" /> Status
             </TabsTrigger>
             <TabsTrigger value="notifications" className="text-xs">
               <Bell className="h-3.5 w-3.5 mr-1" /> Notify
@@ -550,37 +589,6 @@ function LocationSettingsSheet({
           </TabsList>
           <TabsContent value="stripe" className="mt-4">
             <StripeSettingsForm />
-          </TabsContent>
-          <TabsContent value="payments" className="mt-4">
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Manage the global list of payment methods (Stripe, PayPal, cash, etc.), enable/disable, and configure credentials.
-              </p>
-              <Button
-                asChild
-                data-testid="button-open-payment-methods-from-settings"
-              >
-                <a href="/admin/payment-methods">
-                  <DollarSign className="h-4 w-4 mr-2" /> Open Payment Methods
-                </a>
-              </Button>
-            </div>
-          </TabsContent>
-          <TabsContent value="status" className="mt-4">
-            <div className="space-y-3">
-              <p className="text-sm text-muted-foreground">
-                Live monitor of pending deposits, completion rates, and payment-detection diagnostics.
-              </p>
-              <Button
-                asChild
-                variant="outline"
-                data-testid="button-open-payment-status-from-settings"
-              >
-                <a href="/admin/payment-status">
-                  <BarChart3 className="h-4 w-4 mr-2" /> Open Payment Status Monitor
-                </a>
-              </Button>
-            </div>
           </TabsContent>
           <TabsContent value="notifications" className="mt-4">
             <NotificationSettingsForm />

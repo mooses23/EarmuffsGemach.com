@@ -9,8 +9,6 @@ import {
   transactions, type Transaction, type InsertTransaction,
   contacts, type Contact, type InsertContact,
   payments, type Payment, type InsertPayment,
-  paymentMethods, type PaymentMethod, type InsertPaymentMethod,
-  locationPaymentMethods, type LocationPaymentMethod, type InsertLocationPaymentMethod,
   inventory, type Inventory, type InsertInventory,
   auditLogs, type AuditLog, type InsertAuditLog,
   webhookEvents, type WebhookEvent, type InsertWebhookEvent,
@@ -178,19 +176,6 @@ export interface IStorage {
   createPayment(payment: InsertPayment): Promise<Payment>;
   updatePaymentStatus(id: number, status: string, paymentData?: any): Promise<Payment>;
 
-  // Payment Method operations
-  getAllPaymentMethods(): Promise<PaymentMethod[]>;
-  getPaymentMethod(id: number): Promise<PaymentMethod | undefined>;
-  createPaymentMethod(method: InsertPaymentMethod): Promise<PaymentMethod>;
-  updatePaymentMethod(id: number, data: Partial<InsertPaymentMethod>): Promise<PaymentMethod>;
-  deletePaymentMethod(id: number): Promise<void>;
-
-  // Location Payment Method operations
-  getLocationPaymentMethods(locationId: number): Promise<LocationPaymentMethod[]>;
-  getAvailablePaymentMethodsForLocation(locationId: number): Promise<PaymentMethod[]>;
-  enablePaymentMethodForLocation(locationId: number, paymentMethodId: number, customFee?: number): Promise<LocationPaymentMethod>;
-  disablePaymentMethodForLocation(locationId: number, paymentMethodId: number): Promise<void>;
-
   // Pay Later operations
   getTransactionByMagicToken(magicToken: string): Promise<Transaction | undefined>;
   getTransactionBySetupIntentId(setupIntentId: string): Promise<Transaction | undefined>;
@@ -254,8 +239,6 @@ export class MemStorage implements IStorage {
   private transactions: Map<number, Transaction>;
   private contacts: Map<number, Contact>;
   private payments: Map<number, Payment>;
-  private paymentMethods: Map<number, PaymentMethod>;
-  private locationPaymentMethods: Map<number, LocationPaymentMethod>;
   private cityCategories: Map<number, CityCategory>;
   private inventoryItems: Map<number, Inventory>;
   private auditLogsMap: Map<number, AuditLog>;
@@ -274,8 +257,6 @@ export class MemStorage implements IStorage {
   private transactionCounter: number;
   private contactCounter: number;
   private paymentCounter: number;
-  private paymentMethodCounter: number;
-  private locationPaymentMethodCounter: number;
   private cityCategoryCounter: number;
   private inventoryCounter: number;
   private auditLogCounter: number;
@@ -290,8 +271,6 @@ export class MemStorage implements IStorage {
     this.transactions = new Map();
     this.contacts = new Map();
     this.payments = new Map();
-    this.paymentMethods = new Map();
-    this.locationPaymentMethods = new Map();
     this.cityCategories = new Map();
     this.inventoryItems = new Map();
     this.auditLogsMap = new Map();
@@ -307,8 +286,6 @@ export class MemStorage implements IStorage {
     this.transactionCounter = 1;
     this.contactCounter = 1;
     this.paymentCounter = 1;
-    this.paymentMethodCounter = 1;
-    this.locationPaymentMethodCounter = 1;
     this.cityCategoryCounter = 1;
     this.inventoryCounter = 1;
     this.auditLogCounter = 1;
@@ -2341,81 +2318,7 @@ export class MemStorage implements IStorage {
       }
     });
 
-    // Initialize default payment methods
-    const defaultPaymentMethods: InsertPaymentMethod[] = [
-      {
-        name: "cash",
-        displayName: "Cash",
-        provider: null,
-        isActive: true,
-        isAvailableToLocations: true,
-        processingFeePercent: 0,
-        fixedFee: 0,
-        requiresApi: false,
-        apiKey: null,
-        apiSecret: null,
-        webhookSecret: null,
-        isConfigured: true
-      },
-      {
-        name: "stripe",
-        displayName: "Credit/Debit Card",
-        provider: "stripe",
-        isActive: false,
-        isAvailableToLocations: false,
-        processingFeePercent: 290, // 2.9%
-        fixedFee: 30, // $0.30
-        requiresApi: true,
-        apiKey: null,
-        apiSecret: null,
-        webhookSecret: null,
-        isConfigured: false
-      },
-      {
-        name: "paypal",
-        displayName: "PayPal",
-        provider: "paypal",
-        isActive: false,
-        isAvailableToLocations: false,
-        processingFeePercent: 290, // 2.9%
-        fixedFee: 30, // $0.30
-        requiresApi: true,
-        apiKey: null,
-        apiSecret: null,
-        webhookSecret: null,
-        isConfigured: false
-      },
-      {
-        name: "venmo",
-        displayName: "Venmo",
-        provider: null,
-        isActive: true,
-        isAvailableToLocations: true,
-        processingFeePercent: 0,
-        fixedFee: 0,
-        requiresApi: false,
-        apiKey: null,
-        apiSecret: null,
-        webhookSecret: null,
-        isConfigured: true
-      },
-      {
-        name: "zelle",
-        displayName: "Zelle",
-        provider: null,
-        isActive: true,
-        isAvailableToLocations: true,
-        processingFeePercent: 0,
-        fixedFee: 0,
-        requiresApi: false,
-        apiKey: null,
-        apiSecret: null,
-        webhookSecret: null,
-        isConfigured: true
-      }
-    ];
-
-    defaultPaymentMethods.forEach(method => this.createPaymentMethod(method));
+    // Task #217: payment_methods table retired.
   }
 
   // User methods
@@ -3163,87 +3066,6 @@ export class MemStorage implements IStorage {
     };
     this.payments.set(id, updatedPayment);
     return updatedPayment;
-  }
-
-  // Payment Method operations
-  async getAllPaymentMethods(): Promise<PaymentMethod[]> {
-    return Array.from(this.paymentMethods.values());
-  }
-
-  async getPaymentMethod(id: number): Promise<PaymentMethod | undefined> {
-    return this.paymentMethods.get(id);
-  }
-
-  async createPaymentMethod(insertMethod: InsertPaymentMethod): Promise<PaymentMethod> {
-    const id = this.paymentMethodCounter++;
-    const method: PaymentMethod = { 
-      ...insertMethod,
-      id,
-      isActive: insertMethod.isActive ?? true,
-      isAvailableToLocations: insertMethod.isAvailableToLocations ?? false,
-      processingFeePercent: insertMethod.processingFeePercent ?? 0,
-      fixedFee: insertMethod.fixedFee ?? 0,
-      requiresApi: insertMethod.requiresApi ?? false,
-      provider: insertMethod.provider ?? null,
-      apiKey: insertMethod.apiKey ?? null,
-      apiSecret: insertMethod.apiSecret ?? null,
-      webhookSecret: insertMethod.webhookSecret ?? null,
-      isConfigured: insertMethod.isConfigured ?? false,
-      createdAt: new Date()
-    };
-    this.paymentMethods.set(id, method);
-    return method;
-  }
-
-  async updatePaymentMethod(id: number, data: Partial<InsertPaymentMethod>): Promise<PaymentMethod> {
-    const method = this.paymentMethods.get(id);
-    if (!method) {
-      throw new Error(`Payment method with id ${id} not found`);
-    }
-    
-    const updatedMethod: PaymentMethod = { ...method, ...data };
-    this.paymentMethods.set(id, updatedMethod);
-    return updatedMethod;
-  }
-
-  async deletePaymentMethod(id: number): Promise<void> {
-    this.paymentMethods.delete(id);
-  }
-
-  // Location Payment Method operations
-  async getLocationPaymentMethods(locationId: number): Promise<LocationPaymentMethod[]> {
-    return Array.from(this.locationPaymentMethods.values()).filter(
-      lpm => lpm.locationId === locationId
-    );
-  }
-
-  async getAvailablePaymentMethodsForLocation(locationId: number): Promise<PaymentMethod[]> {
-    return Array.from(this.paymentMethods.values()).filter(
-      method => method.isActive && method.isAvailableToLocations
-    );
-  }
-
-  async enablePaymentMethodForLocation(locationId: number, paymentMethodId: number, customFee?: number): Promise<LocationPaymentMethod> {
-    const id = this.locationPaymentMethodCounter++;
-    const locationPaymentMethod: LocationPaymentMethod = {
-      id,
-      locationId,
-      paymentMethodId,
-      isEnabled: true,
-      customProcessingFee: customFee || null,
-      createdAt: new Date()
-    };
-    this.locationPaymentMethods.set(id, locationPaymentMethod);
-    return locationPaymentMethod;
-  }
-
-  async disablePaymentMethodForLocation(locationId: number, paymentMethodId: number): Promise<void> {
-    const lpm = Array.from(this.locationPaymentMethods.values()).find(
-      item => item.locationId === locationId && item.paymentMethodId === paymentMethodId
-    );
-    if (lpm) {
-      this.locationPaymentMethods.delete(lpm.id);
-    }
   }
 
   // City Category operations

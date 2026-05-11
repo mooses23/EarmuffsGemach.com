@@ -11,8 +11,6 @@ import {
   transactions, type Transaction, type InsertTransaction,
   contacts, type Contact, type InsertContact,
   payments, type Payment, type InsertPayment,
-  paymentMethods, type PaymentMethod, type InsertPaymentMethod,
-  locationPaymentMethods, type LocationPaymentMethod, type InsertLocationPaymentMethod,
   inventory, type Inventory, type InsertInventory,
   auditLogs, type AuditLog, type InsertAuditLog,
   webhookEvents, type WebhookEvent, type InsertWebhookEvent,
@@ -993,83 +991,6 @@ export class DatabaseStorage implements IStorage {
     return result[0];
   }
 
-  // Payment Method operations
-  async getAllPaymentMethods(): Promise<PaymentMethod[]> {
-    return db.select().from(paymentMethods);
-  }
-
-  async getPaymentMethod(id: number): Promise<PaymentMethod | undefined> {
-    const result = await db.select().from(paymentMethods).where(eq(paymentMethods.id, id));
-    return result[0];
-  }
-
-  async createPaymentMethod(insertMethod: InsertPaymentMethod): Promise<PaymentMethod> {
-    const result = await db.insert(paymentMethods).values({
-      ...insertMethod,
-      isActive: insertMethod.isActive ?? true,
-      isAvailableToLocations: insertMethod.isAvailableToLocations ?? false,
-      processingFeePercent: insertMethod.processingFeePercent ?? 0,
-      fixedFee: insertMethod.fixedFee ?? 0,
-      requiresApi: insertMethod.requiresApi ?? false,
-      provider: insertMethod.provider ?? null,
-      apiKey: insertMethod.apiKey ?? null,
-      apiSecret: insertMethod.apiSecret ?? null,
-      webhookSecret: insertMethod.webhookSecret ?? null,
-      isConfigured: insertMethod.isConfigured ?? false,
-      createdAt: new Date()
-    }).returning();
-    return result[0];
-  }
-
-  async updatePaymentMethod(id: number, data: Partial<InsertPaymentMethod>): Promise<PaymentMethod> {
-    const result = await db.update(paymentMethods)
-      .set(data)
-      .where(eq(paymentMethods.id, id))
-      .returning();
-    if (result.length === 0) {
-      throw new Error(`Payment method with id ${id} not found`);
-    }
-    return result[0];
-  }
-
-  async deletePaymentMethod(id: number): Promise<void> {
-    await db.delete(paymentMethods).where(eq(paymentMethods.id, id));
-  }
-
-  // Location Payment Method operations
-  async getLocationPaymentMethods(locationId: number): Promise<LocationPaymentMethod[]> {
-    return db.select().from(locationPaymentMethods).where(eq(locationPaymentMethods.locationId, locationId));
-  }
-
-  async getAvailablePaymentMethodsForLocation(locationId: number): Promise<PaymentMethod[]> {
-    return db.select().from(paymentMethods).where(
-      and(
-        eq(paymentMethods.isActive, true),
-        eq(paymentMethods.isAvailableToLocations, true)
-      )
-    );
-  }
-
-  async enablePaymentMethodForLocation(locationId: number, paymentMethodId: number, customFee?: number): Promise<LocationPaymentMethod> {
-    const result = await db.insert(locationPaymentMethods).values({
-      locationId,
-      paymentMethodId,
-      isEnabled: true,
-      customProcessingFee: customFee || null,
-      createdAt: new Date()
-    }).returning();
-    return result[0];
-  }
-
-  async disablePaymentMethodForLocation(locationId: number, paymentMethodId: number): Promise<void> {
-    await db.delete(locationPaymentMethods).where(
-      and(
-        eq(locationPaymentMethods.locationId, locationId),
-        eq(locationPaymentMethods.paymentMethodId, paymentMethodId)
-      )
-    );
-  }
-
   // Pay Later operations
   async getTransactionByMagicToken(magicToken: string): Promise<Transaction | undefined> {
     const result = await db.select().from(transactions).where(eq(transactions.magicToken, magicToken));
@@ -1489,6 +1410,11 @@ export async function ensureSchemaUpgrades(): Promise<void> {
       console.error(`[ensureSchemaUpgrades] ${label} failed: ${errorMessage(err)}`);
     }
   };
+
+  // Task #217: drop retired payment_methods + location_payment_methods tables.
+  // Retained as IF EXISTS so re-running on already-migrated DBs is a no-op.
+  await safe("drop table location_payment_methods", () => db.execute(sql`DROP TABLE IF EXISTS location_payment_methods`));
+  await safe("drop table payment_methods", () => db.execute(sql`DROP TABLE IF EXISTS payment_methods`));
 
   await safe("add transactions.last_return_reminder_at", () => db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS last_return_reminder_at TIMESTAMP`));
   await safe("add transactions.return_reminder_count", () => db.execute(sql`ALTER TABLE transactions ADD COLUMN IF NOT EXISTS return_reminder_count INTEGER NOT NULL DEFAULT 0`));

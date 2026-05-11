@@ -477,65 +477,15 @@ export const insertGlobalSettingSchema = createInsertSchema(globalSettings).pick
 export type GlobalSetting = typeof globalSettings.$inferSelect;
 export type InsertGlobalSetting = z.infer<typeof insertGlobalSettingSchema>;
 
-// Payment Methods Configuration
-export const paymentMethods = pgTable("payment_methods", {
-  id: serial("id").primaryKey(),
-  name: text("name").notNull(), // "stripe", "paypal", "square", "cash", "venmo", "zelle"
-  displayName: text("display_name").notNull(), // "Credit/Debit Card", "PayPal", etc.
-  provider: text("provider"), // "stripe", "paypal", "square" - null for cash/manual methods
-  isActive: boolean("is_active").default(true),
-  isAvailableToLocations: boolean("is_available_to_locations").default(false),
-  processingFeePercent: integer("processing_fee_percent").default(0), // stored as basis points (290 = 2.9%)
-  fixedFee: integer("fixed_fee").default(0), // in cents
-  requiresApi: boolean("requires_api").default(false),
-  apiKey: text("api_key"), // encrypted API key
-  apiSecret: text("api_secret"), // encrypted API secret  
-  webhookSecret: text("webhook_secret"), // encrypted webhook secret
-  isConfigured: boolean("is_configured").default(false), // true when API credentials are provided
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const insertPaymentMethodSchema = createInsertSchema(paymentMethods).pick({
-  name: true,
-  displayName: true,
-  provider: true,
-  isActive: true,
-  isAvailableToLocations: true,
-  processingFeePercent: true,
-  fixedFee: true,
-  requiresApi: true,
-  apiKey: true,
-  apiSecret: true,
-  webhookSecret: true,
-  isConfigured: true,
-});
-
-export type PaymentMethod = typeof paymentMethods.$inferSelect;
-export type InsertPaymentMethod = z.infer<typeof insertPaymentMethodSchema>;
+// Task #217: payment_methods + location_payment_methods tables retired.
+// The only real knob (Stripe processingFeePercent / fixedFee) now lives in
+// `global_settings` under `stripe.depositFeePercentBp` / `stripe.depositFeeFixedCents`.
+// Per-location payment-method availability is driven by the
+// `payment_methods text[]` column on the `locations` table.
 
 // City category type definitions
 export type CityCategory = typeof cityCategories.$inferSelect;
 export type InsertCityCategory = z.infer<typeof insertCityCategorySchema>;
-
-// Location Payment Methods (which methods each location accepts)
-export const locationPaymentMethods = pgTable("location_payment_methods", {
-  id: serial("id").primaryKey(),
-  locationId: integer("location_id").notNull(),
-  paymentMethodId: integer("payment_method_id").notNull(),
-  isEnabled: boolean("is_enabled").default(true),
-  customProcessingFee: integer("custom_processing_fee"), // override global fee if set
-  createdAt: timestamp("created_at").defaultNow(),
-});
-
-export const insertLocationPaymentMethodSchema = createInsertSchema(locationPaymentMethods).pick({
-  locationId: true,
-  paymentMethodId: true,
-  isEnabled: true,
-  customProcessingFee: true,
-});
-
-export type LocationPaymentMethod = typeof locationPaymentMethods.$inferSelect;
-export type InsertLocationPaymentMethod = z.infer<typeof insertLocationPaymentMethodSchema>;
 
 // Payment schema for tracking payments
 export const payments = pgTable("payments", {

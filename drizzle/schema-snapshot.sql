@@ -343,30 +343,7 @@ CREATE SEQUENCE public.knowledge_docs_id_seq
 
 ALTER SEQUENCE public.knowledge_docs_id_seq OWNED BY public.knowledge_docs.id;
 
--- Name: location_payment_methods; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE public.location_payment_methods (
-    id integer NOT NULL,
-    location_id integer NOT NULL,
-    payment_method_id integer NOT NULL,
-    is_enabled boolean DEFAULT true,
-    custom_processing_fee integer,
-    created_at timestamp without time zone DEFAULT now()
-);
-
--- Name: location_payment_methods_id_seq; Type: SEQUENCE; Schema: public; Owner: -
-
-CREATE SEQUENCE public.location_payment_methods_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
--- Name: location_payment_methods_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
-
-ALTER SEQUENCE public.location_payment_methods_id_seq OWNED BY public.location_payment_methods.id;
 
 -- Name: locations; Type: TABLE; Schema: public; Owner: -
 
@@ -456,38 +433,7 @@ CREATE SEQUENCE public.message_send_logs_id_seq
 
 ALTER SEQUENCE public.message_send_logs_id_seq OWNED BY public.message_send_logs.id;
 
--- Name: payment_methods; Type: TABLE; Schema: public; Owner: -
 
-CREATE TABLE public.payment_methods (
-    id integer NOT NULL,
-    name text NOT NULL,
-    display_name text NOT NULL,
-    provider text,
-    is_active boolean DEFAULT true,
-    is_available_to_locations boolean DEFAULT false,
-    processing_fee_percent integer DEFAULT 0,
-    fixed_fee integer DEFAULT 0,
-    requires_api boolean DEFAULT false,
-    api_key text,
-    api_secret text,
-    webhook_secret text,
-    is_configured boolean DEFAULT false,
-    created_at timestamp without time zone DEFAULT now()
-);
-
--- Name: payment_methods_id_seq; Type: SEQUENCE; Schema: public; Owner: -
-
-CREATE SEQUENCE public.payment_methods_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
--- Name: payment_methods_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
-
-ALTER SEQUENCE public.payment_methods_id_seq OWNED BY public.payment_methods.id;
 
 -- Name: payments; Type: TABLE; Schema: public; Owner: -
 
@@ -793,10 +739,6 @@ ALTER TABLE ONLY public.kb_embeddings ALTER COLUMN id SET DEFAULT nextval('publi
 
 ALTER TABLE ONLY public.knowledge_docs ALTER COLUMN id SET DEFAULT nextval('public.knowledge_docs_id_seq'::regclass);
 
--- Name: location_payment_methods id; Type: DEFAULT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.location_payment_methods ALTER COLUMN id SET DEFAULT nextval('public.location_payment_methods_id_seq'::regclass);
-
 -- Name: locations id; Type: DEFAULT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.locations ALTER COLUMN id SET DEFAULT nextval('public.locations_id_seq'::regclass);
@@ -804,10 +746,6 @@ ALTER TABLE ONLY public.locations ALTER COLUMN id SET DEFAULT nextval('public.lo
 -- Name: message_send_logs id; Type: DEFAULT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.message_send_logs ALTER COLUMN id SET DEFAULT nextval('public.message_send_logs_id_seq'::regclass);
-
--- Name: payment_methods id; Type: DEFAULT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.payment_methods ALTER COLUMN id SET DEFAULT nextval('public.payment_methods_id_seq'::regclass);
 
 -- Name: payments id; Type: DEFAULT; Schema: public; Owner: -
 
@@ -916,11 +854,6 @@ ALTER TABLE ONLY public.kb_embeddings
 ALTER TABLE ONLY public.knowledge_docs
     ADD CONSTRAINT knowledge_docs_pkey PRIMARY KEY (id);
 
--- Name: location_payment_methods location_payment_methods_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.location_payment_methods
-    ADD CONSTRAINT location_payment_methods_pkey PRIMARY KEY (id);
-
 -- Name: locations locations_location_code_unique; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.locations
@@ -935,11 +868,6 @@ ALTER TABLE ONLY public.locations
 
 ALTER TABLE ONLY public.message_send_logs
     ADD CONSTRAINT message_send_logs_pkey PRIMARY KEY (id);
-
--- Name: payment_methods payment_methods_pkey; Type: CONSTRAINT; Schema: public; Owner: -
-
-ALTER TABLE ONLY public.payment_methods
-    ADD CONSTRAINT payment_methods_pkey PRIMARY KEY (id);
 
 -- Name: payments payments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 

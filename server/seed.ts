@@ -2,12 +2,10 @@ import { db } from "./db.js";
 import {
   regions,
   cityCategories,
-  paymentMethods,
   locations,
   inventory,
   type InsertRegion,
   type InsertCityCategory,
-  type InsertPaymentMethod,
   type InsertLocation,
   type InsertInventory,
 } from "../shared/schema.js";
@@ -75,79 +73,6 @@ const defaultCityCategories: InsertCityCategory[] = [
   { name: "Petach Tikvah", slug: "petach-tikvah", regionId: 6, displayOrder: 21 },
   { name: "Moshav Yesodot", slug: "moshav-yesodot", regionId: 6, displayOrder: 22 },
   { name: "Shomron", slug: "shomron", regionId: 6, displayOrder: 23 },
-];
-
-const defaultPaymentMethods: InsertPaymentMethod[] = [
-  {
-    name: "cash",
-    displayName: "Cash",
-    provider: null,
-    isActive: true,
-    isAvailableToLocations: true,
-    processingFeePercent: 0,
-    fixedFee: 0,
-    requiresApi: false,
-    apiKey: null,
-    apiSecret: null,
-    webhookSecret: null,
-    isConfigured: true,
-  },
-  {
-    name: "stripe",
-    displayName: "Credit/Debit Card",
-    provider: "stripe",
-    isActive: false,
-    isAvailableToLocations: false,
-    processingFeePercent: 290,
-    fixedFee: 30,
-    requiresApi: true,
-    apiKey: null,
-    apiSecret: null,
-    webhookSecret: null,
-    isConfigured: false,
-  },
-  {
-    name: "paypal",
-    displayName: "PayPal",
-    provider: "paypal",
-    isActive: false,
-    isAvailableToLocations: false,
-    processingFeePercent: 290,
-    fixedFee: 30,
-    requiresApi: true,
-    apiKey: null,
-    apiSecret: null,
-    webhookSecret: null,
-    isConfigured: false,
-  },
-  {
-    name: "venmo",
-    displayName: "Venmo",
-    provider: null,
-    isActive: true,
-    isAvailableToLocations: true,
-    processingFeePercent: 0,
-    fixedFee: 0,
-    requiresApi: false,
-    apiKey: null,
-    apiSecret: null,
-    webhookSecret: null,
-    isConfigured: true,
-  },
-  {
-    name: "zelle",
-    displayName: "Zelle",
-    provider: null,
-    isActive: true,
-    isAvailableToLocations: true,
-    processingFeePercent: 0,
-    fixedFee: 0,
-    requiresApi: false,
-    apiKey: null,
-    apiSecret: null,
-    webhookSecret: null,
-    isConfigured: true,
-  },
 ];
 
 interface LocationWithInventory {
@@ -319,21 +244,6 @@ async function seedCityCategories(): Promise<void> {
   console.log(`  Inserted ${defaultCityCategories.length} city categories`);
 }
 
-async function seedPaymentMethods(): Promise<void> {
-  console.log("Seeding payment methods...");
-  try {
-    const result = await db.select({ id: paymentMethods.id }).from(paymentMethods).limit(1);
-    if (result && result.length > 0) {
-      console.log(`  Skipping: payment methods already exist`);
-      return;
-    }
-  } catch (e) {
-    // Table may be empty - continue with insert
-  }
-  await db.insert(paymentMethods).values(defaultPaymentMethods);
-  console.log(`  Inserted ${defaultPaymentMethods.length} payment methods`);
-}
-
 async function seedLocations(): Promise<Map<string, number>> {
   console.log("Seeding locations...");
   const locationCodeToId = new Map<string, number>();
@@ -416,7 +326,6 @@ export async function seed(): Promise<void> {
   try {
     await seedRegions();
     await seedCityCategories();
-    await seedPaymentMethods();
     const locationCodeToId = await seedLocations();
     await seedInventory(locationCodeToId);
     

@@ -2,7 +2,7 @@ import { getStripeClient } from './stripeClient.js';
 import { storage } from './storage.js';
 import { randomBytes, createHash } from 'crypto';
 import type { Transaction, PayLaterStatus } from '../shared/schema.js';
-import { computeFeeForPaymentMethod } from './depositFees.js';
+import { computeFeeForStripe, getStripeFeeOverride } from './depositFees.js';
 import { buildCanonicalConsentText } from './consentHelper.js';
 import { notifyBorrowerBeforeCharge, notifyBorrowerAfterCharge } from './chargeNotifications.js';
 
@@ -106,11 +106,10 @@ export class PayLaterService {
     const tokenExpiresAt = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
 
     // Compute deposit + Stripe fee (disclosed as consent max and charged at settle time).
-    // Fee priority: payment_methods row (provider='stripe') > location defaults > hard defaults.
+    // Task #217: Fee priority: global override (global_settings) > location defaults > hard defaults.
     const location = await storage.getLocation(data.locationId);
-    const allPaymentMethods = await storage.getAllPaymentMethods();
-    const stripePaymentMethod = allPaymentMethods.find(pm => pm.provider === 'stripe' && pm.isActive);
-    const { feeCents, totalCents } = computeFeeForPaymentMethod(data.amountCents, stripePaymentMethod, location);
+    const stripeOverride = await getStripeFeeOverride();
+    const { feeCents, totalCents } = computeFeeForStripe(data.amountCents, stripeOverride, location);
     const consentMax = data.consentMaxChargeCents ?? totalCents;
 
     // Server-computed canonical consent text — ignore any client-supplied text

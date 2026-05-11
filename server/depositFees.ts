@@ -6,6 +6,8 @@
 // deposits where the fixed $0.30 dwarfs the percent). This helper adds
 // both, then ceils to whole cents so the gemach is always made whole.
 
+import { storage } from './storage.js';
+
 export interface ComputeFeeInput {
   /** Deposit amount in CENTS. */
   depositCents: number;
@@ -41,27 +43,49 @@ export function computeFeeForLocation(
   return computeProcessingFeeCents({ depositCents, percentBp, fixedCents });
 }
 
+// Task #217: global Stripe fee override lives in `global_settings`, replacing
+// the retired admin Payment Methods page (which previously held the only
+// real knob — the stripe row's processingFeePercent/fixedFee).
+// Priority: global override > location config > hard defaults.
+export const STRIPE_FEE_PERCENT_BP_KEY = 'stripe.depositFeePercentBp';
+export const STRIPE_FEE_FIXED_CENTS_KEY = 'stripe.depositFeeFixedCents';
+
+export interface StripeFeeOverride {
+  percentBp: number | null;
+  fixedCents: number | null;
+}
+
+export async function getStripeFeeOverride(): Promise<StripeFeeOverride> {
+  const [pctRow, fixedRow] = await Promise.all([
+    storage.getGlobalSetting(STRIPE_FEE_PERCENT_BP_KEY),
+    storage.getGlobalSetting(STRIPE_FEE_FIXED_CENTS_KEY),
+  ]);
+  const pct = pctRow?.value != null ? Number(pctRow.value) : NaN;
+  const fixed = fixedRow?.value != null ? Number(fixedRow.value) : NaN;
+  return {
+    percentBp: Number.isFinite(pct) && pct >= 0 ? pct : null,
+    fixedCents: Number.isFinite(fixed) && fixed >= 0 ? fixed : null,
+  };
+}
+
+export async function setStripeFeeOverride(override: { percentBp?: number | null; fixedCents?: number | null }): Promise<void> {
+  if (override.percentBp != null && Number.isFinite(override.percentBp)) {
+    await storage.setGlobalSetting(STRIPE_FEE_PERCENT_BP_KEY, String(Math.max(0, Math.floor(Number(override.percentBp)))));
+  }
+  if (override.fixedCents != null && Number.isFinite(override.fixedCents)) {
+    await storage.setGlobalSetting(STRIPE_FEE_FIXED_CENTS_KEY, String(Math.max(0, Math.floor(Number(override.fixedCents)))));
+  }
+}
+
 /**
- * Compute fee using the payment-method configuration as the source of truth,
- * with a location fallback. This mirrors how Stripe's actual cost is structured:
- * fee is owned by the payment method (e.g., the Stripe row in payment_methods),
- * and the location can override. Priority: paymentMethod > location > defaults.
- *
- * @param depositCents - Deposit amount in cents
- * @param paymentMethod - Row from payment_methods table (provider='stripe')
- * @param location - Location row (fallback)
+ * Compute Stripe deposit fee. Priority: global override > location config > hard defaults.
  */
-export function computeFeeForPaymentMethod(
+export function computeFeeForStripe(
   depositCents: number,
-  paymentMethod: { processingFeePercent?: number | null; fixedFee?: number | null } | null | undefined,
+  override: { percentBp?: number | null; fixedCents?: number | null } | null | undefined,
   location: { processingFeePercent?: number | null; processingFeeFixed?: number | null } | null | undefined
 ): ComputeFeeResult {
-  // Payment method config takes precedence over location config.
-  const percentBp = paymentMethod?.processingFeePercent
-    ?? location?.processingFeePercent
-    ?? 300;
-  const fixedCents = paymentMethod?.fixedFee
-    ?? location?.processingFeeFixed
-    ?? 30;
+  const percentBp = override?.percentBp ?? location?.processingFeePercent ?? 300;
+  const fixedCents = override?.fixedCents ?? location?.processingFeeFixed ?? 30;
   return computeProcessingFeeCents({ depositCents, percentBp, fixedCents });
 }
