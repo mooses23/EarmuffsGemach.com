@@ -1,0 +1,77 @@
+You are updating EarmuffsGemach.com to satisfy SMS/A2P compliance requirements without making the Gemach feel corporate, scary, or overly legal.
+
+Goal:
+Add lightweight, friendly compliance pages and SMS consent language so Twilio/TCR/carriers can verify proper opt-in, privacy, terms, and SMS handling.
+
+Important tone:
+This is a Gemach, not a bank or law firm. Keep language warm, simple, trustworthy, and human. Avoid scary legal wording. The borrower should feel helped, not warned.
+
+Tasks:
+
+1. Add three simple pages:
+- /privacy-policy
+- /terms
+- /sms-policy
+
+2. Add footer links sitewide:
+Privacy Policy | Terms | SMS Policy
+
+Footer links should be subtle, small, and not in the main navigation.
+
+3. Add SMS consent language near every phone-number field or request form:
+
+“By providing your phone number, you agree to receive SMS messages from EarmuffsGemach regarding requests, pickup updates, return reminders, onboarding, and support. Message frequency varies. Reply STOP to unsubscribe and HELP for assistance. Message and data rates may apply.”
+
+4. Add an unchecked consent checkbox near phone-number collection:
+
+Label:
+“I agree to receive SMS updates about my request and Gemach communication.”
+
+The form should not submit unless this checkbox is checked.
+
+5. Privacy Policy page content:
+Use plain, friendly language. Include:
+- We collect basic request information such as name, phone number, request details, and communication history.
+- We use this information only to help manage Gemach requests, pickup, returns, onboarding, and support.
+- We do not sell personal information.
+- SMS consent is not shared with third parties for marketing purposes.
+- Users may opt out of SMS by replying STOP.
+- Users may request help by replying HELP.
+
+6. Terms page content:
+Use simple language. Include:
+- The Gemach provides earmuffs as a community service.
+- Borrowers should return items on time and communicate if there is an issue.
+- SMS messages may be used for request updates, pickup notifications, return reminders, onboarding, and support.
+- Message frequency varies.
+- Message and data rates may apply.
+- Reply STOP to opt out, HELP for help.
+
+7. SMS Policy page content:
+Make this carrier-compliance friendly but not intimidating. Include:
+- EarmuffsGemach sends SMS only for operational communication.
+- Types of messages: request confirmations, pickup updates, return reminders, onboarding messages, and support.
+- Users opt in through website forms by entering their phone number and checking the SMS consent box.
+- Reply STOP to unsubscribe.
+- Reply HELP for assistance.
+- Message frequency varies.
+- Message and data rates may apply.
+- SMS consent is not sold or shared for marketing.
+
+8. Visual style:
+- Keep pages clean and simple.
+- Use headings like “How We Use Text Messages” instead of intimidating legal headings where possible.
+- Avoid dense walls of legal text.
+- Mobile-friendly layout.
+- Match current site style.
+
+9. Validation:
+- Confirm all three pages are accessible by direct URL.
+- Confirm footer links work.
+- Confirm SMS consent text appears near all phone-number fields.
+- Confirm checkbox is required before submitting forms.
+- Do not remove existing functionality.
+- Do not make the homepage feel legal-heavy.
+
+Deliverable:
+Implement the pages and form updates, then summarize exactly what files changed and where the SMS consent language appears.
