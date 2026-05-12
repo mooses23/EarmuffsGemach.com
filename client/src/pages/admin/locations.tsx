@@ -1176,8 +1176,11 @@ export default function AdminLocations() {
     const em = loc.welcomeEmailStatus?.toLowerCase();
     const sentLike = (s?: string) => s === "sent" || s === "delivered" || s === "queued" || s === "sending" || s === "accepted";
     const failedLike = (s?: string) => s === "failed" || s === "undelivered";
+    // Prioritise failures: if any channel failed, report the overall status as
+    // "failed" so the location shows up in the "Failed delivery" filter even when
+    // another channel was successfully sent.
+    if (failedLike(sms) || failedLike(wa)) return "failed";
     if (sentLike(sms) || sentLike(wa) || sentLike(em)) return "sent";
-    if (failedLike(sms) || failedLike(wa) || failedLike(em)) return "failed";
     return "not-sent";
   };
 
@@ -2346,10 +2349,14 @@ export default function AdminLocations() {
                           {(() => {
                             const sms = location.welcomeSmsStatus?.toLowerCase();
                             const wa = location.welcomeWhatsappStatus?.toLowerCase();
-                            const isUndelivered = sms === 'undelivered' || sms === 'failed' || wa === 'undelivered' || wa === 'failed';
+                            const smsFailed = sms === 'undelivered' || sms === 'failed';
+                            const waFailed = wa === 'undelivered' || wa === 'failed';
+                            const isUndelivered = smsFailed || waFailed;
                             if (!isUndelivered) return null;
                             const errorText = location.welcomeSmsError || location.welcomeWhatsappError || null;
-                            const channel = (sms === 'undelivered' || sms === 'failed') ? 'SMS' : 'WhatsApp';
+                            const failedChannel = smsFailed ? 'SMS' : 'WhatsApp';
+                            const failedStatus = smsFailed ? sms : wa;
+                            const statusLabel = failedStatus === 'failed' ? 'failed' : 'undelivered';
                             return (
                               <Tooltip>
                                 <TooltipTrigger asChild>
@@ -2357,7 +2364,7 @@ export default function AdminLocations() {
                                     variant="outline"
                                     className="border-red-500/40 bg-red-500/15 text-red-300 cursor-help"
                                   >
-                                    {channel} undelivered
+                                    {failedChannel} {statusLabel}
                                   </Badge>
                                 </TooltipTrigger>
                                 <TooltipContent className="max-w-xs text-xs">
