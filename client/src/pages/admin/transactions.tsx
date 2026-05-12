@@ -286,6 +286,20 @@ function TransactionCard({ transaction, locationName, onEdit, onRefund, t }: Tra
           </span>
         )}
       </div>
+
+      {/* Quick-action button for active borrows */}
+      {!transaction.isReturned && (
+        <div className="pt-1 border-t border-white/5">
+          <Button
+            size="sm"
+            className="w-full bg-primary/20 hover:bg-primary/30 text-primary border border-primary/30 hover:border-primary/50 text-xs font-medium"
+            onClick={() => onRefund(transaction)}
+          >
+            <RotateCw className="h-3.5 w-3.5 mr-1.5" />
+            {t("markAsReturned")}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
