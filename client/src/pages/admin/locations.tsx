@@ -2023,7 +2023,7 @@ export default function AdminLocations() {
             {regionStats.map(({ region, count, notOnboarded, missingContact }) => {
               const regionName = language === "he" && region.nameHe ? region.nameHe : region.name;
               const isActive = selectedRegionId === region.id;
-              const regionLocIds = locations.filter(l => l.regionId === region.id).map(l => l.id);
+              const regionLocIds = filteredLocations.filter(l => l.regionId === region.id).map(l => l.id);
               const allRegionSelected = allIdsSelected(regionLocIds);
               const someRegionSelected = !allRegionSelected && regionLocIds.some(id => selectedIds.has(id));
               return (
