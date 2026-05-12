@@ -595,9 +595,9 @@ export default function AdminTransactions() {
               </h2>
               <span className="flex items-center gap-1 text-xs text-muted-foreground">
                 {analyticsOpen ? (
-                  <><ChevronUp className="h-3.5 w-3.5" />{t("hide") || "Hide"}</>
+                  <><ChevronUp className="h-3.5 w-3.5" />Hide</>
                 ) : (
-                  <><ChevronDown className="h-3.5 w-3.5" />{t("show") || "Show"}</>
+                  <><ChevronDown className="h-3.5 w-3.5" />Show</>
                 )}
               </span>
             </button>
