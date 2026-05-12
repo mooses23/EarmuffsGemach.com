@@ -1300,6 +1300,18 @@ export default function AdminLocations() {
     });
   };
 
+  const toggleManyIds = (ids: number[], checked: boolean) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (checked) ids.forEach(id => next.add(id));
+      else ids.forEach(id => next.delete(id));
+      return next;
+    });
+  };
+
+  const allIdsSelected = (ids: number[]) =>
+    ids.length > 0 && ids.every(id => selectedIds.has(id));
+
   const { data: regions = [] } = useQuery<Region[]>({
     queryKey: ["/api/regions"],
   });
@@ -1741,209 +1753,369 @@ export default function AdminLocations() {
 
         {/* ===================================================================
             DRILL-IN LOCATIONS MANAGEMENT (Direction 1 redesign)
+            New order: toolbar → filter chips → ServiceStatusBar → Send History
+                       → Region strip → Community pills → Summary → Cards
             =================================================================== */}
-        <div className="pb-32">
-          {/* Compact Region Strip */}
-          <div className="flex gap-3 overflow-x-auto pb-3 mb-5 -mx-2 px-2">
+        <div className="pb-32 space-y-5">
+          {/* Toolbar (always visible) — breadcrumb + search + filters + Settings + Add */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 glass-panel p-4 rounded-2xl">
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <button
+                type="button"
+                onClick={() => setSelectedRegionId(null)}
+                className="inline-flex items-center hover:text-foreground transition-colors"
+                aria-label="Back to all regions"
+                data-testid="button-breadcrumb-home"
+              >
+                <Home className="h-4 w-4" />
+              </button>
+              {selectedRegionId !== null && (
+                <>
+                  <ChevronRight className="h-4 w-4" />
+                  <span className="text-foreground font-medium">{selectedRegionName}</span>
+                </>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative flex-1 min-w-[180px]">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  placeholder={t('search')}
+                  className="pl-9 h-9"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  data-testid="input-search-locations"
+                />
+              </div>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue placeholder={t('status')} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t('allStatuses')}</SelectItem>
+                  <SelectItem value="active">{t('activeOnly')}</SelectItem>
+                  <SelectItem value="inactive">{t('inactiveOnly')}</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select
+                value={onboardingFilter}
+                onValueChange={(v) => {
+                  try { localStorage.setItem("adminOnboardingFilter", v); } catch {}
+                  setOnboardingFilter(v);
+                }}
+              >
+                <SelectTrigger className="h-9 w-[160px]">
+                  <SelectValue placeholder="Contact status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All contacts</SelectItem>
+                  <SelectItem value="not-sent">Not messaged</SelectItem>
+                  <SelectItem value="sent">Messaged (awaiting)</SelectItem>
+                  <SelectItem value="failed">Failed delivery</SelectItem>
+                  <SelectItem value="onboarded">Onboarded</SelectItem>
+                  <SelectItem value="no-phone">No phone (cannot send)</SelectItem>
+                </SelectContent>
+              </Select>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={() => setSettingsOpen(true)}
+                data-testid="button-open-settings"
+              >
+                <Settings className="h-4 w-4 mr-1" />
+                Settings
+              </Button>
+              <Button
+                size="sm"
+                className="h-9"
+                onClick={() => setIsCreateDialogOpen(true)}
+                data-testid="button-add-location-card-header"
+              >
+                <Plus className="h-4 w-4 mr-1" />
+                {t('addNewLocation')}
+              </Button>
+            </div>
+          </div>
+
+          {/* Active filters chips */}
+          {(statusFilter !== "all" || searchTerm || onboardingFilter !== "all") && (
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-sm text-muted-foreground">{t('activeFilters')}:</span>
+              {searchTerm && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  {t('search')}: {searchTerm}
+                  <button onClick={() => setSearchTerm("")} className="ml-1 hover:text-destructive">×</button>
+                </Badge>
+              )}
+              {statusFilter !== "all" && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  {t('status')}: {statusFilter}
+                  <button onClick={() => setStatusFilter("all")} className="ml-1 hover:text-destructive">×</button>
+                </Badge>
+              )}
+              {onboardingFilter !== "all" && (
+                <Badge variant="secondary" className="flex items-center gap-1">
+                  Contact: {onboardingFilter === "not-sent" ? "Not messaged" : onboardingFilter === "sent" ? "Messaged (awaiting)" : onboardingFilter === "failed" ? "Failed" : onboardingFilter === "no-phone" ? "No phone" : "Onboarded"}
+                  <button onClick={() => setOnboardingFilter("all")} className="ml-1 hover:text-destructive">×</button>
+                </Badge>
+              )}
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => { setSearchTerm(""); setStatusFilter("all"); setOnboardingFilter("all"); }}
+                className="text-xs"
+              >
+                {t('clearAll')}
+              </Button>
+            </div>
+          )}
+
+          {/* Service Status Bar (Twilio / Email / WhatsApp) */}
+          <ServiceStatusBar status={serviceStatusQuery.data} loading={serviceStatusQuery.isLoading} />
+
+          {/* Message Send History (collapsible) — moved here per request */}
+          <Card>
+            <CardHeader className="pb-2 cursor-pointer select-none" onClick={() => setSendHistoryOpen(v => !v)}>
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <History className="h-4 w-4 text-muted-foreground" />
+                  <CardTitle className="text-base">Message Send History</CardTitle>
+                  {!sendHistoryOpen && sendHistoryQuery.data && sendHistoryQuery.data.some(l => l.status === "failed") && (
+                    <Badge variant="destructive" className="text-xs">
+                      {sendHistoryQuery.data.filter(l => l.status === "failed").length} failed
+                    </Badge>
+                  )}
+                </div>
+                {sendHistoryOpen
+                  ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
+                  : <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                }
+              </div>
+              <CardDescription className="text-xs mt-0.5">
+                Permanent log of every message send attempt — successes, failures, and skipped locations.
+              </CardDescription>
+            </CardHeader>
+            {sendHistoryOpen && (
+              <CardContent className="pt-0">
+                {sendHistoryQuery.isLoading && (
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
+                    <Loader2 className="h-4 w-4 animate-spin" /> Loading send history…
+                  </div>
+                )}
+                {sendHistoryQuery.isError && (
+                  <p className="text-sm text-destructive py-4">Failed to load send history.</p>
+                )}
+                {sendHistoryQuery.data && sendHistoryQuery.data.length === 0 && (
+                  <p className="text-sm text-muted-foreground py-4">No send history yet. Logs will appear here after you send messages to locations.</p>
+                )}
+                {sendHistoryQuery.data && sendHistoryQuery.data.length > 0 && (() => {
+                  const logs = sendHistoryQuery.data;
+                  const failedCount = logs.filter(l => l.status === "failed").length;
+                  const sentCount = logs.filter(l => l.status === "sent").length;
+                  const skippedCount = logs.filter(l => l.status === "skipped").length;
+                  return (
+                    <div className="space-y-3">
+                      <div className="flex flex-wrap gap-2 text-xs">
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+                          <CheckCircle className="h-3 w-3" />{sentCount} sent
+                        </span>
+                        {failedCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
+                            <XCircle className="h-3 w-3" />{failedCount} failed
+                          </span>
+                        )}
+                        {skippedCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
+                            <MinusCircle className="h-3 w-3" />{skippedCount} skipped
+                          </span>
+                        )}
+                        <span className="text-muted-foreground">(last {logs.length} entries)</span>
+                      </div>
+                      <div className="rounded border overflow-hidden">
+                        <div className="max-h-96 overflow-y-auto">
+                          <Table>
+                            <TableHeader>
+                              <TableRow className="bg-muted/30">
+                                <TableHead className="text-xs py-2 w-32">When</TableHead>
+                                <TableHead className="text-xs py-2">Location</TableHead>
+                                <TableHead className="text-xs py-2 w-20">Channel</TableHead>
+                                <TableHead className="text-xs py-2 w-20">Status</TableHead>
+                                <TableHead className="text-xs py-2">Reason / Error</TableHead>
+                              </TableRow>
+                            </TableHeader>
+                            <TableBody>
+                              {logs.map((log, i) => {
+                                const isNewBatch = i === 0 || log.batchId !== logs[i - 1].batchId;
+                                const sentAt = new Date(log.sentAt);
+                                const daysAgo = Math.floor((Date.now() - sentAt.getTime()) / 86400000);
+                                const timeStr = daysAgo === 0
+                                  ? sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
+                                  : daysAgo === 1
+                                    ? `Yesterday ${sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
+                                    : sentAt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+                                return (
+                                  <TableRow
+                                    key={log.id}
+                                    className={`text-xs ${log.status === "failed" ? "bg-red-50/40 dark:bg-red-950/20" : log.status === "skipped" ? "bg-amber-50/30 dark:bg-amber-950/10" : ""} ${isNewBatch && log.batchId && i > 0 ? "border-t-2 border-muted" : ""}`}
+                                  >
+                                    <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
+                                      <div className="flex items-center gap-1">
+                                        <Clock className="h-3 w-3 shrink-0" />
+                                        {timeStr}
+                                      </div>
+                                      {isNewBatch && log.batchId && (
+                                        <span className="text-[10px] text-muted-foreground/60 block mt-0.5">
+                                          {log.batchId === 'restock' ? 'restock' : 'batch'}
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="py-1.5 font-medium">
+                                      {log.locationName}
+                                      <span className="text-muted-foreground font-normal ml-1 text-[11px]">({log.locationCode})</span>
+                                    </TableCell>
+                                    <TableCell className="py-1.5">
+                                      <span className="inline-flex items-center gap-0.5">
+                                        {log.channel === "sms" && <MessageSquare className="h-3 w-3" />}
+                                        {log.channel === "whatsapp" && <MessageCircle className="h-3 w-3" />}
+                                        {log.channel === "email" && <Mail className="h-3 w-3" />}
+                                        {log.channel}
+                                      </span>
+                                    </TableCell>
+                                    <TableCell className="py-1.5">
+                                      {log.status === "sent" && (
+                                        <span className="inline-flex items-center gap-1 text-green-700">
+                                          <CheckCircle className="h-3 w-3" /> Sent
+                                        </span>
+                                      )}
+                                      {log.status === "failed" && (
+                                        <span className="inline-flex items-center gap-1 text-red-700 font-medium">
+                                          <XCircle className="h-3 w-3" /> Failed
+                                        </span>
+                                      )}
+                                      {log.status === "skipped" && (
+                                        <span className="inline-flex items-center gap-1 text-amber-700">
+                                          <MinusCircle className="h-3 w-3" /> Skipped
+                                        </span>
+                                      )}
+                                    </TableCell>
+                                    <TableCell className="py-1.5 text-muted-foreground max-w-[200px] truncate">
+                                      {log.error || "—"}
+                                    </TableCell>
+                                  </TableRow>
+                                );
+                              })}
+                            </TableBody>
+                          </Table>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </CardContent>
+            )}
+          </Card>
+
+          {/* Compact Region Strip — moved BELOW toolbar/ServiceStatusBar/Send History.
+              Each card has a bulk-select checkbox to add/remove ALL its locations. */}
+          <div className="flex gap-3 overflow-x-auto pb-3 -mx-2 px-2">
             {regionStats.map(({ region, count, notOnboarded, missingContact }) => {
               const regionName = language === "he" && region.nameHe ? region.nameHe : region.name;
               const isActive = selectedRegionId === region.id;
+              const regionLocIds = locations.filter(l => l.regionId === region.id).map(l => l.id);
+              const allRegionSelected = allIdsSelected(regionLocIds);
+              const someRegionSelected = !allRegionSelected && regionLocIds.some(id => selectedIds.has(id));
               return (
-                <button
+                <div
                   key={region.id}
-                  type="button"
-                  onClick={() => {
-                    setSelectedRegionId(region.id);
-                    setSelectedCityCategoryId("all");
-                  }}
-                  className={`flex-shrink-0 text-left p-4 rounded-2xl transition-all border min-w-[200px] ${
+                  className={`flex-shrink-0 relative p-4 rounded-2xl transition-all border min-w-[220px] ${
                     isActive
                       ? "bg-primary/20 border-primary/50 shadow-[0_0_20px_rgba(59,130,246,0.2)]"
                       : "glass-card hover:bg-white/5"
                   }`}
                   data-testid={`region-card-${region.id}`}
                 >
-                  <h3 className="text-foreground font-semibold flex items-center gap-2">
-                    {regionName}
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5 mt-3">
-                    <Badge variant="secondary" className="text-xs">
-                      {count} {count === 1 ? t('locationSingular') : t('locations')}
-                    </Badge>
-                    {notOnboarded > 0 && (
-                      <Badge variant="outline" className="text-xs bg-red-500/15 text-red-300 border-red-500/30">
-                        {notOnboarded} not onboarded
-                      </Badge>
-                    )}
-                    {missingContact > 0 && (
-                      <Badge variant="outline" className="text-xs bg-orange-500/15 text-orange-300 border-orange-500/30">
-                        {missingContact} missing contact
-                      </Badge>
-                    )}
+                  <div
+                    className="absolute top-3 right-3 z-10"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <Checkbox
+                      checked={allRegionSelected}
+                      onCheckedChange={(v) => toggleManyIds(regionLocIds, !!v)}
+                      aria-label={`Select all locations in ${regionName}`}
+                      className={`w-5 h-5 ${someRegionSelected ? "data-[state=unchecked]:bg-primary/30 data-[state=unchecked]:border-primary/60" : ""}`}
+                      data-testid={`checkbox-region-${region.id}`}
+                    />
                   </div>
-                </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedRegionId(region.id);
+                      setSelectedCityCategoryId("all");
+                    }}
+                    className="text-left w-full pr-8"
+                    data-testid={`region-card-button-${region.id}`}
+                  >
+                    <h3 className="text-foreground font-semibold flex items-center gap-2">
+                      {regionName}
+                    </h3>
+                    <div className="flex flex-wrap gap-1.5 mt-3">
+                      <Badge variant="secondary" className="text-xs">
+                        {count} {count === 1 ? t('locationSingular') : t('locations')}
+                      </Badge>
+                      {notOnboarded > 0 && (
+                        <Badge variant="outline" className="text-xs bg-red-500/15 text-red-300 border-red-500/30">
+                          {notOnboarded} not onboarded
+                        </Badge>
+                      )}
+                      {missingContact > 0 && (
+                        <Badge variant="outline" className="text-xs bg-orange-500/15 text-orange-300 border-orange-500/30">
+                          {missingContact} missing contact
+                        </Badge>
+                      )}
+                    </div>
+                  </button>
+                </div>
               );
             })}
           </div>
 
           {selectedRegionId === null ? (
-            // Region grid (no region selected) — minimal toolbar
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 glass-panel p-4 rounded-2xl">
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder={t('search')}
-                    className="pl-9 h-9"
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-                <Button
-                  size="sm"
-                  onClick={() => setIsCreateDialogOpen(true)}
-                  data-testid="button-add-location-region-grid"
-                  className="h-9"
-                >
-                  <Plus className="h-4 w-4 mr-1" />
-                  {t('addNewLocation')}
-                </Button>
-              </div>
-              <div className="text-sm text-muted-foreground text-center py-8">
-                Select a region above to view its locations.
-              </div>
+            <div className="text-sm text-muted-foreground text-center py-8">
+              Select a region above to view its locations.
             </div>
           ) : (
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
-              {/* Breadcrumb + Toolbar */}
-              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 glass-panel p-4 rounded-2xl">
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedRegionId(null)}
-                    className="inline-flex items-center hover:text-foreground transition-colors"
-                    aria-label="Back to all regions"
-                    data-testid="button-breadcrumb-home"
-                  >
-                    <Home className="h-4 w-4" />
-                  </button>
-                  <ChevronRight className="h-4 w-4" />
-                  <span className="text-foreground font-medium">{selectedRegionName}</span>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-2">
-                  <div className="relative flex-1 min-w-[180px]">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                    <Input
-                      placeholder={t('search')}
-                      className="pl-9 h-9"
-                      value={searchTerm}
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      data-testid="input-search-locations"
-                    />
-                  </div>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder={t('status')} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">{t('allStatuses')}</SelectItem>
-                      <SelectItem value="active">{t('activeOnly')}</SelectItem>
-                      <SelectItem value="inactive">{t('inactiveOnly')}</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Select
-                    value={onboardingFilter}
-                    onValueChange={(v) => {
-                      try { localStorage.setItem("adminOnboardingFilter", v); } catch {}
-                      setOnboardingFilter(v);
-                    }}
-                  >
-                    <SelectTrigger className="h-9 w-[160px]">
-                      <SelectValue placeholder="Contact status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All contacts</SelectItem>
-                      <SelectItem value="not-sent">Not messaged</SelectItem>
-                      <SelectItem value="sent">Messaged (awaiting)</SelectItem>
-                      <SelectItem value="failed">Failed delivery</SelectItem>
-                      <SelectItem value="onboarded">Onboarded</SelectItem>
-                      <SelectItem value="no-phone">No phone (cannot send)</SelectItem>
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9"
-                    onClick={() => setSettingsOpen(true)}
-                    data-testid="button-open-settings"
-                  >
-                    <Settings className="h-4 w-4 mr-1" />
-                    Settings
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="h-9"
-                    onClick={() => setIsCreateDialogOpen(true)}
-                    data-testid="button-add-location-card-header"
-                  >
-                    <Plus className="h-4 w-4 mr-1" />
-                    {t('addNewLocation')}
-                  </Button>
-                </div>
-              </div>
-
-              {/* Active filters chips */}
-              {(statusFilter !== "all" || searchTerm || onboardingFilter !== "all") && (
-                <div className="flex flex-wrap gap-2 items-center">
-                  <span className="text-sm text-muted-foreground">{t('activeFilters')}:</span>
-                  {searchTerm && (
-                    <Badge variant="secondary" className="flex items-center gap-1">
-                      {t('search')}: {searchTerm}
-                      <button onClick={() => setSearchTerm("")} className="ml-1 hover:text-destructive">×</button>
-                    </Badge>
-                  )}
-                  {statusFilter !== "all" && (
-                    <Badge variant="secondary" className="flex items-center gap-1">
-                      {t('status')}: {statusFilter}
-                      <button onClick={() => setStatusFilter("all")} className="ml-1 hover:text-destructive">×</button>
-                    </Badge>
-                  )}
-                  {onboardingFilter !== "all" && (
-                    <Badge variant="secondary" className="flex items-center gap-1">
-                      Contact: {onboardingFilter === "not-sent" ? "Not messaged" : onboardingFilter === "sent" ? "Messaged (awaiting)" : onboardingFilter === "failed" ? "Failed" : onboardingFilter === "no-phone" ? "No phone" : "Onboarded"}
-                      <button onClick={() => setOnboardingFilter("all")} className="ml-1 hover:text-destructive">×</button>
-                    </Badge>
-                  )}
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => { setSearchTerm(""); setStatusFilter("all"); setOnboardingFilter("all"); }}
-                    className="text-xs"
-                  >
-                    {t('clearAll')}
-                  </Button>
-                </div>
-              )}
-
-              {/* Service Status Bar */}
-              <ServiceStatusBar status={serviceStatusQuery.data} loading={serviceStatusQuery.isLoading} />
-
-              {/* Community pills */}
+              {/* Community pills with bulk-select checkboxes */}
               {selectedRegionGroup && selectedRegionGroup.communityGroups.length > 0 && (
-                <div className="flex flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedCityCategoryId("all")}
-                    className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
-                      selectedCityCategoryId === "all"
-                        ? "bg-secondary text-secondary-foreground shadow-[0_0_15px_rgba(249,115,22,0.3)]"
-                        : "glass-panel hover:bg-white/10 text-foreground/80"
-                    }`}
-                    data-testid="pill-community-all"
-                  >
-                    All
-                  </button>
+                <div className="flex flex-wrap gap-2 items-center">
+                  {(() => {
+                    const allRegionVisibleIds = selectedRegionGroup.communityGroups.flatMap(g => g.locations.map(l => l.id));
+                    const allRegionVisSelected = allIdsSelected(allRegionVisibleIds);
+                    return (
+                      <div className={`inline-flex items-center gap-2 pl-2 pr-3 py-1 rounded-full text-sm font-medium transition-all ${
+                        selectedCityCategoryId === "all"
+                          ? "bg-secondary text-secondary-foreground shadow-[0_0_15px_rgba(249,115,22,0.3)]"
+                          : "glass-panel hover:bg-white/10 text-foreground/80"
+                      }`}>
+                        <Checkbox
+                          checked={allRegionVisSelected}
+                          onCheckedChange={(v) => toggleManyIds(allRegionVisibleIds, !!v)}
+                          aria-label="Select all locations in region"
+                          className="w-4 h-4"
+                          data-testid="checkbox-community-all"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCityCategoryId("all")}
+                          data-testid="pill-community-all"
+                        >
+                          All
+                        </button>
+                      </div>
+                    );
+                  })()}
                   {selectedRegionGroup.communityGroups.map(({ cityCategory, locations: ccLocs }) => {
                     const ccId = cityCategory?.id ?? null;
                     const ccName = cityCategory
@@ -1951,21 +2123,33 @@ export default function AdminLocations() {
                       : (t('uncategorized') || "Other");
                     if (ccId === null) return null;
                     const isSel = selectedCityCategoryId === ccId;
+                    const ccIds = ccLocs.map(l => l.id);
+                    const allCcSelected = allIdsSelected(ccIds);
                     return (
-                      <button
+                      <div
                         key={ccId}
-                        type="button"
-                        onClick={() => setSelectedCityCategoryId(ccId)}
-                        className={`px-4 py-1.5 rounded-full text-sm font-medium transition-all ${
+                        className={`inline-flex items-center gap-2 pl-2 pr-3 py-1 rounded-full text-sm font-medium transition-all ${
                           isSel
                             ? "bg-secondary text-secondary-foreground shadow-[0_0_15px_rgba(249,115,22,0.3)]"
                             : "glass-panel hover:bg-white/10 text-foreground/80"
                         }`}
-                        data-testid={`pill-community-${ccId}`}
                       >
-                        {ccName}
-                        <span className="ml-1.5 text-xs opacity-70">({ccLocs.length})</span>
-                      </button>
+                        <Checkbox
+                          checked={allCcSelected}
+                          onCheckedChange={(v) => toggleManyIds(ccIds, !!v)}
+                          aria-label={`Select all in ${ccName}`}
+                          className="w-4 h-4"
+                          data-testid={`checkbox-community-${ccId}`}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setSelectedCityCategoryId(ccId)}
+                          data-testid={`pill-community-${ccId}`}
+                        >
+                          {ccName}
+                          <span className="ml-1.5 text-xs opacity-70">({ccLocs.length})</span>
+                        </button>
+                      </div>
                     );
                   })}
                 </div>
@@ -2216,151 +2400,6 @@ export default function AdminLocations() {
             </div>
           </div>
         )}
-
-        {/* Message Send History Panel */}
-        <Card className="mt-4">
-          <CardHeader className="pb-2 cursor-pointer select-none" onClick={() => setSendHistoryOpen(v => !v)}>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <History className="h-4 w-4 text-muted-foreground" />
-                <CardTitle className="text-base">Message Send History</CardTitle>
-                {!sendHistoryOpen && sendHistoryQuery.data && sendHistoryQuery.data.some(l => l.status === "failed") && (
-                  <Badge variant="destructive" className="text-xs">
-                    {sendHistoryQuery.data.filter(l => l.status === "failed").length} failed
-                  </Badge>
-                )}
-              </div>
-              {sendHistoryOpen
-                ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                : <ChevronDown className="h-4 w-4 text-muted-foreground" />
-              }
-            </div>
-            <CardDescription className="text-xs mt-0.5">
-              Permanent log of every message send attempt — successes, failures, and skipped locations.
-            </CardDescription>
-          </CardHeader>
-          {sendHistoryOpen && (
-            <CardContent className="pt-0">
-              {sendHistoryQuery.isLoading && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-                  <Loader2 className="h-4 w-4 animate-spin" /> Loading send history…
-                </div>
-              )}
-              {sendHistoryQuery.isError && (
-                <p className="text-sm text-destructive py-4">Failed to load send history.</p>
-              )}
-              {sendHistoryQuery.data && sendHistoryQuery.data.length === 0 && (
-                <p className="text-sm text-muted-foreground py-4">No send history yet. Logs will appear here after you send messages to locations.</p>
-              )}
-              {sendHistoryQuery.data && sendHistoryQuery.data.length > 0 && (() => {
-                const logs = sendHistoryQuery.data;
-                const failedCount = logs.filter(l => l.status === "failed").length;
-                const sentCount = logs.filter(l => l.status === "sent").length;
-                const skippedCount = logs.filter(l => l.status === "skipped").length;
-                return (
-                  <div className="space-y-3">
-                    {/* Summary strip */}
-                    <div className="flex flex-wrap gap-2 text-xs">
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
-                        <CheckCircle className="h-3 w-3" />{sentCount} sent
-                      </span>
-                      {failedCount > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-                          <XCircle className="h-3 w-3" />{failedCount} failed
-                        </span>
-                      )}
-                      {skippedCount > 0 && (
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                          <MinusCircle className="h-3 w-3" />{skippedCount} skipped
-                        </span>
-                      )}
-                      <span className="text-muted-foreground">(last {logs.length} entries)</span>
-                    </div>
-
-                    {/* Log table */}
-                    <div className="rounded border overflow-hidden">
-                      <div className="max-h-96 overflow-y-auto">
-                        <Table>
-                          <TableHeader>
-                            <TableRow className="bg-muted/30">
-                              <TableHead className="text-xs py-2 w-32">When</TableHead>
-                              <TableHead className="text-xs py-2">Location</TableHead>
-                              <TableHead className="text-xs py-2 w-20">Channel</TableHead>
-                              <TableHead className="text-xs py-2 w-20">Status</TableHead>
-                              <TableHead className="text-xs py-2">Reason / Error</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {logs.map((log, i) => {
-                              const isNewBatch = i === 0 || log.batchId !== logs[i - 1].batchId;
-                              const sentAt = new Date(log.sentAt);
-                              const daysAgo = Math.floor((Date.now() - sentAt.getTime()) / 86400000);
-                              const timeStr = daysAgo === 0
-                                ? sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-                                : daysAgo === 1
-                                  ? `Yesterday ${sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-                                  : sentAt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                              return (
-                                <TableRow
-                                  key={log.id}
-                                  className={`text-xs ${log.status === "failed" ? "bg-red-50/40 dark:bg-red-950/20" : log.status === "skipped" ? "bg-amber-50/30 dark:bg-amber-950/10" : ""} ${isNewBatch && log.batchId && i > 0 ? "border-t-2 border-muted" : ""}`}
-                                >
-                                  <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
-                                    <div className="flex items-center gap-1">
-                                      <Clock className="h-3 w-3 shrink-0" />
-                                      {timeStr}
-                                    </div>
-                                    {isNewBatch && log.batchId && (
-                                      <span className="text-[10px] text-muted-foreground/60 block mt-0.5">
-                                        {log.batchId === 'restock' ? 'restock' : 'batch'}
-                                      </span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="py-1.5 font-medium">
-                                    {log.locationName}
-                                    <span className="text-muted-foreground font-normal ml-1 text-[11px]">({log.locationCode})</span>
-                                  </TableCell>
-                                  <TableCell className="py-1.5">
-                                    <span className="inline-flex items-center gap-0.5">
-                                      {log.channel === "sms" && <MessageSquare className="h-3 w-3" />}
-                                      {log.channel === "whatsapp" && <MessageCircle className="h-3 w-3" />}
-                                      {log.channel === "email" && <Mail className="h-3 w-3" />}
-                                      {log.channel}
-                                    </span>
-                                  </TableCell>
-                                  <TableCell className="py-1.5">
-                                    {log.status === "sent" && (
-                                      <span className="inline-flex items-center gap-1 text-green-700">
-                                        <CheckCircle className="h-3 w-3" /> Sent
-                                      </span>
-                                    )}
-                                    {log.status === "failed" && (
-                                      <span className="inline-flex items-center gap-1 text-red-700 font-medium">
-                                        <XCircle className="h-3 w-3" /> Failed
-                                      </span>
-                                    )}
-                                    {log.status === "skipped" && (
-                                      <span className="inline-flex items-center gap-1 text-amber-700">
-                                        <MinusCircle className="h-3 w-3" /> Skipped
-                                      </span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell className="py-1.5 text-muted-foreground max-w-[200px] truncate">
-                                    {log.error || "—"}
-                                  </TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                      </div>
-                    </div>
-                  </div>
-                );
-              })()}
-            </CardContent>
-          )}
-        </Card>
 
         {/* Edit Location Dialog */}
         <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
