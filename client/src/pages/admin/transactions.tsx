@@ -488,8 +488,16 @@ function readUrlParams() {
     const rawSort = sp.get("sort") as SortKey | null;
     const rawPage = parseInt(sp.get("page") ?? "1", 10);
     const validSorts: SortKey[] = ["date-desc", "date-asc", "status-active", "status-returned", "deposit-desc", "deposit-asc"];
+    const validStatuses = ["all", "active", "returned", "has-card", "expiring-soon"] as const;
+    type FilterStatus = typeof validStatuses[number];
+    const parsedStatus: FilterStatus =
+      s === "active" || s === "open" || s === "pending" ? "active"
+      : s === "returned" ? "returned"
+      : s === "has-card" ? "has-card"
+      : s === "expiring-soon" ? "expiring-soon"
+      : "all";
     return {
-      status: (s === "active" || s === "open" || s === "pending" ? "active" : s === "returned" ? "returned" : "all") as "all" | "active" | "returned",
+      status: parsedStatus,
       sort: (rawSort && validSorts.includes(rawSort) ? rawSort : "date-desc") as SortKey,
       page: isNaN(rawPage) || rawPage < 1 ? 1 : rawPage,
     };
@@ -508,7 +516,7 @@ export default function AdminTransactions() {
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null);
 
   const initialParams = readUrlParams();
-  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "returned">(initialParams.status);
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "returned" | "has-card" | "expiring-soon">(initialParams.status);
   const [sortKey, setSortKey] = useState<SortKey>(initialParams.sort);
   const [visibleCount, setVisibleCount] = useState(initialParams.page * PAGE_SIZE);
 
@@ -562,7 +570,7 @@ export default function AdminTransactions() {
   }, [filterStatus, sortKey, visibleCount]);
 
   // Reset pagination when filter/sort/search changes
-  const handleSetFilterStatus = useCallback((s: "all" | "active" | "returned") => {
+  const handleSetFilterStatus = useCallback((s: "all" | "active" | "returned" | "has-card" | "expiring-soon") => {
     setFilterStatus(s);
     setVisibleCount(PAGE_SIZE);
     setSelectedIds(new Set());
@@ -761,6 +769,16 @@ export default function AdminTransactions() {
     const filtered = transactions.filter((transaction) => {
       if (filterStatus === "active" && transaction.isReturned) return false;
       if (filterStatus === "returned" && !transaction.isReturned) return false;
+      if (filterStatus === "has-card") {
+        if (transaction.isReturned) return false;
+        if (!hasActiveCard(transaction)) return false;
+      }
+      if (filterStatus === "expiring-soon") {
+        if (transaction.isReturned) return false;
+        if (!hasActiveCard(transaction)) return false;
+        const days = cardDaysUntilExpiry(transaction, maxCardAgeDays);
+        if (days === null || days < 0 || days > CARD_EXPIRY_WARN_DAYS) return false;
+      }
       if (!searchTerm) return true;
       const searchLower = searchTerm.toLowerCase();
       return (
@@ -794,7 +812,7 @@ export default function AdminTransactions() {
 
     return filtered;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, filterStatus, searchTerm, sortKey, locations, language]);
+  }, [transactions, filterStatus, searchTerm, sortKey, locations, language, maxCardAgeDays]);
 
   const visibleTransactions = filteredTransactions.slice(0, visibleCount);
   const hasMore = visibleCount < filteredTransactions.length;
@@ -1033,6 +1051,24 @@ export default function AdminTransactions() {
               onClick={() => handleSetFilterStatus("returned")}
             >
               {t("returnedOnly")}
+            </Button>
+            <Button
+              variant={filterStatus === "has-card" ? "default" : "outline"}
+              size="sm"
+              className="whitespace-nowrap gap-1.5"
+              onClick={() => handleSetFilterStatus("has-card")}
+            >
+              <CreditCard className="h-3.5 w-3.5" />
+              {t("cardOnFile") || "Card on file"}
+            </Button>
+            <Button
+              variant={filterStatus === "expiring-soon" ? "default" : "outline"}
+              size="sm"
+              className="whitespace-nowrap gap-1.5"
+              onClick={() => handleSetFilterStatus("expiring-soon")}
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              {t("expiringSoon") || "Expiring soon"}
             </Button>
           </div>
 
