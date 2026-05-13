@@ -1915,18 +1915,28 @@ export default function AdminLocations() {
                 )}
                 {sendHistoryQuery.data && sendHistoryQuery.data.length > 0 && (() => {
                   const logs = sendHistoryQuery.data;
-                  const failedCount = logs.filter(l => l.status === "failed").length;
-                  const sentCount = logs.filter(l => l.status === "sent").length;
+                  const isDeliveryBad = (l: typeof logs[0]) =>
+                    l.deliveryStatus === "undelivered" || l.deliveryStatus === "failed";
+                  const failedCount = logs.filter(l => l.status === "failed" || isDeliveryBad(l)).length;
+                  const deliveredCount = logs.filter(l => l.deliveryStatus === "delivered").length;
+                  const sentCount = logs.filter(l => l.status === "sent" && !l.deliveryStatus).length;
                   const skippedCount = logs.filter(l => l.status === "skipped").length;
                   return (
                     <div className="space-y-3">
                       <div className="flex flex-wrap gap-2 text-xs">
-                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
-                          <CheckCircle className="h-3 w-3" />{sentCount} sent
-                        </span>
+                        {deliveredCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+                            <CheckCircle className="h-3 w-3" />{deliveredCount} delivered
+                          </span>
+                        )}
+                        {sentCount > 0 && (
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
+                            <CheckCircle className="h-3 w-3" />{sentCount} sent (pending confirmation)
+                          </span>
+                        )}
                         {failedCount > 0 && (
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-                            <XCircle className="h-3 w-3" />{failedCount} failed
+                            <XCircle className="h-3 w-3" />{failedCount} undelivered
                           </span>
                         )}
                         {skippedCount > 0 && (
@@ -1961,7 +1971,7 @@ export default function AdminLocations() {
                                 return (
                                   <TableRow
                                     key={log.id}
-                                    className={`text-xs ${log.status === "failed" ? "bg-red-50/40 dark:bg-red-950/20" : log.status === "skipped" ? "bg-amber-50/30 dark:bg-amber-950/10" : ""} ${isNewBatch && log.batchId && i > 0 ? "border-t-2 border-muted" : ""}`}
+                                    className={`text-xs ${(log.status === "failed" || log.deliveryStatus === "undelivered" || log.deliveryStatus === "failed") ? "bg-red-50/40 dark:bg-red-950/20" : log.status === "skipped" ? "bg-amber-50/30 dark:bg-amber-950/10" : log.deliveryStatus === "delivered" ? "bg-green-50/20 dark:bg-green-950/10" : ""} ${isNewBatch && log.batchId && i > 0 ? "border-t-2 border-muted" : ""}`}
                                   >
                                     <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
                                       <div className="flex items-center gap-1">
@@ -1988,9 +1998,29 @@ export default function AdminLocations() {
                                     </TableCell>
                                     <TableCell className="py-1.5">
                                       {log.status === "sent" && (
-                                        <span className="inline-flex items-center gap-1 text-green-700">
-                                          <CheckCircle className="h-3 w-3" /> Sent
-                                        </span>
+                                        <div className="flex flex-col gap-0.5">
+                                          {/* If Twilio has confirmed delivery, replace the "Sent" chip */}
+                                          {!log.deliveryStatus && (
+                                            <span className="inline-flex items-center gap-1 text-green-700">
+                                              <CheckCircle className="h-3 w-3" /> Sent
+                                            </span>
+                                          )}
+                                          {log.deliveryStatus === "delivered" && (
+                                            <span className="inline-flex items-center gap-1 text-green-700 font-medium">
+                                              <CheckCircle className="h-3 w-3" /> Delivered
+                                            </span>
+                                          )}
+                                          {(log.deliveryStatus === "undelivered" || log.deliveryStatus === "failed") && (
+                                            <span className="inline-flex items-center gap-1 text-red-700 font-medium">
+                                              <XCircle className="h-3 w-3" /> {log.deliveryStatus === "failed" ? "Failed" : "Undelivered"}
+                                            </span>
+                                          )}
+                                          {log.deliveryStatus && log.deliveryStatus !== "delivered" && log.deliveryStatus !== "undelivered" && log.deliveryStatus !== "failed" && (
+                                            <span className="inline-flex items-center gap-1 text-slate-500 text-[11px]">
+                                              <Clock className="h-3 w-3" /> {log.deliveryStatus}
+                                            </span>
+                                          )}
+                                        </div>
                                       )}
                                       {log.status === "failed" && (
                                         <span className="inline-flex items-center gap-1 text-red-700 font-medium">
@@ -2004,7 +2034,7 @@ export default function AdminLocations() {
                                       )}
                                     </TableCell>
                                     <TableCell className="py-1.5 text-muted-foreground max-w-[200px] truncate">
-                                      {log.error || "—"}
+                                      {log.deliveryError || log.error || "—"}
                                     </TableCell>
                                   </TableRow>
                                 );

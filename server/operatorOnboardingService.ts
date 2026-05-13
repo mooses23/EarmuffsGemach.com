@@ -342,6 +342,11 @@ export async function sendWelcomeForLocation(
     const errorMsg = options.channel === 'both'
       ? (!smsResult?.ok ? smsResult?.error : undefined) || (!emailResult?.ok ? emailResult?.error : undefined)
       : channelResult?.error;
+    // Store the Twilio SID so the status-callback webhook can update this row
+    // with the real async delivery outcome (delivered / undelivered / failed).
+    const twilioSid = logChannel === 'whatsapp'
+      ? (whatsappResult?.sid ?? null)
+      : (smsResult?.sid ?? null);
     await storage.createMessageSendLog({
       locationId: loc.id,
       locationName: loc.name,
@@ -351,6 +356,7 @@ export async function sendWelcomeForLocation(
       error: okFlag ? null : (errorMsg || 'Send failed'),
       sentByUserId: options.sentByUserId ?? null,
       batchId: options.batchId ?? null,
+      twilioSid: twilioSid ?? null,
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : String(e);
@@ -453,11 +459,19 @@ export async function ingestTwilioStatusCallback(body: Record<string, any>): Pro
   const rawErrorMessage = body?.ErrorMessage ? String(body.ErrorMessage) : undefined;
   const errorMessage = rawErrorMessage || (errorCode ? translateTwilioErrorCode(errorCode) : undefined);
   const channel: 'sms' | 'whatsapp' = String(body?.From || '').startsWith('whatsapp:') ? 'whatsapp' : 'sms';
+  // Update the location-level delivery status (used for location card badge).
   let updated = await storage.updateWelcomeDeliveryStatus(sid, channel, rawStatus, errorMessage);
   if (!updated) {
     const other: 'sms' | 'whatsapp' = channel === 'sms' ? 'whatsapp' : 'sms';
     updated = await storage.updateWelcomeDeliveryStatus(sid, other, rawStatus, errorMessage);
-    if (updated) return { matched: true, channel: other, status: rawStatus };
+    if (updated) {
+      // Also update the send log row if one carries this SID.
+      await storage.updateMessageSendLogByTwilioSid(sid, rawStatus, errorMessage).catch(() => {});
+      return { matched: true, channel: other, status: rawStatus };
+    }
   }
+  // Update the send log row regardless of whether the location row matched,
+  // so standalone message sends (not part of onboarding) are also reflected.
+  await storage.updateMessageSendLogByTwilioSid(sid, rawStatus, errorMessage).catch(() => {});
   return { matched: !!updated, channel, status: rawStatus };
 }

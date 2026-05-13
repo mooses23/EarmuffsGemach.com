@@ -3783,6 +3783,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
         console.log(`[twilio-status-webhook] SID=${MessageSid} status=${MessageStatus}${ErrorCode ? ` errorCode=${ErrorCode}` : ''}`);
         await storage.updateReturnReminderDeliveryStatus(MessageSid, MessageStatus, ErrorCode ?? null);
+        // Update send-log delivery status (covers return-reminder sends that stored a SID).
+        await storage.updateMessageSendLogByTwilioSid(MessageSid, MessageStatus.toLowerCase(), ErrorCode || undefined).catch(() => {});
         // Also attempt to update welcome-message delivery status in case this SID
         // belongs to an operator onboarding SMS/WhatsApp (e.g. if the Twilio console
         // was configured with this URL instead of /api/twilio/onboarding-status).

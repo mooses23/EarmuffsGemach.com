@@ -677,6 +677,9 @@ export const messageSendLogs = pgTable("message_send_logs", {
   sentAt: timestamp("sent_at").notNull().defaultNow(),
   sentByUserId: integer("sent_by_user_id"),    // admin who triggered the send
   batchId: text("batch_id"),                   // shared UUID for bulk-send batches
+  twilioSid: text("twilio_sid"),               // Twilio message SID — used to correlate status callbacks
+  deliveryStatus: text("delivery_status"),     // async Twilio status: 'delivered' | 'undelivered' | 'failed' | 'sent' | ...
+  deliveryError: text("delivery_error"),       // human-readable error from Twilio callback (e.g. A2P reason)
 });
 
 export const insertMessageSendLogSchema = createInsertSchema(messageSendLogs).omit({ id: true, sentAt: true });

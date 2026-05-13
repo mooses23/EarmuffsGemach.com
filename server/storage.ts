@@ -231,6 +231,7 @@ export interface IStorage {
   // Message Send Logs — persistent history of every operator message send attempt
   createMessageSendLog(log: InsertMessageSendLog): Promise<MessageSendLog>;
   getMessageSendLogs(opts?: { locationId?: number; limit?: number }): Promise<MessageSendLog[]>;
+  updateMessageSendLogByTwilioSid(sid: string, deliveryStatus: string, deliveryError?: string): Promise<boolean>;
 }
 
 export class MemStorage implements IStorage {
@@ -3452,6 +3453,9 @@ export class MemStorage implements IStorage {
       error: log.error ?? null,
       sentByUserId: log.sentByUserId ?? null,
       batchId: log.batchId ?? null,
+      twilioSid: log.twilioSid ?? null,
+      deliveryStatus: log.deliveryStatus ?? null,
+      deliveryError: log.deliveryError ?? null,
     };
     this.messageSendLogsMap.set(id, row);
     return row;
@@ -3463,6 +3467,16 @@ export class MemStorage implements IStorage {
     if (opts?.locationId != null) rows = rows.filter(r => r.locationId === opts.locationId);
     if (opts?.limit != null) rows = rows.slice(0, opts.limit);
     return rows;
+  }
+
+  async updateMessageSendLogByTwilioSid(sid: string, deliveryStatus: string, deliveryError?: string): Promise<boolean> {
+    for (const [key, row] of Array.from(this.messageSendLogsMap.entries())) {
+      if (row.twilioSid === sid) {
+        this.messageSendLogsMap.set(key, { ...row, deliveryStatus, deliveryError: deliveryError ?? null });
+        return true;
+      }
+    }
+    return false;
   }
 }
 

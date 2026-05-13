@@ -1237,6 +1237,14 @@ export class DatabaseStorage implements IStorage {
       .limit(limit);
   }
 
+  async updateMessageSendLogByTwilioSid(sid: string, deliveryStatus: string, deliveryError?: string): Promise<boolean> {
+    const result = await db.update(messageSendLogs)
+      .set({ deliveryStatus, deliveryError: deliveryError ?? null })
+      .where(eq(messageSendLogs.twilioSid, sid))
+      .returning({ id: messageSendLogs.id });
+    return result.length > 0;
+  }
+
   // Playbook Fact operations (admin-editable AI facts)
   async getAllPlaybookFacts(): Promise<PlaybookFact[]> {
     return db.select().from(playbookFacts).orderBy(playbookFacts.category, playbookFacts.factKey);
@@ -1596,6 +1604,11 @@ export async function ensureSchemaUpgrades(): Promise<void> {
       batch_id TEXT
     )
   `));
+  // Task #239 follow-up: store Twilio SID + async delivery status on send log rows
+  await safe("add message_send_logs.twilio_sid", () => db.execute(sql`ALTER TABLE message_send_logs ADD COLUMN IF NOT EXISTS twilio_sid TEXT`));
+  await safe("add message_send_logs.delivery_status", () => db.execute(sql`ALTER TABLE message_send_logs ADD COLUMN IF NOT EXISTS delivery_status TEXT`));
+  await safe("add message_send_logs.delivery_error", () => db.execute(sql`ALTER TABLE message_send_logs ADD COLUMN IF NOT EXISTS delivery_error TEXT`));
+  await safe("create index message_send_logs_twilio_sid_idx", () => db.execute(sql`CREATE INDEX IF NOT EXISTS message_send_logs_twilio_sid_idx ON message_send_logs (twilio_sid) WHERE twilio_sid IS NOT NULL`));
 
   // Make sure the confirmation-email-sent timestamp column exists. The
   // gemach_applications schema declares it but older databases (including
