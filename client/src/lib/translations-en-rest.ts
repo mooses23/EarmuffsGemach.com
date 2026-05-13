@@ -435,6 +435,8 @@ const enRest = {
     filterByReturn: "Filter by return status",
     allTransactions: "All Transactions",
     returnedOnly: "Returned Only",
+    cardOnFile: "Card on file",
+    expiringSoon: "Expiring soon",
     noTransactionsMatch: "No transactions match your filters",
     noTransactionsMatchSearch: "No transactions found matching your search criteria.",
     noTransactionsYet: "No transactions recorded yet. Create your first transaction.",

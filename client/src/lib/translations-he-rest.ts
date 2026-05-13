@@ -437,6 +437,8 @@ const dict: Record<RestTranslationKey, string> = {
     filterByReturn: "סנן לפי סטטוס החזרה",
     allTransactions: "כל העסקאות",
     returnedOnly: "הוחזרו בלבד",
+    cardOnFile: "כרטיס במערכת",
+    expiringSoon: "פג תוקף בקרוב",
     noTransactionsMatch: "אין עסקאות שתואמות לסינון",
     noTransactionsMatchSearch: "לא נמצאו עסקאות שתואמות את קריטריוני החיפוש שלך.",
     noTransactionsYet: "עדיין לא נרשמו עסקאות. צור את העסקה הראשונה שלך.",

@@ -1066,7 +1066,7 @@ export default function AdminTransactions() {
               onClick={() => handleSetFilterStatus("has-card")}
             >
               <CreditCard className="h-3.5 w-3.5" />
-              {t("cardOnFile") || "Card on file"}
+              {t("cardOnFile")}
               {cardOnFileCount > 0 && (
                 <span className="ml-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-semibold leading-none">
                   {cardOnFileCount}
@@ -1080,7 +1080,7 @@ export default function AdminTransactions() {
               onClick={() => handleSetFilterStatus("expiring-soon")}
             >
               <AlertTriangle className="h-3.5 w-3.5" />
-              {t("expiringSoon") || "Expiring soon"}
+              {t("expiringSoon")}
               {expiringSoonCount > 0 && (
                 <span className="ml-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-semibold leading-none">
                   {expiringSoonCount}
