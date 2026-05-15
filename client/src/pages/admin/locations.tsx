@@ -1673,7 +1673,7 @@ export default function AdminLocations() {
     const sortedRegions = [...regions].sort((a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0));
     return sortedRegions.map(region => {
       const regionLocs = locations.filter(l => l.regionId === region.id);
-      const notOnboarded = regionLocs.filter(l => !l.onboardedAt).length;
+      const notOnboarded = regionLocs.filter(l => !(l.operatorPin && l.operatorPin !== '1234')).length;
       const missingContact = regionLocs.filter(l => !l.phone && !l.email).length;
       return { region, count: regionLocs.length, notOnboarded, missingContact };
     });
