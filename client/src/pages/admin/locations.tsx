@@ -2226,7 +2226,8 @@ export default function AdminLocations() {
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {visibleLocations.map((location) => {
                     const isSelected = selectedIds.has(location.id);
-                    const isOnboarded = !!location.operatorPin && location.operatorPin !== '1234';
+                    const isOnboarded = !!location.onboardedAt;
+                    const isPinCustomized = !!location.operatorPin && location.operatorPin !== '1234';
                     return (
                       <div
                         key={location.id}
@@ -2372,9 +2373,9 @@ export default function AdminLocations() {
                           </Badge>
                           <Badge
                             variant="outline"
-                            className={`border-transparent ${isOnboarded ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
+                            className={`border-transparent ${isPinCustomized ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
                           >
-                            {isOnboarded ? "Onboarded" : "Not onboarded"}
+                            {isPinCustomized ? "Onboarded" : "Not onboarded"}
                           </Badge>
                           {(() => {
                             const sms = location.welcomeSmsStatus?.toLowerCase();
