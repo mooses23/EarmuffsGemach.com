@@ -1227,6 +1227,24 @@ const dict: Record<RestTranslationKey, string> = {
     emailDiscountCodesLabel: "קודי הנחה:",
     emailIntlNote: "כולל גם: מידע על שירות העברת חבילות MyUS.com למשלוח בינלאומי",
 
+    // Task #249: Verification code relay
+    verificationCodeSectionTitle: "צריכים קוד אימות?",
+    verificationCodeSectionDesc: "לחצו על הכפתור כדי לקבל אוטומטית את קוד ה-2FA מתיבת הדואר המשותפת.",
+    getVerificationCode: "קבל קוד אימות",
+    verificationCodeDialogTitle: "קוד אימות BabyBanz",
+    verificationCodeDialogDesc: "עקבו אחר השלבים — הקוד יופיע אוטומטית ברגע שהמייל יגיע.",
+    verificationCodeStep1: "גשו לאתר BabyBanz והתחילו להתחבר עם החשבון המשותף.",
+    verificationCodeStep2: "כאשר האתר יבקש קוד אימות, חיזרו לכאן.",
+    verificationCodeStep3: "הקוד שלכם יופיע למטה ברגע שהמייל יגיע לתיבת הדואר.",
+    verificationCodeWaiting: "ממתינים למייל האימות…",
+    verificationCodeLabel: "הקוד שלכם:",
+    verificationCodeCopyCode: "העתק קוד",
+    verificationCodeExpiry: "פג תוקף בעוד {time}",
+    verificationCodeExpired: "הפגישה פגה. בקשו קוד חדש להמשיך.",
+    verificationCodeRequestNew: "בקש קוד חדש",
+    verificationCodeError: "לא ניתן להתחיל בקשת קוד אימות. אנא נסו שוב.",
+    verificationCodeUnavailable: "לא ניתן לאחזר את הקוד (השרת הופעל מחדש בזמן ההמתנה). אנא בקשו קוד חדש.",
+
 };
 
 export default dict;

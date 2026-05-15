@@ -440,6 +440,7 @@ export async function listEmails(
   maxResults: number = 25,
   pageToken?: string,
   mode: GmailListMode = 'inbox',
+  search?: string,
 ): Promise<ListEmailsResult> {
   const gmail = await getUncachableGmailClient();
 
@@ -453,6 +454,11 @@ export async function listEmails(
   // For 'archive' mode, exclude inbox/spam/trash via search query
   if (mode === 'archive') {
     listParams.q = '-in:inbox -in:spam -in:trash';
+  }
+  // Caller-supplied Gmail search term (e.g. "after:1234567890"); merged with any
+  // mode-derived q so both filters apply simultaneously.
+  if (search) {
+    listParams.q = listParams.q ? `${listParams.q} ${search}` : search;
   }
 
   const response = await gmail.users.messages.list(listParams);

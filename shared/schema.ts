@@ -686,3 +686,18 @@ export const insertMessageSendLogSchema = createInsertSchema(messageSendLogs).om
 export type MessageSendLog = typeof messageSendLogs.$inferSelect;
 export type InsertMessageSendLog = z.infer<typeof insertMessageSendLogSchema>;
 
+// Task #249: Restock verification code requests — tracks in-flight 2FA code fetches
+// from the shared Gmail inbox so each coordinator sees only their own code.
+export const restockCodeRequests = pgTable("restock_code_requests", {
+  id: serial("id").primaryKey(),
+  locationId: integer("location_id").notNull(),
+  requestedAt: timestamp("requested_at").notNull().defaultNow(),
+  claimedEmailId: text("claimed_email_id"),   // Gmail message ID, null until resolved
+  resolvedAt: timestamp("resolved_at"),
+  // NOTE: OTP codes are intentionally NOT stored here — they live only in the server-side
+  // in-memory cache for the duration of the request window (see routes.ts restockCodeCache).
+  expiresAt: timestamp("expires_at").notNull(),
+});
+
+export type RestockCodeRequest = typeof restockCodeRequests.$inferSelect;
+

@@ -21,6 +21,7 @@ import {
   globalSettings, type GlobalSetting, type InsertGlobalSetting,
   disputes, type Dispute, type InsertDispute,
   messageSendLogs, type MessageSendLog, type InsertMessageSendLog,
+  restockCodeRequests, type RestockCodeRequest,
   type KbSourceKind,
   type PayLaterStatus
 } from "../shared/schema.js";
@@ -232,6 +233,17 @@ export interface IStorage {
   createMessageSendLog(log: InsertMessageSendLog): Promise<MessageSendLog>;
   getMessageSendLogs(opts?: { locationId?: number; limit?: number }): Promise<MessageSendLog[]>;
   updateMessageSendLogByTwilioSid(sid: string, deliveryStatus: string, deliveryError?: string): Promise<boolean>;
+
+  // Task #249: Restock verification code requests
+  createRestockCodeRequest(locationId: number, requestedAt: Date, expiresAt: Date): Promise<RestockCodeRequest>;
+  getRestockCodeRequest(id: number): Promise<RestockCodeRequest | undefined>;
+  /** Returns the globally oldest active unclaimed request (across all locations), or undefined if none.
+   *  Used to enforce first-come-first-served ordering across all coordinators sharing the inbox. */
+  getEarliestUnclaimedRestockRequest(): Promise<RestockCodeRequest | undefined>;
+  /** Atomically claim an email for this request. Returns null if already claimed by another request or this one.
+   *  NOTE: The OTP code is intentionally NOT stored in the database; it lives only in the server-side
+   *  in-memory cache in routes.ts for the duration of the request window. */
+  claimRestockCodeRequest(id: number, emailId: string): Promise<RestockCodeRequest | null>;
 }
 
 export class MemStorage implements IStorage {
@@ -3477,6 +3489,22 @@ export class MemStorage implements IStorage {
       }
     }
     return false;
+  }
+
+  async createRestockCodeRequest(_locationId: number, _requestedAt: Date, _expiresAt: Date): Promise<RestockCodeRequest> {
+    throw new Error("Not implemented in MemStorage");
+  }
+
+  async getRestockCodeRequest(_id: number): Promise<RestockCodeRequest | undefined> {
+    throw new Error("Not implemented in MemStorage");
+  }
+
+  async getEarliestUnclaimedRestockRequest(): Promise<RestockCodeRequest | undefined> {
+    throw new Error("Not implemented in MemStorage");
+  }
+
+  async claimRestockCodeRequest(_id: number, _emailId: string): Promise<RestockCodeRequest | null> {
+    throw new Error("Not implemented in MemStorage");
   }
 }
 

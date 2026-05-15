@@ -153,6 +153,255 @@ function CopyableCredential({ value, copyKey, copiedKey, onCopy }: {
   );
 }
 
+function VerificationCodeDialog() {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const [requestId, setRequestId] = useState<number | null>(null);
+  const [pollStatus, setPollStatus] = useState<'idle' | 'pending' | 'claimed' | 'expired' | 'error' | 'unavailable'>('idle');
+  const [code, setCode] = useState<string | null>(null);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(600);
+  const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const countdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollIntervalRef.current) { clearInterval(pollIntervalRef.current); pollIntervalRef.current = null; }
+  };
+  const stopCountdown = () => {
+    if (countdownRef.current) { clearInterval(countdownRef.current); countdownRef.current = null; }
+  };
+
+  const startCountdown = () => {
+    stopCountdown();
+    countdownRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev <= 1) { setPollStatus('expired'); stopPolling(); stopCountdown(); return 0; }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  const startPolling = (id: number) => {
+    stopPolling();
+    pollIntervalRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/operator/restock-code/poll?requestId=${id}`);
+        const data = await res.json();
+        if (data.status === 'claimed') {
+          setCode(data.code);
+          setPollStatus('claimed');
+          stopPolling();
+          stopCountdown();
+        } else if (data.status === 'expired') {
+          setPollStatus('expired');
+          stopPolling();
+          stopCountdown();
+        } else if (data.status === 'unavailable') {
+          setPollStatus('unavailable');
+          stopPolling();
+          stopCountdown();
+        }
+      } catch { /* keep polling */ }
+    }, 3000);
+  };
+
+  const requestMutation = useMutation({
+    mutationFn: () => apiRequest('POST', '/api/operator/restock-code/request'),
+    onSuccess: async (res: Response) => {
+      const data = await res.json();
+      setRequestId(data.requestId);
+      setPollStatus('pending');
+      setTimeLeft(600);
+      startPolling(data.requestId);
+      startCountdown();
+    },
+    onError: () => {
+      setPollStatus('error');
+    },
+  });
+
+  const handleOpen = () => {
+    setOpen(true);
+    setPollStatus('pending');
+    setCode(null);
+    setCodeCopied(false);
+    setRequestId(null);
+    setTimeLeft(600);
+    requestMutation.mutate();
+  };
+
+  const handleClose = () => {
+    setOpen(false);
+    stopPolling();
+    stopCountdown();
+    setPollStatus('idle');
+    setCode(null);
+    setCodeCopied(false);
+    setRequestId(null);
+  };
+
+  const handleRequestNew = () => {
+    setCode(null);
+    setCodeCopied(false);
+    setPollStatus('pending');
+    setRequestId(null);
+    setTimeLeft(600);
+    requestMutation.mutate();
+  };
+
+  useEffect(() => { return () => { stopPolling(); stopCountdown(); }; }, []);
+
+  const formatTimeLeft = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
+
+  return (
+    <>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={handleOpen}
+        className="border-blue-500/40 bg-blue-500/10 hover:bg-blue-500/20 text-blue-300 text-xs h-7"
+      >
+        <KeyRound className="h-3 w-3 mr-1.5" />
+        {t('getVerificationCode')}
+      </Button>
+
+      <Dialog open={open} onOpenChange={(o) => { if (!o) handleClose(); }}>
+        <DialogContent className="glass-card border-white/10 text-white max-w-sm">
+          <DialogHeader>
+            <DialogTitle className="text-white flex items-center gap-2">
+              <KeyRound className="h-5 w-5 text-blue-400" />
+              {t('verificationCodeDialogTitle')}
+            </DialogTitle>
+            <DialogDescription className="text-slate-400">
+              {t('verificationCodeDialogDesc')}
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-1">
+            <ol className="space-y-2 text-sm text-slate-300">
+              <li className="flex items-start gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-xs text-blue-300 font-bold mt-0.5">1</span>
+                <span>{t('verificationCodeStep1')}</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-xs text-blue-300 font-bold mt-0.5">2</span>
+                <span>{t('verificationCodeStep2')}</span>
+              </li>
+              <li className="flex items-start gap-2">
+                <span className="flex-shrink-0 w-5 h-5 rounded-full bg-blue-500/20 border border-blue-500/40 flex items-center justify-center text-xs text-blue-300 font-bold mt-0.5">3</span>
+                <span>{t('verificationCodeStep3')}</span>
+              </li>
+            </ol>
+
+            {pollStatus === 'error' && (
+              <div className="flex flex-col items-center gap-3 py-1">
+                <div className="p-3 bg-red-500/10 border border-red-500/30 rounded-lg w-full text-center">
+                  <p className="text-sm text-red-300">{t('verificationCodeError')}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRequestNew}
+                  disabled={requestMutation.isPending}
+                  className="border-white/20 hover:bg-white/10 text-slate-300"
+                >
+                  {requestMutation.isPending
+                    ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t('sending')}</>
+                    : t('verificationCodeRequestNew')
+                  }
+                </Button>
+              </div>
+            )}
+
+            {pollStatus === 'pending' && (
+              <div className="flex flex-col items-center gap-2 py-3">
+                <Loader2 className="h-7 w-7 animate-spin text-blue-400" />
+                <p className="text-sm text-slate-400">{t('verificationCodeWaiting')}</p>
+                {pollStatus === 'pending' && timeLeft > 0 && (
+                  <p className="text-xs text-slate-500">
+                    {t('verificationCodeExpiry').replace('{time}', formatTimeLeft(timeLeft))}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {pollStatus === 'claimed' && code && (
+              <div className="flex flex-col items-center gap-3 py-1">
+                <div className="p-4 bg-green-500/10 border border-green-500/30 rounded-xl w-full text-center">
+                  <p className="text-xs text-slate-400 mb-1">{t('verificationCodeLabel')}</p>
+                  <p className="text-4xl font-mono font-bold tracking-[0.3em] text-green-300 select-all">{code}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    navigator.clipboard.writeText(code).then(() => {
+                      setCodeCopied(true);
+                      setTimeout(() => setCodeCopied(false), 2000);
+                    }).catch(() => {});
+                  }}
+                  className="border-green-500/40 bg-green-500/10 hover:bg-green-500/20 text-green-300"
+                >
+                  {codeCopied
+                    ? <><Check className="h-3.5 w-3.5 mr-1.5" />{t('valueCopied')}</>
+                    : <><Copy className="h-3.5 w-3.5 mr-1.5" />{t('verificationCodeCopyCode')}</>
+                  }
+                </Button>
+              </div>
+            )}
+
+            {pollStatus === 'expired' && (
+              <div className="flex flex-col items-center gap-3 py-1">
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-lg w-full text-center">
+                  <p className="text-sm text-amber-300">{t('verificationCodeExpired')}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRequestNew}
+                  disabled={requestMutation.isPending}
+                  className="border-white/20 hover:bg-white/10 text-slate-300"
+                >
+                  {requestMutation.isPending
+                    ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t('sending')}</>
+                    : t('verificationCodeRequestNew')
+                  }
+                </Button>
+              </div>
+            )}
+
+            {pollStatus === 'unavailable' && (
+              <div className="flex flex-col items-center gap-3 py-1">
+                <div className="p-3 bg-slate-500/10 border border-slate-500/30 rounded-lg w-full text-center">
+                  <p className="text-sm text-slate-300">{t('verificationCodeUnavailable')}</p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleRequestNew}
+                  disabled={requestMutation.isPending}
+                  className="border-white/20 hover:bg-white/10 text-slate-300"
+                >
+                  {requestMutation.isPending
+                    ? <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />{t('sending')}</>
+                    : t('verificationCodeRequestNew')
+                  }
+                </Button>
+              </div>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="ghost" onClick={handleClose} className="text-slate-400 hover:text-white">
+              {t('close')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function RestockingInstructions({ location }: { location: Location }) {
   const { t } = useLanguage();
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -319,6 +568,14 @@ function RestockingInstructions({ location }: { location: Location }) {
               </div>
             </div>
           )}
+
+          <div className="border-t border-white/10 pt-4 flex items-center justify-between gap-4">
+            <div>
+              <p className="text-sm font-semibold text-white">{t('verificationCodeSectionTitle')}</p>
+              <p className="text-xs text-slate-400 mt-0.5">{t('verificationCodeSectionDesc')}</p>
+            </div>
+            <VerificationCodeDialog />
+          </div>
 
           {discountCodesBlock}
 

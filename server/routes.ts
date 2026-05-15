@@ -6120,6 +6120,150 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============================================================
+  // OPERATOR: BabyBanz 2FA verification code relay (Task #249)
+  // Polls the shared Gmail inbox for a BabyBanz verification code
+  // after a coordinator-initiated request. Codes are held in a
+  // server-side in-memory cache only — never written to the DB.
+  // ============================================================
+
+  // In-memory OTP cache: requestId → { code, expiresAt }
+  // Intentionally not persisted — codes disappear on server restart or expiry.
+  const restockCodeCache = new Map<number, { code: string; expiresAt: Date }>();
+  setInterval(() => {
+    const now = new Date();
+    restockCodeCache.forEach((entry, id) => {
+      if (entry.expiresAt < now) restockCodeCache.delete(id);
+    });
+  }, 60_000);
+
+  /** Returns true only if the email looks like a BabyBanz / BanzWorld 2FA message. */
+  function isBabyBanzVerificationEmail(from: string, subject: string): boolean {
+    const f = from.toLowerCase();
+    const s = subject.toLowerCase();
+    const banzSender = /babybanz\.com|banzworld\.com/.test(f);
+    const verificationSubject = /verif|otp|one.time|authenticat|login code|confirm.{0,10}code|code.{0,10}confirm/.test(s);
+    // Accept if both match, or if sender is definitely BabyBanz (subject may be generic)
+    return banzSender || (verificationSubject && f.includes('banz'));
+  }
+
+  /** Extracts a 4–8 digit OTP only when it appears near verification keywords.
+   *  No generic "first number" fallback — avoids misidentifying order IDs, zip codes, etc. */
+  function extractVerificationCode(text: string): string | null {
+    const plain = text.replace(/<[^>]+>/g, ' ').replace(/&[a-z#0-9]+;/gi, ' ').replace(/\s+/g, ' ');
+    const match =
+      plain.match(/(?:code|verif(?:ication|y)|otp|one.time|authenticat|log.?in|confirm)\D{0,40}?\b(\d{4,8})\b/i) ||
+      plain.match(/\b(\d{4,8})\b\D{0,40}?(?:code|verif(?:ication|y)|otp|authenticat)/i);
+    return match ? match[1] : null;
+  }
+
+  app.post("/api/operator/restock-code/request", async (req, res) => {
+    const operatorLocId = getOperatorLocationId(req);
+    // Only real operators (not admin-scope) may use this endpoint
+    if (!operatorLocId || isAdminScope(operatorLocId)) {
+      return res.status(operatorLocId ? 403 : 401).json({ message: "Operator login required" });
+    }
+    try {
+      const now = new Date();
+      const expiresAt = new Date(now.getTime() + 10 * 60 * 1000);
+      const request = await storage.createRestockCodeRequest(operatorLocId, now, expiresAt);
+      return res.json({ requestId: request.id });
+    } catch (err: unknown) {
+      console.error("restock-code/request error:", err);
+      return res.status(500).json({ message: "Failed to create request" });
+    }
+  });
+
+  app.get("/api/operator/restock-code/poll", async (req, res) => {
+    const operatorLocId = getOperatorLocationId(req);
+    if (!operatorLocId || isAdminScope(operatorLocId)) {
+      return res.status(operatorLocId ? 403 : 401).json({ message: "Operator login required" });
+    }
+    const requestId = parseInt(req.query.requestId as string, 10);
+    if (Number.isNaN(requestId)) return res.status(400).json({ message: "Invalid requestId" });
+    try {
+      const request = await storage.getRestockCodeRequest(requestId);
+      if (!request) return res.status(404).json({ message: "Request not found" });
+      // Strict ownership — request must belong to this exact operator location
+      if (request.locationId !== operatorLocId) {
+        return res.status(403).json({ message: "Forbidden" });
+      }
+      if (new Date() > request.expiresAt) {
+        restockCodeCache.delete(requestId);
+        return res.json({ status: 'expired' });
+      }
+      // Already claimed — look up code from in-memory cache (not DB)
+      if (request.claimedEmailId) {
+        const cached = restockCodeCache.get(requestId);
+        if (cached && cached.expiresAt > new Date()) {
+          return res.json({ status: 'claimed', code: cached.code });
+        }
+        // Cache miss: server restarted during the window; code is unrecoverable — prompt retry
+        return res.json({ status: 'unavailable' });
+      }
+      // Find the globally oldest unclaimed request. Every active poller processes the queue
+      // on behalf of that earliest request — not necessarily their own. This eliminates
+      // starvation: if the earliest owner abandons their dialog, the next poller advances
+      // the slot and eventually becomes the new earliest, breaking the deadlock.
+      const globalEarliest = await storage.getEarliestUnclaimedRestockRequest();
+      if (!globalEarliest) {
+        // All requests expired or claimed between reads (harmless race)
+        return res.json({ status: 'pending' });
+      }
+      // Search Gmail at message level (not thread summaries) so two OTP emails in the same
+      // Gmail thread are each visible as distinct claimable messages.
+      // Use the earliest request's timing window so we never miss emails sent to it.
+      const afterSeconds = Math.floor(globalEarliest.requestedAt.getTime() / 1000);
+      let gmailResult: Awaited<ReturnType<typeof listEmails>>;
+      try {
+        gmailResult = await listEmails(30, undefined, 'all', `after:${afterSeconds}`);
+      } catch (gmailErr) {
+        console.error("restock-code poll: Gmail unavailable:", gmailErr);
+        return res.json({ status: 'pending' });
+      }
+      // Sort oldest-first: the earliest request is paired with the earliest matching OTP email.
+      const messagesOldestFirst = [...gmailResult.emails].sort((a, b) => {
+        const aMs = a.date ? new Date(a.date).getTime() : 0;
+        const bMs = b.date ? new Date(b.date).getTime() : 0;
+        return aMs - bMs;
+      });
+      for (const msg of messagesOldestFirst) {
+        const msgId = msg.id;
+        if (!msgId) continue;
+        // Gmail after: filter is date-level; double-check using the message's date header
+        const emailMs = msg.date ? new Date(msg.date).getTime() : 0;
+        if (emailMs > 0 && emailMs < globalEarliest.requestedAt.getTime()) continue;
+        // Must look like a BabyBanz / BanzWorld verification email
+        if (!isBabyBanzVerificationEmail(msg.from ?? '', msg.subject ?? '')) continue;
+        const searchText = [msg.subject ?? '', msg.snippet ?? '', msg.body ?? ''].join(' ');
+        const code = extractVerificationCode(searchText);
+        if (!code) continue;
+        try {
+          // Claim on behalf of the globally earliest request (may not be this caller)
+          const claimed = await storage.claimRestockCodeRequest(globalEarliest.id, msgId);
+          if (claimed) {
+            // Store in cache under the earliest request's ID (not necessarily this caller's)
+            restockCodeCache.set(globalEarliest.id, { code, expiresAt: globalEarliest.expiresAt });
+            // If WE are the earliest, return the code immediately
+            if (globalEarliest.id === requestId) {
+              return res.json({ status: 'claimed', code });
+            }
+            // Otherwise the queue advanced one slot; our code comes in a future poll cycle
+            break;
+          }
+        } catch (claimErr: unknown) {
+          const claimMsg = claimErr instanceof Error ? claimErr.message : String(claimErr);
+          if (/unique|duplicate/i.test(claimMsg)) continue; // email claimed by concurrent poller
+          throw claimErr;
+        }
+      }
+      return res.json({ status: 'pending' });
+    } catch (err: unknown) {
+      console.error("restock-code/poll error:", err);
+      return res.json({ status: 'pending' }); // graceful — keep client polling
+    }
+  });
+
+  // ============================================================
   // TEST-ONLY SEEDING ENDPOINTS (disabled in production)
   // ============================================================
   // These endpoints exist solely to support e2e tests. They are

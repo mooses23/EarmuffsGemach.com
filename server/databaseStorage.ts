@@ -23,6 +23,7 @@ import {
   globalSettings, type GlobalSetting, type InsertGlobalSetting,
   disputes, type Dispute, type InsertDispute,
   messageSendLogs, type MessageSendLog, type InsertMessageSendLog,
+  restockCodeRequests, type RestockCodeRequest,
   type KbSourceKind,
   type PayLaterStatus
 } from '../shared/schema.js';
@@ -1402,6 +1403,54 @@ export class DatabaseStorage implements IStorage {
     if (!email) return [];
     return db.select().from(transactions).where(sql`lower(${transactions.borrowerEmail}) = ${email.toLowerCase()}`);
   }
+
+  // Task #249: Restock verification code requests
+  async createRestockCodeRequest(locationId: number, requestedAt: Date, expiresAt: Date): Promise<RestockCodeRequest> {
+    const result = await db.insert(restockCodeRequests).values({
+      locationId,
+      requestedAt,
+      expiresAt,
+    }).returning();
+    return result[0];
+  }
+
+  async getRestockCodeRequest(id: number): Promise<RestockCodeRequest | undefined> {
+    const result = await db.select().from(restockCodeRequests).where(eq(restockCodeRequests.id, id));
+    return result[0];
+  }
+
+  async getEarliestUnclaimedRestockRequest(): Promise<RestockCodeRequest | undefined> {
+    // Global query — no locationId filter — so coordinators from different locations
+    // don't race to claim emails from the same shared inbox.
+    const result = await db.select().from(restockCodeRequests)
+      .where(
+        and(
+          isNull(restockCodeRequests.claimedEmailId),
+          sql`${restockCodeRequests.expiresAt} > NOW()`
+        )
+      )
+      .orderBy(restockCodeRequests.requestedAt)
+      .limit(1);
+    return result[0];
+  }
+
+  async claimRestockCodeRequest(id: number, emailId: string): Promise<RestockCodeRequest | null> {
+    const now = new Date();
+    // Atomic: only succeeds if this request is unclaimed AND no other request has claimed this email.
+    // The unique index on claimed_email_id (WHERE NOT NULL) enforces the cross-request constraint at DB level.
+    // NOTE: The OTP code is deliberately NOT stored here — it lives only in the server-side in-memory cache.
+    const result = await db.update(restockCodeRequests)
+      .set({ claimedEmailId: emailId, resolvedAt: now })
+      .where(
+        and(
+          eq(restockCodeRequests.id, id),
+          isNull(restockCodeRequests.claimedEmailId),
+          sql`${restockCodeRequests.expiresAt} > NOW()`
+        )
+      )
+      .returning();
+    return result[0] ?? null;
+  }
 }
 
 let schemaUpgradesRun = false;
@@ -1633,6 +1682,31 @@ export async function ensureSchemaUpgrades(): Promise<void> {
   await safe("create index application_status_changes_application_id_idx", () => db.execute(sql`
     CREATE INDEX IF NOT EXISTS application_status_changes_application_id_idx
       ON application_status_changes (application_id)
+  `));
+
+  // Task #249: restock_code_requests table — tracks in-flight 2FA code fetches
+  await safe("create table restock_code_requests", () => db.execute(sql`
+    CREATE TABLE IF NOT EXISTS restock_code_requests (
+      id SERIAL PRIMARY KEY,
+      location_id INTEGER NOT NULL,
+      requested_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      claimed_email_id TEXT,
+      resolved_at TIMESTAMP,
+      expires_at TIMESTAMP NOT NULL
+    )
+  `));
+  // Drop the resolved_code column if it was created by an earlier migration that included it.
+  // OTPs must not be persisted to the database.
+  await safe("drop column restock_code_requests.resolved_code", () => db.execute(sql`
+    ALTER TABLE restock_code_requests DROP COLUMN IF EXISTS resolved_code
+  `));
+  await safe("create index restock_code_requests_location_idx", () => db.execute(sql`
+    CREATE INDEX IF NOT EXISTS restock_code_requests_location_idx
+      ON restock_code_requests (location_id, requested_at DESC)
+  `));
+  await safe("create unique index restock_code_requests_claimed_email_uq", () => db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS restock_code_requests_claimed_email_uq
+      ON restock_code_requests (claimed_email_id) WHERE claimed_email_id IS NOT NULL
   `));
 
   // Task #70: pay-later refund_amount data-fix. Wrapped via safe() so a failure

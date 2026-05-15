@@ -1273,6 +1273,24 @@ const enTranslations = {
     findPastChargedDescription: "Search by borrower name or transaction ID to refund older charges.",
     searchBorrowerOrId: "Borrower name or #ID",
     noChargedTransactionsFound: "No matching charged transactions.",
+
+    // Task #249: Verification code relay
+    verificationCodeSectionTitle: "Need a verification code?",
+    verificationCodeSectionDesc: "Click the button to automatically retrieve the 2FA code from the shared inbox.",
+    getVerificationCode: "Get verification code",
+    verificationCodeDialogTitle: "BabyBanz Verification Code",
+    verificationCodeDialogDesc: "Follow the steps — the code will appear automatically once the email arrives.",
+    verificationCodeStep1: "Go to the BabyBanz website and begin signing in with the shared account.",
+    verificationCodeStep2: "When the site asks for a verification code, come back here.",
+    verificationCodeStep3: "Your code will appear below as soon as the email lands in the inbox.",
+    verificationCodeWaiting: "Waiting for the verification email…",
+    verificationCodeLabel: "Your code:",
+    verificationCodeCopyCode: "Copy code",
+    verificationCodeExpiry: "Expires in {time}",
+    verificationCodeExpired: "This session expired. Request a new code to continue.",
+    verificationCodeRequestNew: "Request new code",
+    verificationCodeError: "Could not start a verification code request. Please try again.",
+    verificationCodeUnavailable: "Code could not be retrieved (server restarted during the window). Please request a new code.",
 } as const;
 
 export default enTranslations;
