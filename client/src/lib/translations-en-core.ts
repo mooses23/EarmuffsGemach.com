@@ -33,7 +33,7 @@ const enCore = {
     applyToOpenLocation: "Apply to Open a Location",
 
     // Rules page — sourced from shared/rules-content.ts (single source of truth with AI seed docs)
-    searchPlaceholder: "Search all locations or select a continent below...",
+    searchPlaceholder: "Search locations...",
     chooseYourContinent: "Choose Your Continent",
     selectContinentBrowse: "Select a continent to browse popular cities and locations",
     backToContinents: "Back to Continents",

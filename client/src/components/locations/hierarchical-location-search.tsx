@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link, useLocation } from "wouter";
-import { Search, Phone, MapPin, ChevronRight, ArrowLeft, Home, Package, Mail, Star, User, Navigation2, Loader2, X, ChevronDown, ChevronUp } from "lucide-react";
+import { Search, Phone, MapPin, ChevronRight, ArrowLeft, Package, Mail, Star, User, Navigation2, Loader2, X, ChevronDown, ChevronUp } from "lucide-react";
 import { ContactActions } from "@/components/ui/contact-actions";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -526,13 +526,6 @@ export function HierarchicalLocationSearch() {
           >
             <ArrowLeft className="h-4 w-4" />
             {t("backToContinents")}
-          </button>
-          <button 
-            onClick={() => window.location.href = '/'}
-            className="btn-glass-outline px-4 py-2 rounded-xl flex items-center gap-2 text-sm"
-          >
-            <Home className="h-4 w-4" />
-            {t("home")}
           </button>
         </div>
         

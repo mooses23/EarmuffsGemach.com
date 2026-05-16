@@ -171,7 +171,7 @@ const enTranslations = {
     israel: "Israel",
 
     // Location Search
-    searchPlaceholder: "Search all locations or select a continent below...",
+    searchPlaceholder: "Search locations...",
     chooseYourContinent: "Choose Your Continent",
     selectContinentBrowse: "Select a continent to browse popular cities and locations",
     backToContinents: "Back to Continents",
