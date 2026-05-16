@@ -6,6 +6,8 @@ import { LocationCard } from "./location-card";
 import { RegionTabs } from "./region-tabs";
 import { Input } from "@/components/ui/input";
 import { Search } from "lucide-react";
+import { useCardDensity } from "@/hooks/use-card-density";
+import { CardDensityToggle } from "./card-density-toggle";
 interface LocationFinderProps {
   initialRegion?: string;
 }
@@ -13,6 +15,7 @@ interface LocationFinderProps {
 export function LocationFinder({ initialRegion = "united-states" }: LocationFinderProps) {
   const [activeRegion, setActiveRegion] = useState(initialRegion);
   const [searchTerm, setSearchTerm] = useState("");
+  const [cardDensity, setCardDensity] = useCardDensity();
   
   const { data: regions = [] } = useQuery<Region[]>({
     queryKey: ["/api/regions"],
@@ -79,12 +82,19 @@ export function LocationFinder({ initialRegion = "united-states" }: LocationFind
           </div>
         </div>
         
+        {/* Density toggle */}
+        {filteredLocations.length > 0 && (
+          <div className="max-w-6xl mx-auto mb-4 flex justify-center md:justify-end">
+            <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="light" />
+          </div>
+        )}
+
         {/* Locations Grid */}
         <div id="locations-results">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 ${cardDensity === "compact" ? "gap-3" : "gap-6"}`}>
             {filteredLocations.length > 0 ? (
               filteredLocations.map((location, index) => (
-                <LocationCard key={location.id} location={location} locationNumber={index + 1} />
+                <LocationCard key={location.id} location={location} locationNumber={index + 1} density={cardDensity} />
               ))
             ) : (
               <div className="col-span-1 md:col-span-2 lg:col-span-3 py-8 text-center">

@@ -49,9 +49,11 @@ interface LocationCardProps {
   location: Location;
   locationNumber?: number;
   distanceKm?: number | null;
+  density?: "compact" | "full";
 }
 
-export function LocationCard({ location, locationNumber, distanceKm }: LocationCardProps) {
+export function LocationCard({ location, locationNumber, distanceKm, density = "full" }: LocationCardProps) {
+  const isCompact = density === "compact";
   const [, navigate] = useLocation();
   const { t, language } = useLanguage();
   const locName = pickLocalized(location, "name", language);
@@ -77,15 +79,15 @@ export function LocationCard({ location, locationNumber, distanceKm }: LocationC
   return (
     <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}#location-contact`); }}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300 hover:bg-blue-50/30">
-        <CardContent className="pt-6">
-          <div className="flex justify-between items-start mb-4">
-            <div>
+        <CardContent className={isCompact ? "pt-3 pb-3" : "pt-6"}>
+          <div className={`flex justify-between items-start gap-2 ${isCompact ? "mb-2" : "mb-4"}`}>
+            <div className="min-w-0">
               {locationNumber && (
-                <div className="bg-yellow-400 text-black text-sm font-bold px-3 py-1 rounded-full inline-block mb-2">
+                <div className={`bg-yellow-400 text-black font-bold rounded-full inline-block ${isCompact ? "text-xs px-2 py-0.5 mb-1" : "text-sm px-3 py-1 mb-2"}`}>
                   #{locationNumber}
                 </div>
               )}
-              <h3 className="text-xl font-semibold">{locName}</h3>
+              <h3 className={`${isCompact ? "text-base" : "text-xl"} font-semibold truncate`}>{locName}</h3>
               {typeof distanceKm === "number" && Number.isFinite(distanceKm) && (
                 <p className="text-xs text-blue-600 font-medium mt-1" data-testid={`text-distance-${location.id}`}>
                   {formatDistance(distanceKm, language, t)}
@@ -103,29 +105,31 @@ export function LocationCard({ location, locationNumber, distanceKm }: LocationC
               />
             </div>
           </div>
-          <div className="mb-4 text-neutral-600">
+          <div className={`text-neutral-600 ${isCompact ? "mb-0" : "mb-4"}`}>
             {locContact && (
-              <p className="flex items-center mb-2">
-                <User className="w-5 h-5 mr-2 text-neutral-500 flex-shrink-0" />
-                <span>{locContact}</span>
+              <p className={`flex items-center ${isCompact ? "mb-1 text-sm" : "mb-2"}`}>
+                <User className={`${isCompact ? "w-4 h-4" : "w-5 h-5"} mr-2 text-neutral-500 flex-shrink-0`} />
+                <span className="truncate">{locContact}</span>
               </p>
             )}
-            <p className="flex items-start mb-2">
-              <MapPin className="w-5 h-5 mr-2 mt-0.5 text-neutral-500 flex-shrink-0" />
-              <span className="break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</span>
-            </p>
+            {!isCompact && (
+              <p className="flex items-start mb-2">
+                <MapPin className="w-5 h-5 mr-2 mt-0.5 text-neutral-500 flex-shrink-0" />
+                <span className="break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</span>
+              </p>
+            )}
             {location.phone && (
-              <p className="flex items-center mb-2">
-                <Phone className={`w-5 h-5 mr-2 flex-shrink-0 ${location.contactPreference === "phone" || location.contactPreference === "whatsapp" ? "text-blue-500" : "text-neutral-500"}`} />
+              <p className={`flex items-center ${isCompact ? "mb-0 text-sm" : "mb-2"}`}>
+                <Phone className={`${isCompact ? "w-4 h-4" : "w-5 h-5"} mr-2 flex-shrink-0 ${location.contactPreference === "phone" || location.contactPreference === "whatsapp" ? "text-blue-500" : "text-neutral-500"}`} />
                 <a href={`tel:${location.phone.replace(/[^+\d]/g, "")}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors">{location.phone}</a>
-                {(location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
+                {!isCompact && (location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
                   <span className="ml-2 text-xs text-blue-500 font-medium flex items-center gap-0.5">
                     <Star className="w-3 h-3 fill-current" /> preferred
                   </span>
                 )}
               </p>
             )}
-            {location.email && (
+            {!isCompact && location.email && (
               <div className="flex items-start mb-2">
                 <Mail className={`w-5 h-5 mr-2 mt-0.5 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-500" : "text-neutral-500"}`} />
                 <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
@@ -144,21 +148,25 @@ export function LocationCard({ location, locationNumber, distanceKm }: LocationC
                 </div>
               </div>
             )}
-            <div className="mb-2" data-contact-actions>
-              <ContactActionsLight phone={location.phone} locationName={locName} />
-            </div>
-            <p className="flex items-center">
-              <Package className="w-5 h-5 mr-2 text-neutral-500" />
-              {inventory.length > 0 ? (
-                <span className="flex items-center gap-1 flex-wrap">
-                  {inventory.map(item => (
-                    <InventoryCircle key={item.color} color={item.color} quantity={item.quantity} />
-                  ))}
-                </span>
-              ) : (
-                <span className="text-neutral-400 text-sm">{t("noStockData")}</span>
-              )}
-            </p>
+            {!isCompact && (
+              <>
+                <div className="mb-2" data-contact-actions>
+                  <ContactActionsLight phone={location.phone} locationName={locName} />
+                </div>
+                <p className="flex items-center">
+                  <Package className="w-5 h-5 mr-2 text-neutral-500" />
+                  {inventory.length > 0 ? (
+                    <span className="flex items-center gap-1 flex-wrap">
+                      {inventory.map(item => (
+                        <InventoryCircle key={item.color} color={item.color} quantity={item.quantity} />
+                      ))}
+                    </span>
+                  ) : (
+                    <span className="text-neutral-400 text-sm">{t("noStockData")}</span>
+                  )}
+                </p>
+              </>
+            )}
           </div>
         </CardContent>
       </Card>

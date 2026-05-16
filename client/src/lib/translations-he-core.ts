@@ -95,6 +95,11 @@ const dict: Record<CoreTranslationKey, string> = {
     distanceKm: "{n} ק\"מ ממך",
     directionsAddress: "כתובת לניווט",
     directionsAddressHint: "הכתובת המלאה שהמבקרים ישתמשו בה כדי להגיע אליך. מוצגת בכרטיס הציבורי של הסניף שלך.",
+
+    // Task #271: compact / full card view toggle
+    cardViewLabel: "תצוגת כרטיס",
+    cardViewCompact: "מצומצם",
+    cardViewFull: "מלא",
 };
 
 export default dict;

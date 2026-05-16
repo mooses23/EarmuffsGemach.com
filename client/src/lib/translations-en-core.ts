@@ -92,6 +92,11 @@ const enCore = {
     distanceKm: "{n} km away",
     directionsAddress: "Directions address",
     directionsAddressHint: "The postal address visitors will use to navigate to you. Shown on your public location card.",
+
+    // Task #271: compact / full card view toggle
+    cardViewLabel: "Card view",
+    cardViewCompact: "Compact",
+    cardViewFull: "Full",
 } as const;
 
 export default enCore;

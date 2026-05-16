@@ -13,6 +13,8 @@ import { localizeUSState } from "@/lib/location-names";
 import { pickLocalized } from "@/lib/localized-record";
 import type { Location, Region } from "@/lib/types";
 import { DirectionsButton, formatDistance } from "./directions-button";
+import { useCardDensity } from "@/hooks/use-card-density";
+import { CardDensityToggle } from "./card-density-toggle";
 
 // Task #263: haversine distance in km between two lat/lng pairs.
 function haversineKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -44,6 +46,7 @@ const HIGH_DENSITY_THRESHOLD = 3;
 
 export function HierarchicalLocationSearch() {
   const { t, language } = useLanguage();
+  const [cardDensity, setCardDensity] = useCardDensity();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedRegion, setSelectedRegion] = useState<Region | null>(null);
   const [selectedCity, setSelectedCity] = useState<CityCategory | null>(null);
@@ -412,13 +415,17 @@ export function HierarchicalLocationSearch() {
                 {t("showing")} <span className="font-semibold text-white">{sortedByDistance.length}</span> {t("locations")}
               </p>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-4 md:px-0">
+            <div className="flex justify-center md:justify-end px-4 md:px-0">
+              <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" />
+            </div>
+            <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 px-4 md:px-0 ${cardDensity === "compact" ? "gap-2 md:gap-3" : "gap-4 md:gap-6"}`}>
               {sortedByDistance.map((location: Location) => (
                 <LocationCard
                   key={location.id}
                   location={location}
                   region={regionsMap[location.regionId]}
                   distanceKm={distanceMap.get(location.id) ?? null}
+                  density={cardDensity}
                 />
               ))}
             </div>
@@ -430,13 +437,16 @@ export function HierarchicalLocationSearch() {
                 {t("showing")} <span className="font-semibold text-white">{filteredLocations.length}</span> {t("locations")}
               </p>
             </div>
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-4 md:px-0">
+            <div className="flex justify-center md:justify-end px-4 md:px-0">
+              <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" />
+            </div>
+            <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 px-4 md:px-0 ${cardDensity === "compact" ? "gap-2 md:gap-3" : "gap-4 md:gap-6"}`}>
               {filteredLocations.map((location: Location) => (
                 <LocationCard 
                   key={location.id} 
                   location={location} 
                   region={regionsMap[location.regionId]}
+                  density={cardDensity}
                 />
               ))}
             </div>
@@ -722,6 +732,12 @@ export function HierarchicalLocationSearch() {
         </div>
       )}
 
+      {Object.keys(groupedByCity).length > 0 && (
+        <div className="flex justify-center md:justify-end px-4 md:px-0 mb-4">
+          <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" />
+        </div>
+      )}
+
       <div className="space-y-8">
         {Object.entries(groupedByCity).map(([citySlug, { city, locations: cityLocations }]) => (
           <div key={citySlug}>
@@ -739,12 +755,13 @@ export function HierarchicalLocationSearch() {
               </span>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6 px-4 md:px-0">
+            <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 px-4 md:px-0 ${cardDensity === "compact" ? "gap-2 md:gap-3" : "gap-4 md:gap-6"}`}>
               {cityLocations.map((location: Location) => (
                 <LocationCard 
                   key={location.id} 
                   location={location} 
                   region={selectedRegion}
+                  density={cardDensity}
                 />
               ))}
             </div>
@@ -810,11 +827,13 @@ interface LocationCardProps {
   location: Location;
   region: Region;
   distanceKm?: number | null;
+  density?: "compact" | "full";
 }
 
-function LocationCard({ location, region, distanceKm }: LocationCardProps) {
+function LocationCard({ location, region, distanceKm, density = "full" }: LocationCardProps) {
   const { t, language } = useLanguage();
   const [, navigate] = useLocation();
+  const isCompact = density === "compact";
   const locName = pickLocalized(location, "name", language);
   const locAddress = pickLocalized(location, "address", language);
   const locContact = pickLocalized(location, "contactPerson", language);
@@ -838,13 +857,13 @@ function LocationCard({ location, region, distanceKm }: LocationCardProps) {
 
   return (
     <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}`); }}>
-      <div className="glass-card glass-card-hover glass-highlight rounded-2xl cursor-pointer p-6">
-        <div className="flex items-start justify-between mb-4 gap-2">
-          <div>
-            <span className="inline-block px-2 py-1 mb-2 text-xs font-mono rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30">
+      <div className={`glass-card glass-card-hover glass-highlight rounded-2xl cursor-pointer ${isCompact ? "p-3" : "p-6"}`}>
+        <div className={`flex items-start justify-between gap-2 ${isCompact ? "mb-2" : "mb-4"}`}>
+          <div className="min-w-0">
+            <span className={`inline-block font-mono rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30 ${isCompact ? "px-1.5 py-0.5 mb-1 text-[10px]" : "px-2 py-1 mb-2 text-xs"}`}>
               {location.locationCode}
             </span>
-            <h3 className="text-lg font-semibold text-white">
+            <h3 className={`${isCompact ? "text-sm" : "text-lg"} font-semibold text-white truncate`}>
               {locName}
             </h3>
             {typeof distanceKm === "number" && Number.isFinite(distanceKm) && (
@@ -859,25 +878,27 @@ function LocationCard({ location, region, distanceKm }: LocationCardProps) {
             hasCoords={location.latitude != null && location.longitude != null}
           />
         </div>
-        
-        <div className="space-y-3">
-          <div className="flex items-start">
-            <MapPin className="h-4 w-4 text-slate-400 mt-1 mr-2 flex-shrink-0" />
-            <p className="text-sm text-slate-300 break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</p>
-          </div>
-          
+
+        <div className={isCompact ? "space-y-1.5" : "space-y-3"}>
+          {!isCompact && (
+            <div className="flex items-start">
+              <MapPin className="h-4 w-4 text-slate-400 mt-1 mr-2 flex-shrink-0" />
+              <p className="text-sm text-slate-300 break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</p>
+            </div>
+          )}
+
           {location.phone && (
             <div className="flex items-center">
               <Phone className={`h-4 w-4 mr-2 flex-shrink-0 ${location.contactPreference === "phone" || location.contactPreference === "whatsapp" ? "text-blue-400" : "text-slate-400"}`} />
               <a href={`tel:${location.phone.replace(/[^+\d]/g, "")}`} className="text-sm text-slate-300 hover:text-white transition-colors">{location.phone}</a>
-              {(location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
+              {!isCompact && (location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
                 <span className="ml-2 text-xs text-blue-400 font-medium flex items-center gap-0.5">
                   <Star className="w-3 h-3 fill-current" /> {t("preferred")}
                 </span>
               )}
             </div>
           )}
-          {location.email && (
+          {!isCompact && location.email && (
             <div className="flex items-start">
               <Mail className={`h-4 w-4 mr-2 mt-1 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-400" : "text-slate-400"}`} />
               <div className="flex flex-wrap items-start gap-x-2 gap-y-1 min-w-0">
@@ -899,51 +920,54 @@ function LocationCard({ location, region, distanceKm }: LocationCardProps) {
           {locContact && (
             <div className="flex items-center">
               <User className="h-4 w-4 text-slate-400 mr-2 flex-shrink-0" />
-              <span className="text-sm text-slate-300">{locContact}</span>
+              <span className="text-sm text-slate-300 truncate">{locContact}</span>
             </div>
           )}
-          <div data-contact-actions>
-            <ContactActions phone={location.phone} locationName={locName} compact />
-          </div>
-          
-          <div className="flex items-center min-h-[28px]">
-            <Package className="h-4 w-4 text-slate-400 mr-2 flex-shrink-0" />
-            {inventoryLoading ? (
-              <div className="flex items-center gap-1">
-                {[1, 2, 3].map(i => (
-                  <div key={i} className="w-6 h-6 rounded-full bg-white/10 animate-pulse" />
-                ))}
+          {!isCompact && (
+            <>
+              <div data-contact-actions>
+                <ContactActions phone={location.phone} locationName={locName} compact />
               </div>
-            ) : inventory.length > 0 ? (
-              <div className="flex items-center gap-1 flex-wrap">
-                {inventory.map(item => (
-                  <InventoryCircle key={item.color} color={item.color} quantity={item.quantity} />
-                ))}
+
+              <div className="flex items-center min-h-[28px]">
+                <Package className="h-4 w-4 text-slate-400 mr-2 flex-shrink-0" />
+                {inventoryLoading ? (
+                  <div className="flex items-center gap-1">
+                    {[1, 2, 3].map(i => (
+                      <div key={i} className="w-6 h-6 rounded-full bg-white/10 animate-pulse" />
+                    ))}
+                  </div>
+                ) : inventory.length > 0 ? (
+                  <div className="flex items-center gap-1 flex-wrap">
+                    {inventory.map(item => (
+                      <InventoryCircle key={item.color} color={item.color} quantity={item.quantity} />
+                    ))}
+                  </div>
+                ) : (
+                  <span className="text-sm text-slate-400">{t("noStockInfo")}</span>
+                )}
               </div>
-            ) : (
-              <span className="text-sm text-slate-400">{t("noStockInfo")}</span>
-            )}
-          </div>
+            </>
+          )}
         </div>
-        
-        {/* Task #268: footer "Contact: …" line removed — the contact name
-            already appears above next to the User icon. Keep active/deposit
-            footer. */}
-        <div className="mt-4 pt-4 border-t border-white/10">
-          <div className="flex items-center justify-between">
-            <div className="text-sm">
-              <span className="text-slate-400">{t("depositLabel")}</span>
-              <span className="font-medium text-white ml-1">${location.depositAmount}</span>
+
+        {!isCompact && (
+          <div className="mt-4 pt-4 border-t border-white/10">
+            <div className="flex items-center justify-between">
+              <div className="text-sm">
+                <span className="text-slate-400">{t("depositLabel")}</span>
+                <span className="font-medium text-white ml-1">${location.depositAmount}</span>
+              </div>
+              <span className={`px-2 py-1 text-xs rounded-full ${
+                location.isActive
+                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                  : "bg-slate-500/20 text-slate-400 border border-slate-500/30"
+              }`}>
+                {location.isActive ? t("active") : t("inactive")}
+              </span>
             </div>
-            <span className={`px-2 py-1 text-xs rounded-full ${
-              location.isActive
-                ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                : "bg-slate-500/20 text-slate-400 border border-slate-500/30"
-            }`}>
-              {location.isActive ? t("active") : t("inactive")}
-            </span>
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
