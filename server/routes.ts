@@ -5983,6 +5983,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // ============================================================
+  // ADMIN: List all active (non-dismissed) restock shipments (Task #254)
+  // ============================================================
+  app.get("/api/admin/restock-shipments", async (req, res) => {
+    if (!requireAdminDash(req, res)) return;
+    try {
+      const shipments = await storage.listActiveRestockShipments();
+      return res.json(shipments);
+    } catch (err: unknown) {
+      console.error("admin/restock-shipments GET error:", err);
+      return res.status(500).json({ message: "Failed to fetch restock shipments" });
+    }
+  });
+
+  // ============================================================
   // ADMIN: Send restock email to a single location (Task #198)
   // ============================================================
   app.post("/api/admin/locations/:id/send-restock-email", async (req, res) => {

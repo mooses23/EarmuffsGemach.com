@@ -1509,6 +1509,27 @@ export class DatabaseStorage implements IStorage {
       .set({ dismissed: true })
       .where(eq(restockShipments.locationId, locationId));
   }
+
+  async listActiveRestockShipments(): Promise<Array<RestockShipment & { locationName: string }>> {
+    const rows = await db
+      .select({
+        id: restockShipments.id,
+        locationId: restockShipments.locationId,
+        orderedAt: restockShipments.orderedAt,
+        detectedAt: restockShipments.detectedAt,
+        trackingNumber: restockShipments.trackingNumber,
+        carrier: restockShipments.carrier,
+        estimatedDelivery: restockShipments.estimatedDelivery,
+        rawEmailSnippet: restockShipments.rawEmailSnippet,
+        dismissed: restockShipments.dismissed,
+        locationName: locations.name,
+      })
+      .from(restockShipments)
+      .innerJoin(locations, eq(restockShipments.locationId, locations.id))
+      .where(eq(restockShipments.dismissed, false))
+      .orderBy(desc(restockShipments.orderedAt));
+    return rows;
+  }
 }
 
 let schemaUpgradesRun = false;

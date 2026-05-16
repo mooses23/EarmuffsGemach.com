@@ -17,7 +17,7 @@ import {
   DollarSign, AlarmClock, BarChart3, Mail, MessageSquare,
   Shield, AlertTriangle, BookOpen, Phone, Bell, X,
   CheckCircle2, XCircle, Download, Send, MailCheck, Plus,
-  ArrowRight, Activity,
+  ArrowRight, Activity, Package, Truck,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
@@ -68,6 +68,18 @@ interface ActivityItem {
   name: string;
   subtitle: string;
   href: string;
+}
+
+interface RestockShipmentRow {
+  id: number;
+  locationId: number;
+  locationName: string;
+  orderedAt: string;
+  detectedAt: string | null;
+  trackingNumber: string | null;
+  carrier: string | null;
+  estimatedDelivery: string | null;
+  dismissed: boolean;
 }
 
 type Severity = "critical" | "warning" | "info";
@@ -326,6 +338,10 @@ export default function Dashboard() {
   });
   const activityQ = useQuery<ActivityItem[]>({
     queryKey: ["/api/admin/recent-activity"], staleTime: 30_000,
+  });
+  const restockQ = useQuery<RestockShipmentRow[]>({
+    queryKey: ["/api/admin/restock-shipments"],
+    staleTime: 60_000,
   });
 
   const counts = summaryQ.data?.counts;
@@ -726,6 +742,52 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       </div>
+
+      {/* Pending restock shipments (Task #254) */}
+      {(restockQ.isLoading || (restockQ.data && restockQ.data.length > 0)) && (
+        <Card className="mt-4" data-testid="card-restock-shipments">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Package className="h-4 w-4" />
+              {t('pendingRestockShipments') || 'Pending Restock Shipments'}
+              {restockQ.data && restockQ.data.length > 0 && (
+                <Badge variant="secondary" className="ml-auto">{restockQ.data.length}</Badge>
+              )}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {restockQ.isLoading ? (
+              <div className="space-y-2">
+                <Skeleton className="h-5 w-full" />
+                <Skeleton className="h-5 w-3/4" />
+              </div>
+            ) : (
+              <ul className="space-y-2 text-sm">
+                {(restockQ.data ?? []).map((s) => (
+                  <li key={s.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1 border-b last:border-b-0 pb-2 last:pb-0">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <Truck className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
+                      <span className="font-medium truncate">{s.locationName}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-muted-foreground pl-5 sm:pl-0">
+                      <span>Ordered {new Date(s.orderedAt).toLocaleDateString()}</span>
+                      {s.trackingNumber && (
+                        <span className="font-mono">{s.carrier ? `${s.carrier}: ` : ''}{s.trackingNumber}</span>
+                      )}
+                      {s.estimatedDelivery && (
+                        <span className="text-green-700">Est. {s.estimatedDelivery}</span>
+                      )}
+                      {!s.trackingNumber && (
+                        <Badge variant="outline" className="text-[10px] px-1 py-0">Awaiting tracking</Badge>
+                      )}
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stripe risk detail (only when there's data) */}
       {disputesQ.data && disputesQ.data.rows.length > 0 && (

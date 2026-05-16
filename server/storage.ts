@@ -251,6 +251,8 @@ export interface IStorage {
   upsertRestockShipment(locationId: number, data: { orderedAt: Date; detectedAt?: Date | null; trackingNumber?: string | null; carrier?: string | null; estimatedDelivery?: string | null; rawEmailSnippet?: string | null; dismissed?: boolean }): Promise<RestockShipment>;
   getRestockShipment(locationId: number): Promise<RestockShipment | undefined>;
   dismissRestockShipment(locationId: number): Promise<void>;
+  /** Task #254: Return all non-dismissed restock shipments joined with location names. */
+  listActiveRestockShipments(): Promise<Array<RestockShipment & { locationName: string }>>;
 }
 
 export class MemStorage implements IStorage {
@@ -3553,6 +3555,16 @@ export class MemStorage implements IStorage {
     if (existing) {
       this._restockShipments.set(locationId, { ...existing, dismissed: true });
     }
+  }
+
+  async listActiveRestockShipments(): Promise<Array<RestockShipment & { locationName: string }>> {
+    const results: Array<RestockShipment & { locationName: string }> = [];
+    for (const shipment of this._restockShipments.values()) {
+      if (shipment.dismissed) continue;
+      const loc = this.locations.get(shipment.locationId);
+      results.push({ ...shipment, locationName: loc?.name ?? `Location #${shipment.locationId}` });
+    }
+    return results;
   }
 }
 
