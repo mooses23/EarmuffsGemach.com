@@ -87,8 +87,8 @@ export function LocationFinder({ initialRegion = "united-states" }: LocationFind
         
         {/* Density toggle */}
         {filteredLocations.length > 0 && (
-          <div className="max-w-md mx-auto mb-4 flex justify-center opacity-70 hover:opacity-100 transition-opacity">
-            <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="light" />
+          <div className="max-w-6xl mx-auto mb-4 flex justify-start opacity-60 hover:opacity-90 transition-opacity">
+            <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="light" className="scale-[0.85] origin-left" />
           </div>
         )}
 

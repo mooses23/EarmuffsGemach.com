@@ -25,18 +25,17 @@ const COLOR_SWATCHES: Record<string, string> = {
 function InventoryCircle({ color, quantity }: { color: string; quantity: number }) {
   const bgColor = COLOR_SWATCHES[color] || "#9CA3AF";
   const isLight = color === "white" || color === "yellow";
-  
   return (
-    <div 
+    <div
       className="relative w-6 h-6 rounded-full flex items-center justify-center"
-      style={{ 
+      style={{
         backgroundColor: bgColor,
         boxShadow: `inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.12)`,
-        border: isLight ? '1px solid #d1d5db' : 'none'
+        border: isLight ? '1px solid #d1d5db' : 'none',
       }}
       title={`${color}: ${quantity}`}
     >
-      <span 
+      <span
         className={`text-[9px] font-bold ${isLight ? 'text-gray-700' : 'text-white'}`}
         style={{ textShadow: isLight ? 'none' : '0 1px 1px rgba(0,0,0,0.4)' }}
       >
@@ -56,13 +55,14 @@ interface LocationCardProps {
 
 export function LocationCard({ location, locationNumber, distanceKm, density = "full", regionName }: LocationCardProps) {
   const [locallyExpanded, setLocallyExpanded] = useState(false);
-  const isCompact = density === "compact" && !locallyExpanded;
+  const showExpanded = density === "full" || locallyExpanded;
   const [, navigate] = useLocation();
   const { t, language } = useLanguage();
   const locName = pickLocalized(location, "name", language);
   const locContact = pickLocalized(location, "contactPerson", language);
   const locAddress = pickLocalized(location, "address", language);
   const cityRegionLabel = [location.city, regionName].filter(Boolean).join(", ");
+
   const { data: inventoryData } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
     queryKey: ["/api/locations", location.id, "inventory"],
     queryFn: async () => {
@@ -79,11 +79,15 @@ export function LocationCard({ location, locationNumber, distanceKm, density = "
     if (target.closest("a") || target.closest("[data-contact-actions]") || target.closest("[data-expand-toggle]")) return;
     navigate(`/self-deposit?locationId=${location.id}#location-contact`);
   };
-  
+
+  const isCompact = density === "compact";
+
   return (
     <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}#location-contact`); }}>
       <Card className="hover:shadow-md transition-shadow cursor-pointer hover:border-blue-300 hover:bg-blue-50/30">
         <CardContent className={isCompact ? "pt-3 pb-3" : "pt-6"}>
+
+          {/* Always-visible header */}
           <div className={`flex justify-between items-start gap-2 ${isCompact ? "mb-2" : "mb-4"}`}>
             <div className="min-w-0">
               {locationNumber && (
@@ -107,59 +111,55 @@ export function LocationCard({ location, locationNumber, distanceKm, density = "
               <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full">
                 {location.isActive ? t("active") : t("inactive")}
               </span>
-              <DirectionsButton
-                address={locAddress}
-                variant="light"
-                hasCoords={location.latitude != null && location.longitude != null}
-              />
+              <DirectionsButton address={locAddress} variant="light" hasCoords={location.latitude != null && location.longitude != null} />
             </div>
           </div>
-          <div className={`text-neutral-600 ${isCompact ? "mb-0" : "mb-4"}`}>
+
+          {/* Always-visible: contact person + phone */}
+          <div className={`text-neutral-600 ${isCompact ? "space-y-1" : "space-y-2 mb-4"}`}>
             {locContact && (
-              <p className={`flex items-center ${isCompact ? "mb-1 text-sm" : "mb-2"}`}>
+              <p className={`flex items-center ${isCompact ? "text-sm" : ""}`}>
                 <User className={`${isCompact ? "w-4 h-4" : "w-5 h-5"} mr-2 text-neutral-500 flex-shrink-0`} />
                 <span className="truncate">{locContact}</span>
               </p>
             )}
-            {!isCompact && (
-              <p className="flex items-start mb-2">
-                <MapPin className="w-5 h-5 mr-2 mt-0.5 text-neutral-500 flex-shrink-0" />
-                <span className="break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</span>
-              </p>
-            )}
             {location.phone && (
-              <p className={`flex items-center ${isCompact ? "mb-0 text-sm" : "mb-2"}`}>
+              <p className={`flex items-center ${isCompact ? "text-sm" : ""}`}>
                 <Phone className={`${isCompact ? "w-4 h-4" : "w-5 h-5"} mr-2 flex-shrink-0 ${location.contactPreference === "phone" || location.contactPreference === "whatsapp" ? "text-blue-500" : "text-neutral-500"}`} />
                 <a href={`tel:${location.phone.replace(/[^+\d]/g, "")}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors">{location.phone}</a>
-                {!isCompact && (location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
-                  <span className="ml-2 text-xs text-blue-500 font-medium flex items-center gap-0.5">
-                    <Star className="w-3 h-3 fill-current" /> preferred
-                  </span>
-                )}
               </p>
             )}
-            {!isCompact && location.email && (
-              <div className="flex items-start mb-2">
-                <Mail className={`w-5 h-5 mr-2 mt-0.5 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-500" : "text-neutral-500"}`} />
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-                  <a
-                    href={`mailto:${location.email}`}
-                    className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm break-all"
-                    data-testid={`link-location-email-${location.id}`}
-                  >
-                    {location.email}
-                  </a>
-                  {location.contactPreference === "email" && (
-                    <span className="text-xs text-blue-500 font-medium flex items-center gap-0.5 flex-shrink-0">
-                      <Star className="w-3 h-3 fill-current" /> preferred
-                    </span>
-                  )}
-                </div>
-              </div>
-            )}
-            {!isCompact && (
-              <>
-                <div className="mb-2" data-contact-actions>
+          </div>
+
+          {/* Animated expanded content */}
+          <div className={`grid transition-all duration-350 ease-in-out ${showExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+            <div className="overflow-hidden">
+              <div className={`space-y-2 text-neutral-600 ${isCompact ? "pt-2" : ""}`}>
+                <p className="flex items-start">
+                  <MapPin className="w-5 h-5 mr-2 mt-0.5 text-neutral-500 flex-shrink-0" />
+                  <span className="break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</span>
+                </p>
+                {location.phone && (location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
+                  <p className="ml-7 text-xs text-blue-500 font-medium flex items-center gap-0.5">
+                    <Star className="w-3 h-3 fill-current" /> preferred
+                  </p>
+                )}
+                {location.email && (
+                  <div className="flex items-start">
+                    <Mail className={`w-5 h-5 mr-2 mt-0.5 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-500" : "text-neutral-500"}`} />
+                    <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
+                      <a href={`mailto:${location.email}`} className="text-blue-600 hover:text-blue-800 hover:underline transition-colors text-sm break-all" data-testid={`link-location-email-${location.id}`}>
+                        {location.email}
+                      </a>
+                      {location.contactPreference === "email" && (
+                        <span className="text-xs text-blue-500 font-medium flex items-center gap-0.5 flex-shrink-0">
+                          <Star className="w-3 h-3 fill-current" /> preferred
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className="pb-1" data-contact-actions>
                   <ContactActionsLight phone={location.phone} locationName={locName} />
                 </div>
                 <p className="flex items-center">
@@ -174,12 +174,12 @@ export function LocationCard({ location, locationNumber, distanceKm, density = "
                     <span className="text-neutral-400 text-sm">{t("noStockData")}</span>
                   )}
                 </p>
-              </>
-            )}
+              </div>
+            </div>
           </div>
 
-          {/* Expand / collapse button — only shown in compact density mode */}
-          {density === "compact" && (
+          {/* Expand / collapse — compact density only */}
+          {isCompact && (
             <div className="mt-2 pt-2 border-t border-gray-100" data-expand-toggle>
               <button
                 type="button"
@@ -187,15 +187,9 @@ export function LocationCard({ location, locationNumber, distanceKm, density = "
                 className="flex items-center gap-1 text-xs text-neutral-400 hover:text-blue-600 transition-colors w-full justify-center"
               >
                 {locallyExpanded ? (
-                  <>
-                    <ChevronUp className="w-3.5 h-3.5" />
-                    <span>Show less</span>
-                  </>
+                  <><ChevronUp className="w-3.5 h-3.5" /><span>Show less</span></>
                 ) : (
-                  <>
-                    <ChevronDown className="w-3.5 h-3.5" />
-                    <span>Show more</span>
-                  </>
+                  <><ChevronDown className="w-3.5 h-3.5" /><span>Show more</span></>
                 )}
               </button>
             </div>

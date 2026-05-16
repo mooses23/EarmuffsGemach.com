@@ -415,8 +415,8 @@ export function HierarchicalLocationSearch() {
                 {t("showing")} <span className="font-semibold text-white">{sortedByDistance.length}</span> {t("locations")}
               </p>
             </div>
-            <div className="flex justify-center px-4 md:px-0 opacity-70 hover:opacity-100 transition-opacity">
-              <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" />
+            <div className="flex justify-start px-4 md:px-0 opacity-60 hover:opacity-90 transition-opacity">
+              <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" className="scale-[0.85] origin-left" />
             </div>
             <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 px-4 md:px-0 ${cardDensity === "compact" ? "gap-2 md:gap-3" : "gap-4 md:gap-6"}`}>
               {sortedByDistance.map((location: Location) => (
@@ -437,8 +437,8 @@ export function HierarchicalLocationSearch() {
                 {t("showing")} <span className="font-semibold text-white">{filteredLocations.length}</span> {t("locations")}
               </p>
             </div>
-            <div className="flex justify-center px-4 md:px-0 opacity-70 hover:opacity-100 transition-opacity">
-              <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" />
+            <div className="flex justify-start px-4 md:px-0 opacity-60 hover:opacity-90 transition-opacity">
+              <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" className="scale-[0.85] origin-left" />
             </div>
             <div className={`grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 px-4 md:px-0 ${cardDensity === "compact" ? "gap-2 md:gap-3" : "gap-4 md:gap-6"}`}>
               {filteredLocations.map((location: Location) => (
@@ -733,8 +733,8 @@ export function HierarchicalLocationSearch() {
       )}
 
       {Object.keys(groupedByCity).length > 0 && (
-        <div className="flex justify-center px-4 md:px-0 mb-4 opacity-70 hover:opacity-100 transition-opacity">
-          <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" />
+        <div className="flex justify-start px-4 md:px-0 mb-4 opacity-60 hover:opacity-90 transition-opacity">
+          <CardDensityToggle density={cardDensity} onChange={setCardDensity} variant="dark" className="scale-[0.85] origin-left" />
         </div>
       )}
 
@@ -859,18 +859,22 @@ function LocationCard({ location, region, distanceKm, density = "full" }: Locati
     navigate(`/self-deposit?locationId=${location.id}`);
   };
 
+  const showExpanded = density === "full" || locallyExpanded;
+
   return (
     <div onClick={handleCardClick} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") navigate(`/self-deposit?locationId=${location.id}`); }}>
-      <div className={`glass-card glass-card-hover glass-highlight rounded-2xl cursor-pointer ${isCompact ? "p-3" : "p-6"}`}>
-        <div className={`flex items-start justify-between gap-2 ${isCompact ? "mb-2" : "mb-4"}`}>
+      <div className={`glass-card glass-card-hover glass-highlight rounded-2xl cursor-pointer ${density === "compact" ? "p-3" : "p-6"}`}>
+
+        {/* Always-visible header */}
+        <div className={`flex items-start justify-between gap-2 ${density === "compact" ? "mb-2" : "mb-4"}`}>
           <div className="min-w-0">
-            <span className={`inline-block font-mono rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30 ${isCompact ? "px-1.5 py-0.5 mb-1 text-[10px]" : "px-2 py-1 mb-2 text-xs"}`}>
+            <span className={`inline-block font-mono rounded-lg bg-blue-500/20 text-blue-300 border border-blue-500/30 ${density === "compact" ? "px-1.5 py-0.5 mb-1 text-[10px]" : "px-2 py-1 mb-2 text-xs"}`}>
               {location.locationCode}
             </span>
-            <h3 className={`${isCompact ? "text-sm" : "text-lg"} font-semibold text-white truncate`}>
+            <h3 className={`${density === "compact" ? "text-sm" : "text-lg"} font-semibold text-white truncate`}>
               {locName}
             </h3>
-            {isCompact && cityRegionLabel && (
+            {density === "compact" && cityRegionLabel && (
               <p className="text-xs text-slate-400 mt-0.5 truncate" data-testid={`text-city-region-${location.id}`}>
                 {cityRegionLabel}
               </p>
@@ -881,49 +885,15 @@ function LocationCard({ location, region, distanceKm, density = "full" }: Locati
               </p>
             )}
           </div>
-          <DirectionsButton
-            address={locAddress}
-            variant="dark"
-            hasCoords={location.latitude != null && location.longitude != null}
-          />
+          <DirectionsButton address={locAddress} variant="dark" hasCoords={location.latitude != null && location.longitude != null} />
         </div>
 
-        <div className={isCompact ? "space-y-1.5" : "space-y-3"}>
-          {!isCompact && (
-            <div className="flex items-start">
-              <MapPin className="h-4 w-4 text-slate-400 mt-1 mr-2 flex-shrink-0" />
-              <p className="text-sm text-slate-300 break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</p>
-            </div>
-          )}
-
+        {/* Always-visible: phone + contact person */}
+        <div className={density === "compact" ? "space-y-1.5" : "space-y-3"}>
           {location.phone && (
             <div className="flex items-center">
               <Phone className={`h-4 w-4 mr-2 flex-shrink-0 ${location.contactPreference === "phone" || location.contactPreference === "whatsapp" ? "text-blue-400" : "text-slate-400"}`} />
               <a href={`tel:${location.phone.replace(/[^+\d]/g, "")}`} className="text-sm text-slate-300 hover:text-white transition-colors">{location.phone}</a>
-              {!isCompact && (location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
-                <span className="ml-2 text-xs text-blue-400 font-medium flex items-center gap-0.5">
-                  <Star className="w-3 h-3 fill-current" /> {t("preferred")}
-                </span>
-              )}
-            </div>
-          )}
-          {!isCompact && location.email && (
-            <div className="flex items-start">
-              <Mail className={`h-4 w-4 mr-2 mt-1 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-400" : "text-slate-400"}`} />
-              <div className="flex flex-wrap items-start gap-x-2 gap-y-1 min-w-0">
-                <a
-                  href={`mailto:${location.email}`}
-                  className="text-sm text-slate-300 hover:text-white transition-colors break-all"
-                  data-testid={`link-location-email-${location.id}`}
-                >
-                  {location.email}
-                </a>
-                {location.contactPreference === "email" && (
-                  <span className="text-xs text-blue-400 font-medium flex items-center gap-0.5 flex-shrink-0 self-start mt-0.5">
-                    <Star className="w-3 h-3 fill-current" /> {t("preferred")}
-                  </span>
-                )}
-              </div>
             </div>
           )}
           {locContact && (
@@ -932,12 +902,39 @@ function LocationCard({ location, region, distanceKm, density = "full" }: Locati
               <span className="text-sm text-slate-300 truncate">{locContact}</span>
             </div>
           )}
-          {!isCompact && (
-            <>
+        </div>
+
+        {/* Animated expanded content */}
+        <div className={`grid transition-[grid-template-rows] duration-300 ease-in-out ${showExpanded ? "grid-rows-[1fr]" : "grid-rows-[0fr]"}`}>
+          <div className="overflow-hidden">
+            <div className="space-y-3 pt-3">
+              <div className="flex items-start">
+                <MapPin className="h-4 w-4 text-slate-400 mt-1 mr-2 flex-shrink-0" />
+                <p className="text-sm text-slate-300 break-words" data-testid={`text-location-address-${location.id}`}>{locAddress}</p>
+              </div>
+              {location.phone && (location.contactPreference === "phone" || location.contactPreference === "whatsapp") && (
+                <p className="ml-6 text-xs text-blue-400 font-medium flex items-center gap-0.5">
+                  <Star className="w-3 h-3 fill-current" /> {t("preferred")}
+                </p>
+              )}
+              {location.email && (
+                <div className="flex items-start">
+                  <Mail className={`h-4 w-4 mr-2 mt-1 flex-shrink-0 ${location.contactPreference === "email" ? "text-blue-400" : "text-slate-400"}`} />
+                  <div className="flex flex-wrap items-start gap-x-2 gap-y-1 min-w-0">
+                    <a href={`mailto:${location.email}`} className="text-sm text-slate-300 hover:text-white transition-colors break-all" data-testid={`link-location-email-${location.id}`}>
+                      {location.email}
+                    </a>
+                    {location.contactPreference === "email" && (
+                      <span className="text-xs text-blue-400 font-medium flex items-center gap-0.5 flex-shrink-0 self-start mt-0.5">
+                        <Star className="w-3 h-3 fill-current" /> {t("preferred")}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
               <div data-contact-actions>
                 <ContactActions phone={location.phone} locationName={locName} compact />
               </div>
-
               <div className="flex items-center min-h-[28px]">
                 <Package className="h-4 w-4 text-slate-400 mr-2 flex-shrink-0" />
                 {inventoryLoading ? (
@@ -956,29 +953,22 @@ function LocationCard({ location, region, distanceKm, density = "full" }: Locati
                   <span className="text-sm text-slate-400">{t("noStockInfo")}</span>
                 )}
               </div>
-            </>
-          )}
-        </div>
-
-        {!isCompact && (
-          <div className="mt-4 pt-4 border-t border-white/10">
-            <div className="flex items-center justify-between">
-              <div className="text-sm">
-                <span className="text-slate-400">{t("depositLabel")}</span>
-                <span className="font-medium text-white ml-1">${location.depositAmount}</span>
+              <div className="pt-1 border-t border-white/10">
+                <div className="flex items-center justify-between">
+                  <div className="text-sm">
+                    <span className="text-slate-400">{t("depositLabel")}</span>
+                    <span className="font-medium text-white ml-1">${location.depositAmount}</span>
+                  </div>
+                  <span className={`px-2 py-1 text-xs rounded-full ${location.isActive ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "bg-slate-500/20 text-slate-400 border border-slate-500/30"}`}>
+                    {location.isActive ? t("active") : t("inactive")}
+                  </span>
+                </div>
               </div>
-              <span className={`px-2 py-1 text-xs rounded-full ${
-                location.isActive
-                  ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
-                  : "bg-slate-500/20 text-slate-400 border border-slate-500/30"
-              }`}>
-                {location.isActive ? t("active") : t("inactive")}
-              </span>
             </div>
           </div>
-        )}
+        </div>
 
-        {/* Expand / collapse button — only shown in compact density mode */}
+        {/* Expand / collapse — compact density only */}
         {density === "compact" && (
           <div className="mt-2 pt-2 border-t border-white/10" data-expand-toggle>
             <button
@@ -987,15 +977,9 @@ function LocationCard({ location, region, distanceKm, density = "full" }: Locati
               className="flex items-center gap-1 text-xs text-slate-500 hover:text-blue-400 transition-colors w-full justify-center"
             >
               {locallyExpanded ? (
-                <>
-                  <ChevronUp className="w-3.5 h-3.5" />
-                  <span>Show less</span>
-                </>
+                <><ChevronUp className="w-3.5 h-3.5" /><span>Show less</span></>
               ) : (
-                <>
-                  <ChevronDown className="w-3.5 h-3.5" />
-                  <span>Show more</span>
-                </>
+                <><ChevronDown className="w-3.5 h-3.5" /><span>Show more</span></>
               )}
             </button>
           </div>
