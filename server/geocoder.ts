@@ -86,10 +86,24 @@ function isPrecise(row: NominatimRow): boolean {
   return false;
 }
 
-export async function geocodeAddress(address: string): Promise<GeocodeResult | null> {
+// Clear the in-process cache entry for a given address. Used when an admin
+// triggers a re-geocode and we want to force a fresh hit on Nominatim.
+export function clearGeocodeCacheForAddress(address: string): void {
+  if (!address || typeof address !== "string") return;
+  cache.delete(normalize(address));
+}
+
+export async function geocodeAddress(
+  address: string,
+  options: { force?: boolean } = {},
+): Promise<GeocodeResult | null> {
   if (!address || typeof address !== "string") return null;
   const key = normalize(address);
-  if (cache.has(key)) return cache.get(key) ?? null;
+  if (options.force) {
+    cache.delete(key);
+  } else if (cache.has(key)) {
+    return cache.get(key) ?? null;
+  }
 
   try {
     await acquireSlot();

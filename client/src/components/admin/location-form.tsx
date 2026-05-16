@@ -27,7 +27,8 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { LoaderCircle, Phone, Mail, DollarSign, MapPin, User, Globe, AlertTriangle } from "lucide-react";
+import { LoaderCircle, Phone, Mail, DollarSign, MapPin, User, Globe, AlertTriangle, Crosshair, Save } from "lucide-react";
+import { apiRequest } from "@/lib/queryClient";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
@@ -78,6 +79,206 @@ function IconInputWrapper({ icon: Icon, children }: { icon: React.ElementType; c
     <div className="relative">
       <Icon className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
       {children}
+    </div>
+  );
+}
+
+// Task #265: admin-only "Map coordinates" section for an existing location.
+// Shows the current lat/lng + a "Re-geocode from address" one-click action,
+// plus optional manual override fields. Both actions are audited server-side.
+function toDateOrNull(value: unknown): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value;
+  if (typeof value === "string" || typeof value === "number") {
+    const d = new Date(value);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+  return null;
+}
+
+interface LiveCoords {
+  latitude: number | null;
+  longitude: number | null;
+  geocodedAt: Date | null;
+}
+
+function CoordinatesSection({ location }: { location: Location }) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [lat, setLat] = useState<string>(
+    location.latitude != null ? String(location.latitude) : "",
+  );
+  const [lng, setLng] = useState<string>(
+    location.longitude != null ? String(location.longitude) : "",
+  );
+  // Local mirror of saved coords so the "Currently …" line updates the moment
+  // a mutation succeeds, without waiting for the full /api/locations refetch.
+  const [live, setLive] = useState<LiveCoords>({
+    latitude: location.latitude ?? null,
+    longitude: location.longitude ?? null,
+    geocodedAt: toDateOrNull(location.geocodedAt),
+  });
+
+  useEffect(() => {
+    setLat(location.latitude != null ? String(location.latitude) : "");
+    setLng(location.longitude != null ? String(location.longitude) : "");
+    setLive({
+      latitude: location.latitude ?? null,
+      longitude: location.longitude ?? null,
+      geocodedAt: toDateOrNull(location.geocodedAt),
+    });
+  }, [location.id, location.latitude, location.longitude, location.geocodedAt]);
+
+  const regeocode = useMutation({
+    mutationFn: async () => {
+      const res = await apiRequest("POST", `/api/admin/locations/${location.id}/regeocode`);
+      return res.json() as Promise<{ latitude: number; longitude: number; geocodedAt: string | null }>;
+    },
+    onSuccess: (data) => {
+      setLat(String(data.latitude));
+      setLng(String(data.longitude));
+      setLive({
+        latitude: data.latitude,
+        longitude: data.longitude,
+        geocodedAt: toDateOrNull(data.geocodedAt),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/location-tree"] });
+      toast({
+        title: "Re-geocoded",
+        description: `New coords: ${data.latitude.toFixed(5)}, ${data.longitude.toFixed(5)}`,
+      });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Re-geocode failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const saveManual = useMutation({
+    mutationFn: async (payload: { latitude: number | null; longitude: number | null }) => {
+      const res = await apiRequest(
+        "PATCH",
+        `/api/admin/locations/${location.id}/coordinates`,
+        payload,
+      );
+      return res.json() as Promise<{ latitude: number | null; longitude: number | null; geocodedAt: string | null }>;
+    },
+    onSuccess: (data) => {
+      setLive({
+        latitude: data.latitude,
+        longitude: data.longitude,
+        geocodedAt: toDateOrNull(data.geocodedAt),
+      });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+      queryClient.invalidateQueries({ queryKey: ["/api/location-tree"] });
+      toast({ title: "Coordinates saved" });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Save failed", description: err.message, variant: "destructive" });
+    },
+  });
+
+  const handleSaveManual = () => {
+    const trimmedLat = lat.trim();
+    const trimmedLng = lng.trim();
+    if (trimmedLat === "" && trimmedLng === "") {
+      saveManual.mutate({ latitude: null, longitude: null });
+      return;
+    }
+    const latNum = Number(trimmedLat);
+    const lngNum = Number(trimmedLng);
+    if (!Number.isFinite(latNum) || latNum < -90 || latNum > 90) {
+      toast({ title: "Invalid latitude", description: "Must be a number between -90 and 90", variant: "destructive" });
+      return;
+    }
+    if (!Number.isFinite(lngNum) || lngNum < -180 || lngNum > 180) {
+      toast({ title: "Invalid longitude", description: "Must be a number between -180 and 180", variant: "destructive" });
+      return;
+    }
+    saveManual.mutate({ latitude: latNum, longitude: lngNum });
+  };
+
+  const hasAddress = !!(location.address && location.address.trim());
+  const stamped = live.geocodedAt;
+
+  return (
+    <div className="space-y-3">
+      <SectionHeading icon={Crosshair} label="Map coordinates" />
+      <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs text-muted-foreground">
+            {live.latitude != null && live.longitude != null ? (
+              <>Currently <span className="font-mono">{live.latitude.toFixed(5)}, {live.longitude.toFixed(5)}</span>{stamped ? ` · last set ${stamped.toLocaleDateString()}` : ""}</>
+            ) : (
+              <>No coordinates set yet — borrowers won't see this in "Find nearest to me".</>
+            )}
+          </div>
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => regeocode.mutate()}
+            disabled={!hasAddress || regeocode.isPending}
+            data-testid="btn-regeocode"
+          >
+            {regeocode.isPending ? (
+              <><LoaderCircle className="mr-2 h-3.5 w-3.5 animate-spin" />Re-geocoding…</>
+            ) : (
+              <><Crosshair className="mr-2 h-3.5 w-3.5" />Re-geocode from address</>
+            )}
+          </Button>
+        </div>
+        {!hasAddress && (
+          <p className="text-xs text-amber-700 dark:text-amber-300">
+            Add an English address above and save before re-geocoding.
+          </p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <label className={labelClass} htmlFor={`manual-lat-${location.id}`}>Latitude (manual override)</label>
+            <Input
+              id={`manual-lat-${location.id}`}
+              className={inputClass}
+              inputMode="decimal"
+              placeholder="-90 to 90"
+              value={lat}
+              onChange={(e) => setLat(e.target.value)}
+              data-testid="input-manual-lat"
+            />
+          </div>
+          <div className="space-y-1">
+            <label className={labelClass} htmlFor={`manual-lng-${location.id}`}>Longitude (manual override)</label>
+            <Input
+              id={`manual-lng-${location.id}`}
+              className={inputClass}
+              inputMode="decimal"
+              placeholder="-180 to 180"
+              value={lng}
+              onChange={(e) => setLng(e.target.value)}
+              data-testid="input-manual-lng"
+            />
+          </div>
+        </div>
+        <div className="flex justify-end">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={handleSaveManual}
+            disabled={saveManual.isPending}
+            data-testid="btn-save-manual-coords"
+          >
+            {saveManual.isPending ? (
+              <><LoaderCircle className="mr-2 h-3.5 w-3.5 animate-spin" />Saving…</>
+            ) : (
+              <><Save className="mr-2 h-3.5 w-3.5" />Save coordinates</>
+            )}
+          </Button>
+        </div>
+        <p className="text-[11px] text-muted-foreground">
+          Leave both blank and save to clear coordinates. All changes are recorded in the audit trail.
+        </p>
+      </div>
     </div>
   );
 }
@@ -382,6 +583,8 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
             )}
           />
         </div>
+
+        {location && <CoordinatesSection location={location} />}
 
         <div className="space-y-3">
           <SectionHeading icon={Phone} label={t("contactInfoSection")} />

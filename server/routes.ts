@@ -39,6 +39,7 @@ import {
   migrateDomainInKnowledgeBase,
 } from "./openai-client.js";
 import { filterLocationTree } from "./location-tree-filter.js";
+import { geocodeAddress, clearGeocodeCacheForAddress } from "./geocoder.js";
 import { z } from "zod";
 import { computeReplyWasEdited } from "./reply-edit-detection.js";
 
@@ -981,6 +982,136 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error changing admin PIN:", error);
       res.status(500).json({ message: "Failed to change PIN" });
+    }
+  });
+
+  // Task #265: admin one-click re-geocode for a location whose Nominatim
+  // result looks wrong on "Find nearest to me". Hits the geocoder
+  // synchronously (bypassing the in-process cache for that address) and
+  // persists the new coords + geocodedAt. Audited.
+  app.post("/api/admin/locations/:id/regeocode", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Admin authentication required" });
+    }
+    const user = req.user as Express.User;
+    if (!user.isAdmin) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid location ID" });
+    try {
+      const existing = await storage.getLocation(id);
+      if (!existing) return res.status(404).json({ message: "Location not found" });
+      const address = (existing.address || "").trim();
+      if (!address) {
+        return res.status(400).json({ message: "Location has no address to geocode" });
+      }
+      // Force a fresh hit even if the address is in cache.
+      clearGeocodeCacheForAddress(address);
+      const coords = await geocodeAddress(address, { force: true });
+      if (!coords) {
+        return res.status(502).json({ message: "Geocoder returned no result for this address" });
+      }
+      const oldCoords = {
+        latitude: existing.latitude ?? null,
+        longitude: existing.longitude ?? null,
+      };
+      const updated = await storage.updateLocation(id, {
+        latitude: coords.latitude,
+        longitude: coords.longitude,
+        geocodedAt: new Date(),
+      });
+      await AuditTrailService.logLocationGeocode(
+        user.id,
+        user.username,
+        id,
+        'REGEOCODE',
+        oldCoords,
+        { latitude: coords.latitude, longitude: coords.longitude },
+        {
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') || undefined,
+          address,
+        },
+      );
+      res.json({
+        success: true,
+        latitude: updated.latitude,
+        longitude: updated.longitude,
+        geocodedAt: updated.geocodedAt,
+      });
+    } catch (error) {
+      console.error("Error re-geocoding location:", error);
+      res.status(500).json({ message: "Failed to re-geocode location" });
+    }
+  });
+
+  // Task #265: admin manual lat/lng override for a location. Used when the
+  // geocoder still can't pin the right spot — admin pastes coords from a map
+  // and they're saved verbatim. Audited. Pass null for both fields to clear.
+  app.patch("/api/admin/locations/:id/coordinates", async (req, res) => {
+    if (!req.isAuthenticated()) {
+      return res.status(401).json({ message: "Admin authentication required" });
+    }
+    const user = req.user as Express.User;
+    if (!user.isAdmin) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) return res.status(400).json({ message: "Invalid location ID" });
+    const coordsSchema = z.object({
+      latitude: z.number().min(-90).max(90).nullable(),
+      longitude: z.number().min(-180).max(180).nullable(),
+      reason: z.string().trim().max(200).optional(),
+    }).refine(
+      (v) => (v.latitude === null) === (v.longitude === null),
+      { message: "latitude and longitude must both be set or both be null" },
+    );
+    const parsed = coordsSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ message: "Invalid coordinates", errors: parsed.error.errors });
+    }
+    try {
+      const existing = await storage.getLocation(id);
+      if (!existing) return res.status(404).json({ message: "Location not found" });
+      const oldCoords = {
+        latitude: existing.latitude ?? null,
+        longitude: existing.longitude ?? null,
+      };
+      const { latitude, longitude, reason } = parsed.data;
+      const updated = await storage.updateLocation(id, {
+        latitude,
+        longitude,
+        // Stamp geocodedAt so downstream "stale coord" checks treat the
+        // manual override as fresh; null it when clearing.
+        geocodedAt: latitude === null ? null : new Date(),
+      });
+      // Drop any cached Nominatim result for this address so a future
+      // re-geocode actually re-queries the upstream service.
+      if (existing.address) clearGeocodeCacheForAddress(existing.address);
+      await AuditTrailService.logLocationGeocode(
+        user.id,
+        user.username,
+        id,
+        'MANUAL_COORDS',
+        oldCoords,
+        { latitude, longitude },
+        {
+          ipAddress: req.ip,
+          userAgent: req.get('user-agent') || undefined,
+          address: existing.address ?? null,
+          reason,
+        },
+      );
+      res.json({
+        success: true,
+        latitude: updated.latitude,
+        longitude: updated.longitude,
+        geocodedAt: updated.geocodedAt,
+      });
+    } catch (error) {
+      console.error("Error updating location coordinates:", error);
+      res.status(500).json({ message: "Failed to update coordinates" });
     }
   });
 

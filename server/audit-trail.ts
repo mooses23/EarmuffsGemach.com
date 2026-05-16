@@ -11,7 +11,7 @@ interface AuditEntry {
   userId: number;
   username: string;
   action: string;
-  entityType: 'payment' | 'transaction' | 'deposit';
+  entityType: 'payment' | 'transaction' | 'deposit' | 'location';
   entityId: number;
   oldValue?: any;
   newValue?: any;
@@ -109,6 +109,38 @@ export class AuditTrailService {
       notes: `Bulk ${operation}: ${results.successful} successful, ${results.failed} failed`
     };
 
+    this.auditEntries.set(entry.id, entry);
+    console.log('Audit logged:', entry);
+  }
+
+  /**
+   * Records admin re-geocode / manual coordinate override on a location.
+   */
+  static async logLocationGeocode(
+    userId: number,
+    username: string,
+    locationId: number,
+    action: 'REGEOCODE' | 'MANUAL_COORDS',
+    oldCoords: { latitude: number | null; longitude: number | null },
+    newCoords: { latitude: number | null; longitude: number | null },
+    metadata?: { ipAddress?: string; userAgent?: string; address?: string | null; reason?: string },
+  ): Promise<void> {
+    const entry: AuditEntry = {
+      id: this.auditCounter++,
+      timestamp: new Date(),
+      userId,
+      username,
+      action: `LOCATION_${action}`,
+      entityType: 'location',
+      entityId: locationId,
+      oldValue: oldCoords,
+      newValue: { ...newCoords, address: metadata?.address },
+      ipAddress: metadata?.ipAddress,
+      userAgent: metadata?.userAgent,
+      notes: action === 'REGEOCODE'
+        ? `Re-geocoded location ${locationId}: (${oldCoords.latitude}, ${oldCoords.longitude}) -> (${newCoords.latitude}, ${newCoords.longitude})`
+        : `Manual coords override on location ${locationId}: (${oldCoords.latitude}, ${oldCoords.longitude}) -> (${newCoords.latitude}, ${newCoords.longitude})${metadata?.reason ? ` [${metadata.reason}]` : ''}`,
+    };
     this.auditEntries.set(entry.id, entry);
     console.log('Audit logged:', entry);
   }
