@@ -56,6 +56,8 @@ export function HierarchicalLocationSearch() {
   const [selectedCommunity, setSelectedCommunity] = useState<CityCategory | null>(null);
   const [showCommunityView, setShowCommunityView] = useState(false);
   const [selectedDistrict, setSelectedDistrict] = useState<string | null>(null);
+  const [showDistrictCommunityView, setShowDistrictCommunityView] = useState(false);
+  const [selectedDistrictCommunity, setSelectedDistrictCommunity] = useState<CityCategory | null>(null);
   const [initialRegionApplied, setInitialRegionApplied] = useState(false);
 
   // Task #263: "Find nearest to me" — browser geolocation + client-side
@@ -275,6 +277,26 @@ export function HierarchicalLocationSearch() {
     return stateCommunitiesWithCounts.length >= HIGH_DENSITY_THRESHOLD;
   }, [stateCommunitiesWithCounts]);
 
+  // Cities within the selected Israel district, with location counts (mirrors stateCommunitiesWithCounts)
+  const districtCommunitiesWithCounts = useMemo(() => {
+    if (!selectedDistrict || !selectedRegion || selectedRegion.slug !== "israel") return [];
+    const communitiesInDistrict = cityCategories.filter(
+      (city: CityCategory) => city.regionId === selectedRegion.id && city.districtCode === selectedDistrict
+    );
+    return communitiesInDistrict
+      .map(community => {
+        const locationCount = locations.filter((loc: Location) => loc.cityCategoryId === community.id).length;
+        return { ...community, locationCount };
+      })
+      .filter(c => c.locationCount > 0)
+      .sort((a, b) => b.locationCount - a.locationCount);
+  }, [selectedDistrict, selectedRegion, cityCategories, locations]);
+
+  const isHighDensityDistrict = useMemo(
+    () => districtCommunitiesWithCounts.length >= HIGH_DENSITY_THRESHOLD,
+    [districtCommunitiesWithCounts]
+  );
+
   // Israel districts derived from city categories with locations
   const israelDistricts = useMemo(() => {
     if (!selectedRegion || selectedRegion.slug !== "israel") return [];
@@ -319,9 +341,12 @@ export function HierarchicalLocationSearch() {
       }
     }
     
-    // Israel: filter by selected district
+    // Israel: filter by selected district, and optionally by community within the district
     if (selectedRegion.slug === "israel" && selectedDistrict) {
       citiesInRegion = citiesInRegion.filter((city: CityCategory) => city.districtCode === selectedDistrict);
+      if (selectedDistrictCommunity) {
+        citiesInRegion = citiesInRegion.filter((city: CityCategory) => city.id === selectedDistrictCommunity.id);
+      }
     }
     
     if (selectedRegion.slug !== "united-states" && selectedRegion.slug !== "israel" && selectedSubRegion) {
@@ -360,7 +385,7 @@ export function HierarchicalLocationSearch() {
       result[entry.slug] = { city: entry.city, locations: entry.locations };
     }
     return result;
-  }, [selectedRegion, cityCategories, filteredLocations, selectedState, selectedSubRegion, selectedCommunity, selectedDistrict, nearestActive, distanceMap]);
+  }, [selectedRegion, cityCategories, filteredLocations, selectedState, selectedSubRegion, selectedCommunity, selectedDistrict, selectedDistrictCommunity, nearestActive, distanceMap]);
 
   if (!selectedRegion) {
     return (
@@ -564,6 +589,8 @@ export function HierarchicalLocationSearch() {
               setSelectedCommunity(null);
               setShowCommunityView(false);
               setSelectedDistrict(null);
+              setShowDistrictCommunityView(false);
+              setSelectedDistrictCommunity(null);
             }}
             className="btn-glass-outline px-4 py-2 rounded-xl flex items-center gap-2 text-sm"
           >
@@ -740,30 +767,78 @@ export function HierarchicalLocationSearch() {
 
       {selectedRegion.slug === "israel" && israelDistricts.length > 0 && (
         <div className="mb-8 px-4 md:px-0">
-          <div className="flex flex-wrap justify-center gap-2">
-            <button
-              onClick={() => setSelectedDistrict(null)}
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                selectedDistrict === null
-                  ? "btn-glass-amber"
-                  : "btn-glass-outline"
-              }`}
-            >
-              {t("allDistricts")}
-            </button>
-            {israelDistricts.map((dc) => (
-              <button
-                key={dc}
-                onClick={() => setSelectedDistrict(dc)}
-                className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
-                  selectedDistrict === dc
-                    ? "btn-glass-amber"
-                    : "btn-glass-outline"
-                }`}
-              >
-                {localizeIsraelDistrict(language as "en" | "he", dc)}
-              </button>
-            ))}
+          <div className="flex flex-wrap justify-center gap-2 transition-all duration-300">
+            {showDistrictCommunityView && selectedDistrict && isHighDensityDistrict ? (
+              <>
+                {/* Back to Districts */}
+                <button
+                  onClick={() => { setShowDistrictCommunityView(false); setSelectedDistrictCommunity(null); }}
+                  className="px-4 py-2 rounded-full text-sm font-medium btn-glass-outline flex items-center gap-2"
+                >
+                  <ArrowLeft className="h-3 w-3" />
+                  {localizeIsraelDistrict(language as "en" | "he", selectedDistrict)}
+                </button>
+
+                {/* All cities in district */}
+                <button
+                  onClick={() => setSelectedDistrictCommunity(null)}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                    selectedDistrictCommunity === null ? "btn-glass-amber" : "btn-glass-outline"
+                  }`}
+                >
+                  {t("all")} {t("cities")}
+                </button>
+
+                {/* City chips within selected district */}
+                {districtCommunitiesWithCounts.map((city) => (
+                  <button
+                    key={city.id}
+                    onClick={() => setSelectedDistrictCommunity(city)}
+                    className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                      selectedDistrictCommunity?.id === city.id ? "btn-glass-amber" : "btn-glass-outline"
+                    }`}
+                  >
+                    {pickLocalized(city, "name", language)}
+                    <span className="ml-1 text-xs opacity-75">({city.locationCount})</span>
+                  </button>
+                ))}
+              </>
+            ) : (
+              <>
+                {/* District chips */}
+                <button
+                  onClick={() => { setSelectedDistrict(null); setShowDistrictCommunityView(false); setSelectedDistrictCommunity(null); }}
+                  className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                    selectedDistrict === null ? "btn-glass-amber" : "btn-glass-outline"
+                  }`}
+                >
+                  {t("allDistricts")}
+                </button>
+                {israelDistricts.map((dc) => {
+                  const citiesInDc = cityCategories.filter(
+                    (c: CityCategory) => c.regionId === selectedRegion.id && c.districtCode === dc
+                  );
+                  const isThisDcHighDensity = citiesInDc.filter(c =>
+                    locations.some((l: Location) => l.cityCategoryId === c.id)
+                  ).length >= HIGH_DENSITY_THRESHOLD;
+                  return (
+                    <button
+                      key={dc}
+                      onClick={() => {
+                        setSelectedDistrict(dc);
+                        setSelectedDistrictCommunity(null);
+                        setShowDistrictCommunityView(isThisDcHighDensity);
+                      }}
+                      className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 ${
+                        selectedDistrict === dc && !showDistrictCommunityView ? "btn-glass-amber" : "btn-glass-outline"
+                      }`}
+                    >
+                      {localizeIsraelDistrict(language as "en" | "he", dc)}
+                    </button>
+                  );
+                })}
+              </>
+            )}
           </div>
         </div>
       )}

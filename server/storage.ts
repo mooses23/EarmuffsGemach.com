@@ -3167,7 +3167,8 @@ export class MemStorage implements IStorage {
       isPopular: cityCategory.isPopular ?? false,
       description: cityCategory.description ?? null,
       descriptionHe: cityCategory.descriptionHe ?? null,
-      stateCode: cityCategory.stateCode ?? null
+      stateCode: cityCategory.stateCode ?? null,
+      districtCode: cityCategory.districtCode ?? null,
     };
     this.cityCategories.set(id, newCategory);
     return newCategory;

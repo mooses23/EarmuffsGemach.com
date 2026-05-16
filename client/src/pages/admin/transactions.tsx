@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useCallback } from "react";
 import type { ElementType } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLocations, getTransactions, markTransactionReturned } from "@/lib/api";
-import { Location, Transaction, CityCategory } from "@shared/schema";
+import { Location, Transaction, CityCategory, Region } from "@shared/schema";
 import { localizeIsraelDistrict, IL_DISTRICT_ORDER } from "@/lib/location-names";
 import { TransactionForm } from "@/components/admin/transaction-form";
 import { useToast } from "@/hooks/use-toast";
@@ -583,10 +583,15 @@ export default function AdminTransactions() {
     setSelectedIds(new Set());
   }, []);
 
+  const [filterRegionId, setFilterRegionId] = useState<number | null>(null);
   const [filterDistrict, setFilterDistrict] = useState<string | null>(null);
 
   const { data: locations = [] } = useQuery<Location[]>({
     queryKey: ["/api/locations"],
+  });
+
+  const { data: regions = [] } = useQuery<Region[]>({
+    queryKey: ["/api/regions"],
   });
 
   const { data: cityCategories = [] } = useQuery<CityCategory[]>({
@@ -785,15 +790,25 @@ export default function AdminTransactions() {
     return m;
   }, [locations, cityCategories]);
 
-  // Districts that appear in the current transaction set (for Israel)
+  // The Israel region record (used to gate district filter)
+  const israelRegion = useMemo(() => regions.find(r => r.slug === "israel") ?? null, [regions]);
+
+  // Regions that actually have transactions (for the region filter chips)
+  const availableRegions = useMemo(() => {
+    const regionIdSet = new Set(locations.map(l => l.regionId));
+    return regions.filter(r => regionIdSet.has(r.id));
+  }, [regions, locations]);
+
+  // Districts present in Israel transactions (only used when Israel filter is active)
   const availableIsraelDistricts = useMemo(() => {
+    if (!israelRegion || filterRegionId !== israelRegion.id) return [];
     const found = new Set<string>();
     for (const tx of transactions) {
       const dc = locationDistrictMap.get(tx.locationId);
       if (dc) found.add(dc);
     }
     return IL_DISTRICT_ORDER.filter(d => found.has(d));
-  }, [transactions, locationDistrictMap]);
+  }, [transactions, locationDistrictMap, israelRegion, filterRegionId]);
 
   const filteredTransactions = useMemo(() => {
     const filtered = transactions.filter((transaction) => {
@@ -808,6 +823,10 @@ export default function AdminTransactions() {
         if (!hasActiveCard(transaction)) return false;
         const days = cardDaysUntilExpiry(transaction, maxCardAgeDays);
         if (days === null || days < 0 || days > CARD_EXPIRY_WARN_DAYS) return false;
+      }
+      if (filterRegionId !== null) {
+        const loc = locations.find(l => l.id === transaction.locationId);
+        if (!loc || loc.regionId !== filterRegionId) return false;
       }
       if (filterDistrict) {
         const dc = locationDistrictMap.get(transaction.locationId);
@@ -846,7 +865,7 @@ export default function AdminTransactions() {
 
     return filtered;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, filterStatus, filterDistrict, searchTerm, sortKey, locations, cityCategories, language, maxCardAgeDays, locationDistrictMap]);
+  }, [transactions, filterStatus, filterRegionId, filterDistrict, searchTerm, sortKey, locations, cityCategories, language, maxCardAgeDays, locationDistrictMap]);
 
   const visibleTransactions = filteredTransactions.slice(0, visibleCount);
   const hasMore = visibleCount < filteredTransactions.length;
@@ -1055,6 +1074,36 @@ export default function AdminTransactions() {
           accent="bg-blue-500/20"
         />
       </div>
+
+      {/* ── Region filter chips (shown when ≥2 regions have transactions) ─── */}
+      {availableRegions.length >= 2 && (
+        <div className="flex flex-wrap gap-2 mb-3">
+          <Button
+            variant={filterRegionId === null ? "default" : "outline"}
+            size="sm"
+            className="whitespace-nowrap rounded-full"
+            onClick={() => { setFilterRegionId(null); setFilterDistrict(null); setVisibleCount(PAGE_SIZE); setSelectedIds(new Set()); }}
+          >
+            {t("allTransactions")}
+          </Button>
+          {availableRegions.map(region => (
+            <Button
+              key={region.id}
+              variant={filterRegionId === region.id ? "default" : "outline"}
+              size="sm"
+              className="whitespace-nowrap rounded-full"
+              onClick={() => {
+                setFilterRegionId(region.id);
+                setFilterDistrict(null);
+                setVisibleCount(PAGE_SIZE);
+                setSelectedIds(new Set());
+              }}
+            >
+              {language === "he" && region.nameHe ? region.nameHe : region.name}
+            </Button>
+          ))}
+        </div>
+      )}
 
       {/* ── Search / filter bar + add button ────────────────────────────── */}
       <div className="flex flex-col sm:flex-row gap-3 mb-4">
