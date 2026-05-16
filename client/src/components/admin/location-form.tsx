@@ -998,6 +998,7 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
           </DialogHeader>
           <CommunityForm
             regions={regions}
+            communities={communities}
             defaultRegionId={watchedRegionId}
             onSuccess={(created) => {
               if (created?.id) {
