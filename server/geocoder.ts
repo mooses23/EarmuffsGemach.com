@@ -101,7 +101,7 @@ export function geocodeAndStore(locationId: number, address: string): void {
         latitude: coords.latitude,
         longitude: coords.longitude,
         geocodedAt: new Date(),
-      } as any);
+      });
     } catch (err) {
       console.warn(`[geocoder] failed to persist coords for location ${locationId}: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -124,7 +124,7 @@ export async function backfillMissingGeocodes(): Promise<void> {
           latitude: coords.latitude,
           longitude: coords.longitude,
           geocodedAt: new Date(),
-        } as any);
+        });
         ok += 1;
       } catch (err) {
         console.warn(`[geocoder] backfill persist failed for ${loc.id}: ${err instanceof Error ? err.message : String(err)}`);

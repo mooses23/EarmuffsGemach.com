@@ -102,7 +102,14 @@ export interface IStorage {
   getLocationsByRegionId(regionId: number): Promise<Location[]>;
   getNextLocationCode(): Promise<string>;
   createLocation(location: InsertLocation): Promise<Location>;
-  updateLocation(id: number, data: Partial<InsertLocation>): Promise<Location>;
+  updateLocation(
+    id: number,
+    data: Partial<InsertLocation> & {
+      latitude?: number | null;
+      longitude?: number | null;
+      geocodedAt?: Date | null;
+    },
+  ): Promise<Location>;
   deleteLocation(id: number): Promise<void>;
 
   // GemachApplication operations
@@ -2566,7 +2573,14 @@ export class MemStorage implements IStorage {
     return item;
   }
 
-  async updateLocation(id: number, data: Partial<InsertLocation>): Promise<Location> {
+  async updateLocation(
+    id: number,
+    data: Partial<InsertLocation> & {
+      latitude?: number | null;
+      longitude?: number | null;
+      geocodedAt?: Date | null;
+    },
+  ): Promise<Location> {
     const location = this.locations.get(id);
     if (!location) {
       throw new Error(`Location with id ${id} not found`);

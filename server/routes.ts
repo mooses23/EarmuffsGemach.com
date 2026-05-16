@@ -930,7 +930,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       const updated = await storage.updateLocation(operatorLocationId, patch);
       // Strip secrets and coords — operators must never see lat/lng.
-      const { operatorPin: _pin, claimToken: _token, latitude: _lat, longitude: _lng, geocodedAt: _gca, ...safe } = updated as any;
+      const { operatorPin: _pin, claimToken: _token, latitude: _lat, longitude: _lng, geocodedAt: _gca, ...safe } = updated;
       res.json({ success: true, location: safe });
     } catch (error) {
       console.error("Error updating operator profile:", error);
@@ -2041,7 +2041,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       
       // Task #263: operators must never see lat/lng — strip alongside the PIN.
-      const { operatorPin, latitude: _lat, longitude: _lng, geocodedAt: _gca, ...locationWithoutPin } = location as any;
+      const { operatorPin, latitude: _lat, longitude: _lng, geocodedAt: _gca, ...locationWithoutPin } = location;
       res.json({ ...locationWithoutPin, pinIsDefault: operatorPin === '1234' });
     } catch (error) {
       console.error("Error fetching operator location:", error);

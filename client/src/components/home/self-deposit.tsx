@@ -17,6 +17,7 @@ import UniversalPaymentProcessor from "@/components/payment/universal-payment-pr
 import { FeeCalculator } from "@/components/payment/fee-calculator";
 import { CreditCard, DollarSign, MapPin, Phone, Mail, User } from "lucide-react";
 import { ContactActionsLight } from "@/components/ui/contact-actions";
+import { DirectionsButton } from "@/components/locations/directions-button";
 import { SmsConsentText, SmsConsentCheckbox } from "@/components/ui/sms-consent";
 import { useSearch } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
@@ -257,9 +258,15 @@ export function SelfDeposit() {
                       </div>
                     )}
                   </div>
-                  {selectedLocationData.phone && (
-                    <ContactActionsLight phone={selectedLocationData.phone} locationName={language === "he" && selectedLocationData.nameHe ? selectedLocationData.nameHe : selectedLocationData.name} />
-                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    {selectedLocationData.phone && (
+                      <ContactActionsLight phone={selectedLocationData.phone} locationName={language === "he" && selectedLocationData.nameHe ? selectedLocationData.nameHe : selectedLocationData.name} />
+                    )}
+                    <DirectionsButton
+                      address={language === "he" && selectedLocationData.addressHe ? selectedLocationData.addressHe : selectedLocationData.address}
+                      variant="light"
+                    />
+                  </div>
                 </div>
               )}
 

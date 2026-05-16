@@ -54,10 +54,35 @@ export function HierarchicalLocationSearch() {
   const [initialRegionApplied, setInitialRegionApplied] = useState(false);
 
   // Task #263: "Find nearest to me" — browser geolocation + client-side
-  // haversine sort. Coords never leave the browser.
-  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(null);
+  // haversine sort. Coords never leave the browser. The user's preferred sort
+  // mode + last-known coords are persisted in localStorage so the choice
+  // survives reloads within the session.
+  const NEAREST_STORAGE_KEY = "gemach:nearest";
+  const [userCoords, setUserCoords] = useState<{ lat: number; lon: number } | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(NEAREST_STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { lat?: number; lon?: number };
+      if (typeof parsed?.lat === "number" && typeof parsed?.lon === "number") {
+        return { lat: parsed.lat, lon: parsed.lon };
+      }
+    } catch {}
+    return null;
+  });
   const [locating, setLocating] = useState(false);
   const [locError, setLocError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      if (userCoords) {
+        window.localStorage.setItem(NEAREST_STORAGE_KEY, JSON.stringify(userCoords));
+      } else {
+        window.localStorage.removeItem(NEAREST_STORAGE_KEY);
+      }
+    } catch {}
+  }, [userCoords]);
 
   const requestNearest = () => {
     if (typeof navigator === "undefined" || !navigator.geolocation) {
