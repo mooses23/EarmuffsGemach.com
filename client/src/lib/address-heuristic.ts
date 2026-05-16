@@ -10,5 +10,5 @@ export function looksLikeStreetAddress(value: string | null | undefined): boolea
     .filter((tok) => /[A-Za-z\u0590-\u05FF]/.test(tok));
   const letterWordCount = letterTokens.filter((tok) => tok.length >= 2).length;
 
-  return hasDigit && letterWordCount >= 2;
+  return hasDigit && letterWordCount >= 1;
 }
