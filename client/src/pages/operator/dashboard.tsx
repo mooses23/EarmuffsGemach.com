@@ -319,6 +319,36 @@ function RestockingInstructions({ location }: { location: Location }) {
   const codePollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const codeCountdownRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const consecutiveCodeErrorsRef = useRef(0);
+  const codePanelRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Persistence: survive page refresh / tab switch ────────────────────
+  const CODE_WATCH_KEY = `babybanz-code-watch-${location.id}`;
+  type PersistedWatch = {
+    requestId: number;
+    status: typeof codePollStatus;
+    foundCodes: Array<{ code: string; receivedAt: string }>;
+    expiresAt: string; // ISO
+  };
+  const persistWatch = (data: Partial<PersistedWatch> | null) => {
+    try {
+      if (!data) { sessionStorage.removeItem(CODE_WATCH_KEY); return; }
+      const existing = sessionStorage.getItem(CODE_WATCH_KEY);
+      const prev: Partial<PersistedWatch> = existing ? JSON.parse(existing) : {};
+      sessionStorage.setItem(CODE_WATCH_KEY, JSON.stringify({ ...prev, ...data }));
+    } catch {}
+  };
+  const loadPersistedWatch = (): PersistedWatch | null => {
+    try {
+      const raw = sessionStorage.getItem(CODE_WATCH_KEY);
+      if (!raw) return null;
+      const data = JSON.parse(raw) as PersistedWatch;
+      if (new Date(data.expiresAt).getTime() <= Date.now()) {
+        sessionStorage.removeItem(CODE_WATCH_KEY);
+        return null;
+      }
+      return data;
+    } catch { return null; }
+  };
 
   const stopCodePolling = () => {
     if (codePollIntervalRef.current) { clearInterval(codePollIntervalRef.current); codePollIntervalRef.current = null; }
@@ -345,31 +375,39 @@ function RestockingInstructions({ location }: { location: Location }) {
         if (!res.ok) {
           if (res.status === 401 || res.status === 403) {
             setCodePollStatus('session_expired');
+            persistWatch({ status: 'session_expired' });
             stopCodePolling(); stopCodeCountdown();
             return;
           }
           consecutiveCodeErrorsRef.current++;
-          if (consecutiveCodeErrorsRef.current >= 5) setCodePollStatus('gmail_down');
+          if (consecutiveCodeErrorsRef.current >= 5) { setCodePollStatus('gmail_down'); persistWatch({ status: 'gmail_down' }); }
           return; // keep polling; Gmail temporarily unavailable
         }
         consecutiveCodeErrorsRef.current = 0;
-        setCodePollStatus(prev => prev === 'gmail_down' ? 'pending' : prev);
+        setCodePollStatus(prev => {
+          const next = prev === 'gmail_down' ? 'pending' : prev;
+          if (next !== prev) persistWatch({ status: next });
+          return next;
+        });
         const data = await res.json();
         if (data.status === 'claimed') {
           setFoundCodes(data.codes ?? []);
           setCodePollStatus('found');
+          persistWatch({ status: 'found', foundCodes: data.codes ?? [] });
           stopCodePolling(); stopCodeCountdown();
         } else if (data.status === 'expired') {
           setCodePollStatus('expired');
+          persistWatch({ status: 'expired' });
           stopCodePolling(); stopCodeCountdown();
         } else if (data.status === 'unavailable') {
           setCodePollStatus('unavailable');
+          persistWatch({ status: 'unavailable' });
           stopCodePolling(); stopCodeCountdown();
         }
         // status === 'pending' → keep polling
       } catch {
         consecutiveCodeErrorsRef.current++;
-        if (consecutiveCodeErrorsRef.current >= 5) setCodePollStatus('gmail_down');
+        if (consecutiveCodeErrorsRef.current >= 5) { setCodePollStatus('gmail_down'); persistWatch({ status: 'gmail_down' }); }
       }
     };
     doPoll(); // immediate first check
@@ -380,10 +418,14 @@ function RestockingInstructions({ location }: { location: Location }) {
     mutationFn: () => apiRequest('POST', '/api/operator/restock-code/request'),
     onSuccess: async (res: Response) => {
       const data = await res.json();
+      const expiresAt = new Date(Date.now() + 600_000).toISOString();
+      persistWatch({ requestId: data.requestId, status: 'pending', foundCodes: [], expiresAt });
       startCodePolling(data.requestId);
       startCodeCountdown();
+      // Scroll the watcher panel into view so it's never missed
+      setTimeout(() => codePanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 50);
     },
-    onError: () => { setCodePollStatus('error'); },
+    onError: () => { setCodePollStatus('error'); persistWatch({ status: 'error' }); },
   });
 
   const handleOpenBanzAndWatch = (url: string) => {
@@ -402,6 +444,14 @@ function RestockingInstructions({ location }: { location: Location }) {
     requestCodeMutation.mutate();
   };
 
+  const handleDismissCodePanel = () => {
+    stopCodePolling();
+    stopCodeCountdown();
+    setCodePollStatus('idle');
+    setFoundCodes([]);
+    persistWatch(null);
+  };
+
   const formatCodeTime = (iso: string) => {
     try { return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit', hour12: true }).format(new Date(iso)); }
     catch { return iso; }
@@ -416,6 +466,22 @@ function RestockingInstructions({ location }: { location: Location }) {
   };
 
   useEffect(() => { return () => { stopCodePolling(); stopCodeCountdown(); }; }, []);
+
+  // Restore an in-flight code watch after page reload / tab switch
+  useEffect(() => {
+    const persisted = loadPersistedWatch();
+    if (!persisted) return;
+    setCodePollStatus(persisted.status);
+    setFoundCodes(persisted.foundCodes ?? []);
+    const secondsLeft = Math.max(0, Math.floor((new Date(persisted.expiresAt).getTime() - Date.now()) / 1000));
+    setCodeTimeLeft(secondsLeft);
+    // Only resume active polling if the previous run was still in-progress and hasn't expired
+    if (secondsLeft > 0 && (persisted.status === 'pending' || persisted.status === 'gmail_down')) {
+      startCodePolling(persisted.requestId);
+      startCodeCountdown();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const credentialsBlock = (
     <ul className="list-disc list-inside ml-6 mt-1 space-y-1.5">
@@ -580,8 +646,8 @@ function RestockingInstructions({ location }: { location: Location }) {
 
           {/* Inline verification code watcher — appears when a code watch is active */}
           {codePollStatus !== 'idle' && (
-            <div className="border-t border-white/10 pt-4">
-              <div className="rounded-xl border border-white/10 bg-white/5 p-4 space-y-3">
+            <div ref={codePanelRef} className="border-t border-white/10 pt-4">
+              <div className="rounded-xl border border-blue-500/30 bg-blue-500/5 p-4 space-y-3 shadow-lg shadow-blue-500/10">
                 <div className="flex items-center gap-2">
                   <KeyRound className="h-4 w-4 text-blue-400 flex-shrink-0" />
                   <p className="text-sm font-semibold text-white">{t('verificationCodeDialogTitle')}</p>
@@ -596,7 +662,7 @@ function RestockingInstructions({ location }: { location: Location }) {
                         {t('verificationCodeExpiry').replace('{time}', formatCodeCountdown(codeTimeLeft))}
                       </p>
                     )}
-                    <Button variant="ghost" size="sm" onClick={() => { stopCodePolling(); stopCodeCountdown(); setCodePollStatus('idle'); }} className="text-slate-500 hover:text-slate-300 text-xs mt-1">
+                    <Button variant="ghost" size="sm" onClick={handleDismissCodePanel} className="text-slate-500 hover:text-slate-300 text-xs mt-1">
                       {t('cancel')}
                     </Button>
                   </div>
@@ -684,7 +750,7 @@ function RestockingInstructions({ location }: { location: Location }) {
                         <span className="text-xs text-amber-400">{t('verificationCodeWatchingInline')}</span>
                       </div>
                     </div>
-                    <Button variant="ghost" size="sm" onClick={() => { stopCodePolling(); stopCodeCountdown(); setCodePollStatus('idle'); }} className="text-slate-500 hover:text-slate-300 text-xs w-full">
+                    <Button variant="ghost" size="sm" onClick={handleDismissCodePanel} className="text-slate-500 hover:text-slate-300 text-xs w-full">
                       {t('cancel')}
                     </Button>
                   </div>
@@ -714,6 +780,8 @@ function RestockingInstructions({ location }: { location: Location }) {
               </div>
             </div>
           )}
+
+          {discountCodesBlock}
 
           {/* Task #250: Shipment tracking section */}
           <div className="border-t border-white/10 pt-4">
@@ -837,8 +905,6 @@ function RestockingInstructions({ location }: { location: Location }) {
               </div>
             )}
           </div>
-
-          {discountCodesBlock}
 
           <div className="border-t border-white/10 pt-4">
             <p className="text-xs text-slate-400 italic">
