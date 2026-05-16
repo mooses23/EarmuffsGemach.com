@@ -14,6 +14,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 import { LocationForm } from "@/components/admin/location-form";
+import { BilingualValue } from "@/components/admin/bilingual-value";
 import { RegionForm } from "@/components/admin/region-form";
 import { TaxonomyPanel } from "@/components/admin/taxonomy-panel";
 import { useToast } from "@/hooks/use-toast";
@@ -2493,6 +2494,36 @@ export default function AdminLocations() {
                         <div className="pr-20">
                           <h4 className="text-lg font-bold text-foreground mb-1 leading-tight">
                             {localized(location, "name")}
+                            {/* Task #289: when the canonical _He name is missing
+                                we surface an inline auto-translated rendition
+                                admins can correct (the correction is persisted
+                                back to locations.nameHe). */}
+                            {language === "he" && !location.nameHe && (
+                              <span className="ms-2 text-xs font-normal">
+                                <BilingualValue
+                                  value={location.name}
+                                  valueLang="en"
+                                  targetLang="he"
+                                  allowEdit
+                                  recordType="location"
+                                  recordId={location.id}
+                                  fieldKey="name"
+                                />
+                              </span>
+                            )}
+                            {language === "en" && !location.name && location.nameHe && (
+                              <span className="ms-2 text-xs font-normal">
+                                <BilingualValue
+                                  value={location.nameHe}
+                                  valueLang="he"
+                                  targetLang="en"
+                                  allowEdit
+                                  recordType="location"
+                                  recordId={location.id}
+                                  fieldKey="name"
+                                />
+                              </span>
+                            )}
                           </h4>
                           <div className="flex flex-wrap gap-1.5 mb-3">
                             {location.locationCode && (

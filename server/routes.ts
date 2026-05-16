@@ -1859,9 +1859,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         isAdminCorrected: true,
       });
       // If the caller pointed us at a specific record, mirror the correction
-      // into that record's "other-language" column so it becomes canonical.
-      if (body.recordType && body.recordId && body.fieldKey && body.to === "he") {
-        const col = body.fieldKey === "name" ? "nameHe" : "descriptionHe";
+      // into that record's canonical column for the target language. EN
+      // values overwrite the base column (e.g. `name`); HE values overwrite
+      // the `_He` column. Both directions are supported.
+      if (body.recordType && body.recordId && body.fieldKey) {
+        const baseCol = body.fieldKey; // "name" | "description"
+        const col = body.to === "he" ? `${baseCol}He` : baseCol;
         try {
           if (body.recordType === "location") {
             await storage.updateLocation(body.recordId, { [col]: body.translatedText } as any);

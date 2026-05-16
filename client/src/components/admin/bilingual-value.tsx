@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from "react";
-import { Languages, Pencil, Check, X, Loader2, Star } from "lucide-react";
+import { Languages, Pencil, Check, X, Loader2, Star, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { apiRequest } from "@/lib/queryClient";
@@ -44,6 +44,7 @@ export function BilingualValue({
   const [isEditing, setIsEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [saving, setSaving] = useState(false);
+  const [retryTick, setRetryTick] = useState(0);
   const fetchedFor = useRef<string | null>(null);
 
   useEffect(() => {
@@ -53,7 +54,7 @@ export function BilingualValue({
       setError(null);
       return;
     }
-    const cacheKey = `${source}::${targetLang}::${text}`;
+    const cacheKey = `${source}::${targetLang}::${text}::${retryTick}`;
     if (fetchedFor.current === cacheKey) return;
     fetchedFor.current = cacheKey;
     setTranslated(null);
@@ -82,7 +83,7 @@ export function BilingualValue({
       }
     })();
     return () => { cancelled = true; };
-  }, [text, source, targetLang, needsTranslation]);
+  }, [text, source, targetLang, needsTranslation, retryTick]);
 
   if (!text) return null;
 
@@ -165,8 +166,25 @@ export function BilingualValue({
           )}
         </>
       ) : (
-        <span className="text-slate-400 text-xs italic" title={error || ""}>
-          {text}
+        <span className="inline-flex items-center gap-1">
+          <span className="text-slate-400 text-xs italic" title={error || "translation_unavailable"}>
+            {text}
+          </span>
+          <Button
+            size="icon"
+            variant="ghost"
+            className="h-5 w-5 opacity-60 hover:opacity-100"
+            onClick={() => setRetryTick((n) => n + 1)}
+            title="Retry translation"
+            aria-label="Retry translation"
+          >
+            <RefreshCw className="h-3 w-3" />
+          </Button>
+          {allowEdit && (
+            <Button size="icon" variant="ghost" className="h-5 w-5 opacity-60 hover:opacity-100" onClick={startEdit} title="Provide translation">
+              <Pencil className="h-3 w-3" />
+            </Button>
+          )}
         </span>
       )}
     </span>

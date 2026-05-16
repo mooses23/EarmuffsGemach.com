@@ -816,16 +816,16 @@ export default function AdminApplications() {
                     <div className="mt-2 text-xs text-muted-foreground space-y-1">
                       <div>
                         <span className="opacity-70 me-1">{t("city")} ({opp}):</span>
-                        <BilingualValue value={viewApplication.city} valueLang={sub} targetLang={opp} />
+                        <BilingualValue value={viewApplication.city} valueLang={sub} targetLang={opp} allowEdit />
                       </div>
                       <div>
                         <span className="opacity-70 me-1">{t("country")} ({opp}):</span>
-                        <BilingualValue value={viewApplication.country} valueLang={sub} targetLang={opp} />
+                        <BilingualValue value={viewApplication.country} valueLang={sub} targetLang={opp} allowEdit />
                       </div>
                       {viewApplication.community && (
                         <div>
                           <span className="opacity-70 me-1">{t("community")} ({opp}):</span>
-                          <BilingualValue value={viewApplication.community} valueLang={sub} targetLang={opp} />
+                          <BilingualValue value={viewApplication.community} valueLang={sub} targetLang={opp} allowEdit />
                         </div>
                       )}
                     </div>
