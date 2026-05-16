@@ -328,7 +328,7 @@ export function HierarchicalLocationSearch() {
               placeholder={t("searchPlaceholder")}
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-12 pr-14 py-4 md:py-5 text-base md:text-lg rounded-full input-glass placeholder:text-slate-500"
+              className="w-full pl-12 pr-14 py-4 md:py-5 text-base md:text-lg rounded-full input-glass placeholder:text-slate-300/80"
             />
             {/* Task #268: small pin icon inside the search bar replaces the
                 large "Find nearest to me" pill. Click toggles geolocation sort. */}
@@ -349,7 +349,7 @@ export function HierarchicalLocationSearch() {
               {locating ? (
                 <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
-                <Navigation2 className="h-4 w-4" />
+                <MapPin className="h-4 w-4" />
               )}
             </button>
           </div>
@@ -542,7 +542,7 @@ export function HierarchicalLocationSearch() {
             placeholder={`${t("searchLocationsIn")} ${pickLocalized(selectedRegion, "name", language)}...`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-12 pr-14 py-4 text-base rounded-full input-glass placeholder:text-slate-500"
+            className="w-full pl-12 pr-14 py-4 text-base rounded-full input-glass placeholder:text-slate-300/80"
           />
           {/* Task #268: same pin toggle as the continent landing bar. */}
           <button
@@ -562,7 +562,7 @@ export function HierarchicalLocationSearch() {
             {locating ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Navigation2 className="h-4 w-4" />
+              <MapPin className="h-4 w-4" />
             )}
           </button>
         </div>
