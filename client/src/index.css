@@ -414,41 +414,39 @@ html {
 .driverjs-popover-mobile {
   max-width: min(340px, 90vw) !important;
   width: min(340px, 90vw) !important;
-  padding-bottom: 52px !important;
+  padding-bottom: 36px !important;
 }
 
-/* Reposition the close ("Skip for now") button as a clear, comfortable
-   secondary action at the bottom of the popover. The default driver.js
-   close button is a 32×28 corner "×" — overriding its text content to
-   "Skip for now" makes it overflow and look cramped, especially on
-   mobile. We give it real button proportions and put it in its own row
-   below the Next/Back navigation. */
+/* "Skip for now" should feel like a subtle fallback — not a primary action.
+   Render it as a small muted text link below the navigation buttons so the
+   user's eye naturally goes to Back / Next first. */
 .driverjs-popover-mobile .driver-popover-close-btn {
   position: absolute !important;
   top: auto !important;
-  right: 12px !important;
-  bottom: 10px !important;
-  left: 12px !important;
-  width: auto !important;
+  right: 0 !important;
+  bottom: 8px !important;
+  left: 0 !important;
+  width: 100% !important;
   height: auto !important;
   display: block !important;
   text-align: center !important;
-  padding: 8px 12px !important;
-  font-size: 13px !important;
-  font-weight: 500 !important;
-  line-height: 1.2 !important;
-  color: #475569 !important;
+  padding: 2px 12px !important;
+  font-size: 11px !important;
+  font-weight: 400 !important;
+  line-height: 1.4 !important;
+  color: #94a3b8 !important;
   background: transparent !important;
-  border: 1px solid rgba(148, 163, 184, 0.4) !important;
-  border-radius: 6px !important;
+  border: none !important;
+  border-radius: 0 !important;
   cursor: pointer !important;
-  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease !important;
+  text-decoration: underline !important;
+  text-underline-offset: 2px !important;
+  transition: color 0.15s ease !important;
 }
 
 .driverjs-popover-mobile .driver-popover-close-btn:hover,
 .driverjs-popover-mobile .driver-popover-close-btn:focus-visible {
-  color: #1e293b !important;
-  background: rgba(148, 163, 184, 0.12) !important;
-  border-color: rgba(100, 116, 139, 0.6) !important;
+  color: #64748b !important;
+  background: transparent !important;
   outline: none !important;
 }

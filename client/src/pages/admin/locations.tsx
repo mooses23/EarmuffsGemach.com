@@ -2143,42 +2143,72 @@ export default function AdminLocations() {
                       </div>
                     );
                   })()}
-                  {selectedRegionGroup.communityGroups.map(({ cityCategory, locations: ccLocs }) => {
-                    const ccId = cityCategory?.id ?? null;
-                    const ccName = cityCategory
-                      ? (language === "he" && cityCategory.nameHe ? cityCategory.nameHe : cityCategory.name)
-                      : (t('uncategorized') || "Other");
-                    if (ccId === null) return null;
-                    const isSel = selectedCityCategoryId === ccId;
-                    const ccIds = ccLocs.map(l => l.id);
-                    const allCcSelected = allIdsSelected(ccIds);
-                    return (
-                      <div
-                        key={ccId}
-                        className={`inline-flex items-center gap-2 pl-2 pr-3 py-1 rounded-full text-sm font-medium transition-all ${
-                          isSel
-                            ? "bg-secondary text-secondary-foreground shadow-[0_0_15px_rgba(249,115,22,0.3)]"
-                            : "glass-panel hover:bg-white/10 text-foreground/80"
-                        }`}
-                      >
-                        <Checkbox
-                          checked={allCcSelected}
-                          onCheckedChange={(v) => toggleManyIds(ccIds, !!v)}
-                          aria-label={`Select all in ${ccName}`}
-                          className="w-4 h-4"
-                          data-testid={`checkbox-community-${ccId}`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setSelectedCityCategoryId(ccId)}
-                          data-testid={`pill-community-${ccId}`}
+                  {(() => {
+                    // Group community pills by stateCode for clearer hierarchy (e.g. NY · Brooklyn)
+                    const withState = selectedRegionGroup.communityGroups.filter(g => g.cityCategory?.stateCode);
+                    const withoutState = selectedRegionGroup.communityGroups.filter(g => !g.cityCategory?.stateCode);
+                    const stateOrder: string[] = [];
+                    const byState = new Map<string, typeof selectedRegionGroup.communityGroups>();
+                    for (const g of withState) {
+                      const sc = g.cityCategory!.stateCode!;
+                      if (!byState.has(sc)) { byState.set(sc, []); stateOrder.push(sc); }
+                      byState.get(sc)!.push(g);
+                    }
+                    const renderPill = ({ cityCategory, locations: ccLocs }: { cityCategory: (typeof selectedRegionGroup.communityGroups)[0]["cityCategory"]; locations: (typeof selectedRegionGroup.communityGroups)[0]["locations"] }) => {
+                      const ccId = cityCategory?.id ?? null;
+                      if (ccId === null) return null;
+                      const ccName = cityCategory
+                        ? (language === "he" && cityCategory.nameHe ? cityCategory.nameHe : cityCategory.name)
+                        : (t('uncategorized') || "Other");
+                      const isSel = selectedCityCategoryId === ccId;
+                      const ccIds = ccLocs.map(l => l.id);
+                      const allCcSelected = allIdsSelected(ccIds);
+                      return (
+                        <div
+                          key={ccId}
+                          className={`inline-flex items-center gap-2 pl-2 pr-3 py-1 rounded-full text-sm font-medium transition-all ${
+                            isSel
+                              ? "bg-secondary text-secondary-foreground shadow-[0_0_15px_rgba(249,115,22,0.3)]"
+                              : "glass-panel hover:bg-white/10 text-foreground/80"
+                          }`}
                         >
-                          {ccName}
-                          <span className="ml-1.5 text-xs opacity-70">({ccLocs.length})</span>
-                        </button>
-                      </div>
+                          <Checkbox
+                            checked={allCcSelected}
+                            onCheckedChange={(v) => toggleManyIds(ccIds, !!v)}
+                            aria-label={`Select all in ${ccName}`}
+                            className="w-4 h-4"
+                            data-testid={`checkbox-community-${ccId}`}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setSelectedCityCategoryId(ccId)}
+                            data-testid={`pill-community-${ccId}`}
+                          >
+                            {ccName}
+                            <span className="ml-1.5 text-xs opacity-70">({ccLocs.length})</span>
+                          </button>
+                        </div>
+                      );
+                    };
+                    return (
+                      <>
+                        {stateOrder.map(sc => (
+                          <div key={sc} className="flex flex-wrap gap-2 items-center w-full">
+                            <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 w-full mt-1 mb-0.5 px-1">{sc}</span>
+                            {byState.get(sc)!.map(g => renderPill(g))}
+                          </div>
+                        ))}
+                        {withoutState.length > 0 && (
+                          <div className="flex flex-wrap gap-2 items-center w-full">
+                            {stateOrder.length > 0 && (
+                              <span className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 w-full mt-1 mb-0.5 px-1">Other</span>
+                            )}
+                            {withoutState.map(g => renderPill(g))}
+                          </div>
+                        )}
+                      </>
                     );
-                  })}
+                  })()}
                 </div>
               )}
 
