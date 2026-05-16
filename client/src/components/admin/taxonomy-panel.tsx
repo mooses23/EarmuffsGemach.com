@@ -89,12 +89,25 @@ export function TaxonomyPanel({
           if (!byDistrict.has(key)) byDistrict.set(key, []);
           byDistrict.get(key)!.push(c);
         }
+        const knownCodes = new Set(IL_DISTRICT_ORDER);
+        const unknownCodes = Array.from(byDistrict.keys()).filter(
+          k => k !== "__none__" && !knownCodes.has(k)
+        );
         const groups = [
           ...IL_DISTRICT_ORDER.filter(d => byDistrict.has(d)).map(d => ({
             code: d,
             label: localizeIsraelDistrict("en", d),
             isFloating: false,
             items: (byDistrict.get(d) ?? []).sort(
+              (a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0) || a.name.localeCompare(b.name)
+            ),
+          })),
+          // Legacy / non-canonical district codes
+          ...unknownCodes.map(code => ({
+            code,
+            label: `Unknown district (${code})`,
+            isFloating: true,
+            items: (byDistrict.get(code) ?? []).sort(
               (a, b) => (a.displayOrder ?? 0) - (b.displayOrder ?? 0) || a.name.localeCompare(b.name)
             ),
           })),
