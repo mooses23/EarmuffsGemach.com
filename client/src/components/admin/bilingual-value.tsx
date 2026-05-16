@@ -31,6 +31,13 @@ export interface BilingualValueProps {
   /** Whether admin can inline-edit the auto-translated side. */
   allowEdit?: boolean;
 
+  /**
+   * "review" applies the stronger "auto · review" nudge (used for person
+   * names and street addresses, which machine-translation handles poorly).
+   * Defaults to "default".
+   */
+  variant?: "default" | "review";
+
   className?: string;
 }
 
@@ -70,6 +77,7 @@ export function BilingualValue(props: BilingualValueProps) {
     showBoth = true,
     targetLang,
     allowEdit = false,
+    variant = "default",
     className,
   } = props;
 
@@ -209,9 +217,17 @@ export function BilingualValue(props: BilingualValueProps) {
         <span className="inline-flex items-center gap-1" dir={effectiveTarget === "he" ? "rtl" : "ltr"}>
           <span>{translated}</span>
           {isAdminCorrected ? (
-            <Star className="h-3 w-3 text-amber-400" aria-label="admin-corrected" />
+            <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-amber-500/15 text-amber-500" title="admin-corrected">
+              <Star className="h-2.5 w-2.5" /> saved
+            </span>
+          ) : variant === "review" ? (
+            <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-orange-500/15 text-orange-500 font-medium" title="auto-translated — admin should review name/address">
+              <Languages className="h-2.5 w-2.5" /> auto · review
+            </span>
           ) : (
-            <Languages className="h-3 w-3 text-slate-400" aria-label="auto-translated" />
+            <span className="inline-flex items-center gap-0.5 px-1 rounded text-[10px] bg-slate-500/15 text-slate-400" title="auto-translated">
+              <Languages className="h-2.5 w-2.5" /> auto
+            </span>
           )}
           {allowEdit && (
             <Button size="icon" variant="ghost" className="h-5 w-5 opacity-60 hover:opacity-100" onClick={startEdit}>

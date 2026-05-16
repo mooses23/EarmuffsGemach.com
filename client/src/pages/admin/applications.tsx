@@ -782,16 +782,30 @@ export default function AdminApplications() {
           </DialogHeader>
           {viewApplication && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground">{t("firstName")}</h3>
-                  <p>{viewApplication.firstName}</p>
-                </div>
-                <div>
-                  <h3 className="text-sm font-medium text-muted-foreground">{t("lastName")}</h3>
-                  <p>{viewApplication.lastName}</p>
-                </div>
-              </div>
+              {(() => {
+                const sub = (viewApplication.submittedLang as "en" | "he" | null) || "en";
+                const opp: "en" | "he" = sub === "he" ? "en" : "he";
+                return (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <h3 className="text-sm font-medium text-muted-foreground">{t("firstName")}</h3>
+                      <p>{viewApplication.firstName}</p>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        <span className="opacity-70 me-1">({opp}):</span>
+                        <BilingualValue value={viewApplication.firstName} valueLang={sub} targetLang={opp} allowEdit variant="review" showBoth={false} />
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-medium text-muted-foreground">{t("lastName")}</h3>
+                      <p>{viewApplication.lastName}</p>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        <span className="opacity-70 me-1">({opp}):</span>
+                        <BilingualValue value={viewApplication.lastName} valueLang={sub} targetLang={opp} allowEdit variant="review" showBoth={false} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">{t("email")}</h3>
                 <p>{viewApplication.email}</p>
@@ -808,12 +822,18 @@ export default function AdminApplications() {
                 </p>
                 <p>{viewApplication.country}</p>
                 {/* Task #289: auto-translate to the opposite of the submitted
-                    language so admins always see both renditions. */}
+                    language so admins always see both renditions. Street
+                    address + person names use the stronger "auto · review"
+                    nudge per spec. */}
                 {(() => {
                   const sub = (viewApplication.submittedLang as "en" | "he" | null) || "en";
                   const opp: "en" | "he" = sub === "he" ? "en" : "he";
                   return (
                     <div className="mt-2 text-xs text-muted-foreground space-y-1">
+                      <div>
+                        <span className="opacity-70 me-1">{t("address")} ({opp}):</span>
+                        <BilingualValue value={viewApplication.streetAddress} valueLang={sub} targetLang={opp} allowEdit variant="review" />
+                      </div>
                       <div>
                         <span className="opacity-70 me-1">{t("city")} ({opp}):</span>
                         <BilingualValue value={viewApplication.city} valueLang={sub} targetLang={opp} allowEdit />
@@ -831,11 +851,6 @@ export default function AdminApplications() {
                     </div>
                   );
                 })()}
-                {viewApplication.community && (
-                  <p className="text-muted-foreground text-sm mt-1">
-                    {t("community")}: {viewApplication.community}
-                  </p>
-                )}
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">{t("message")}</h3>
@@ -844,6 +859,17 @@ export default function AdminApplications() {
                   readOnly
                   className="h-24 mt-1"
                 />
+                {/* Task #289: long-form message display-only translation. */}
+                {viewApplication.message && (() => {
+                  const sub = (viewApplication.submittedLang as "en" | "he" | null) || "en";
+                  const opp: "en" | "he" = sub === "he" ? "en" : "he";
+                  return (
+                    <div className="mt-2 text-xs text-muted-foreground">
+                      <div className="opacity-70 mb-1">{t("message")} ({opp}):</div>
+                      <BilingualValue value={viewApplication.message} valueLang={sub} targetLang={opp} showBoth={false} />
+                    </div>
+                  );
+                })()}
               </div>
               <div>
                 <h3 className="text-sm font-medium text-muted-foreground">{t("status")}</h3>
