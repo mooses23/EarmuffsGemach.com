@@ -3638,10 +3638,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
 
       const patch: { locationId: number | null; displayName?: string } = { locationId: parsed.data.locationId };
-      if (parsed.data.locationId !== null && !conversation.displayName) {
+      if (parsed.data.locationId !== null) {
+        // Always validate the location exists so we never create dangling
+        // associations, even when displayName is already filled in.
         const loc = await storage.getLocation(parsed.data.locationId);
         if (!loc) return res.status(400).json({ message: 'Location not found' });
-        if (loc.name?.trim()) patch.displayName = loc.name.trim();
+        if (!conversation.displayName && loc.name?.trim()) {
+          patch.displayName = loc.name.trim();
+        }
       }
       const updated = await storage.updateSmsConversation(id, patch);
       res.json(updated);
@@ -4519,10 +4523,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
             isOptedOut: isOptOut,
           });
           // Task #309: auto-resolve sender identity (borrower or operator)
-          // on first contact, and back-fill locationId if the To-number match
-          // above didn't yield one. We only write fields that are still null
-          // so a manual admin assignment is never overwritten.
-          if (conversation && (!conversation.displayName || !conversation.locationId)) {
+          // on first contact only. We treat a conversation as "never touched"
+          // when BOTH displayName and locationId are null — that way an admin
+          // clearing either field (e.g. unassigning a gemach) is not undone
+          // by a subsequent inbound message.
+          if (conversation && !conversation.displayName && !conversation.locationId) {
             try {
               const { resolvePhoneOwner } = await import('./sms-resolver.js');
               const owner = await resolvePhoneOwner(normalizedFrom, storage);
