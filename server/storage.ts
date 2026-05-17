@@ -3683,11 +3683,17 @@ export class MemStorage implements IStorage {
       Array.from(this.locations.values()).forEach((loc) => {
         if (loc.name?.toLowerCase().includes(q)) matchingLocIds.add(loc.id);
       });
-      rows = rows.filter(r =>
-        r.phone.toLowerCase().includes(q) ||
-        (r.displayName || '').toLowerCase().includes(q) ||
-        (r.locationId !== null && matchingLocIds.has(r.locationId))
-      );
+      // Mirror DatabaseStorage: strip non-digits and substring-match against
+      // the digits-only form of the stored phone so "(555) 123-4567" finds
+      // a conversation stored as "+15551234567".
+      const termDigits = opts.q.trim().replace(/\D/g, '');
+      rows = rows.filter(r => {
+        if (r.phone.toLowerCase().includes(q)) return true;
+        if ((r.displayName || '').toLowerCase().includes(q)) return true;
+        if (r.locationId !== null && matchingLocIds.has(r.locationId)) return true;
+        if (termDigits.length >= 3 && r.phone.replace(/\D/g, '').includes(termDigits)) return true;
+        return false;
+      });
     }
     rows.sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
     const total = rows.length;

@@ -1411,6 +1411,17 @@ export class DatabaseStorage implements IStorage {
         ilike(smsConversations.phone, pattern),
         ilike(smsConversations.displayName, pattern),
       ];
+      // Phone numbers are stored normalized as E.164 ("+15551234567"), but
+      // admins routinely paste numbers with dashes, parens, spaces, or a
+      // country-code prefix. Strip the search term to digits and do a
+      // substring match against the digits-only form of the stored phone so
+      // "(555) 123-4567", "555-1234", or "+1 555 123 4567" all find the
+      // same conversation. We only add this clause when the term has at
+      // least 3 digits to avoid noisy single-digit matches.
+      const termDigits = term.replace(/\D/g, "");
+      if (termDigits.length >= 3) {
+        orClauses.push(sql`regexp_replace(${smsConversations.phone}, '\\D', '', 'g') ILIKE ${'%' + termDigits + '%'}`);
+      }
       if (locIds.length) {
         orClauses.push(inArray(smsConversations.locationId, locIds));
       }
