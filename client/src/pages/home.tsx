@@ -46,7 +46,7 @@ export default function Home() {
             collapsed the photo fills the space, and when expanded the
             wrapper grows so there is no awkward gap before the content
             below. */}
-        <div className="relative min-h-[680px] md:min-h-[1170px]">
+        <div className="relative min-h-[560px] md:min-h-[920px]">
         <div
           className="absolute inset-0 overflow-hidden pointer-events-none"
           aria-hidden="true"
@@ -70,7 +70,8 @@ export default function Home() {
                 width={1286}
                 height={1787}
                 alt=""
-                className={`w-full h-full ${showStory ? 'object-cover object-top' : 'object-contain object-top md:object-center'} transition-all duration-500`}
+                className="w-full h-full object-cover transition-all duration-500"
+                style={{ objectPosition: '50% 18%' }}
                 decoding="async"
                 fetchpriority="high"
               />
