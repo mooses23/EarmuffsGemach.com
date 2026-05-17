@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { useConversations, useConversationMessages, type SmsChannel } from "./sms-hooks";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 import { Button } from "@/components/ui/button";
@@ -21,21 +22,11 @@ import {
 import { SiWhatsapp } from "react-icons/si";
 import type { SmsConversation, SmsMessage } from "@shared/schema";
 
-type Channel = "all" | "sms" | "whatsapp";
+type Channel = SmsChannel;
 
 interface Props {
   smsUnread: number;
   whatsappUnread: number;
-}
-
-interface ListResponse {
-  rows: SmsConversation[];
-  total: number;
-}
-
-interface MessagesResponse {
-  conversation: SmsConversation;
-  messages: SmsMessage[];
 }
 
 // Self-contained SMS / WhatsApp inbox view. Lives inside the unified admin
@@ -60,38 +51,12 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
   useEffect(() => { setSelectedId(null); setReply(""); }, [channel, showArchived]);
   useEffect(() => { setReply(""); }, [selectedId]);
 
-  const listQuery = useQuery<ListResponse>({
-    queryKey: ["/api/admin/sms/conversations", channel, showArchived ? "archived" : "inbox"],
-    queryFn: async () => {
-      // Omit the channel param entirely when the user picked "All" — the
-      // server treats an unrecognized/missing channel as "no filter" and
-      // returns SMS + WhatsApp combined.
-      const params = new URLSearchParams({
-        folder: showArchived ? "archived" : "inbox",
-        limit: "100",
-      });
-      if (channel !== "all") params.set("channel", channel);
-      const res = await fetch(`/api/admin/sms/conversations?${params.toString()}`, { credentials: "include" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed to load conversations");
-      return res.json();
-    },
-    // 30s polling per task spec; complements the 15s counts poll so the
-    // badge clears quickly while list traffic stays modest.
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-  });
-
-  const threadQuery = useQuery<MessagesResponse>({
-    queryKey: ["/api/admin/sms/conversations", selectedId],
-    enabled: selectedId !== null,
-    queryFn: async () => {
-      const res = await fetch(`/api/admin/sms/conversations/${selectedId}`, { credentials: "include" });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed to load conversation");
-      return res.json();
-    },
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-  });
+  // Conversation list + selected thread are fetched via shared hooks so the
+  // 30 s polling cadence, query-key shape, and error handling stay in one
+  // place (and so other surfaces, e.g. a future contact-page sidebar, can
+  // reuse them without duplicating fetch logic).
+  const listQuery = useConversations(channel, showArchived ? "archived" : "inbox");
+  const threadQuery = useConversationMessages(selectedId);
 
   // Open + mark-as-read in one server round-trip (the PATCH endpoint accepts
   // markRead: true) so the unread badge in the source filter clears as soon
