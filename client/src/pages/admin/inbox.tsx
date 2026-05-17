@@ -25,6 +25,7 @@ import { useInboxFilters } from "./inbox/useInboxFilters";
 import { useInboxKeyboardShortcuts } from "./inbox/useKeyboardShortcuts";
 import { ShortcutsHelp } from "./inbox/ShortcutsHelp";
 import { SuggestedDraftCard } from "./inbox/SuggestedDraftCard";
+import { SmsInboxView } from "./inbox/SmsInboxView";
 import { Brain } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -189,11 +190,24 @@ export default function AdminInbox() {
   // work (unread items) rather than total backlog. Polled every 15s while
   // the tab is visible so a new email/form submission incrementing a chip
   // surfaces without a manual refresh.
-  const inboxCountsQuery = useQuery<{ inbox: number; sent: number; spam: number; trash: number }>({
+  const inboxCountsQuery = useQuery<{ inbox: number; sent: number; spam: number; trash: number; smsUnread?: number; whatsappUnread?: number }>({
     queryKey: ["/api/admin/inbox/counts"],
     refetchInterval: 15_000,
     refetchIntervalInBackground: false,
   });
+  const smsUnread = inboxCountsQuery.data?.smsUnread ?? 0;
+  const whatsappUnread = inboxCountsQuery.data?.whatsappUnread ?? 0;
+  // True when the user has filtered the inbox down to the SMS or WhatsApp
+  // channel. In that mode we hand the entire list+detail area over to
+  // SmsInboxView and bypass the email/form rendering pipeline below.
+  const isSmsView = filters.sourceFilter === "sms" || filters.sourceFilter === "whatsapp";
+
+  // When the user pivots into SMS/WhatsApp, drop any email/form selection so
+  // the early `if (selected) return …` detail view doesn't intercept the
+  // render below and hide the SMS pane.
+  useEffect(() => {
+    if (isSmsView && selected) setSelected(null);
+  }, [isSmsView, selected]);
 
   // Contacts query — `debouncedSearch` is part of the cache key so each
   // search term gets its own server round-trip (server-side ILIKE-style
@@ -2203,6 +2217,12 @@ export default function AdminInbox() {
                       <SelectItem value="all" data-testid="filter-source-all">{t("msgAll")}</SelectItem>
                       <SelectItem value="email" data-testid="filter-source-email">{t("inboxSourceEmail")}</SelectItem>
                       <SelectItem value="form" data-testid="filter-source-form">{t("inboxSourceForm")}</SelectItem>
+                      <SelectItem value="sms" data-testid="filter-source-sms">
+                        {t("inboxSourceSms")}{smsUnread > 0 ? ` (${smsUnread})` : ""}
+                      </SelectItem>
+                      <SelectItem value="whatsapp" data-testid="filter-source-whatsapp">
+                        {t("inboxSourceWhatsapp")}{whatsappUnread > 0 ? ` (${whatsappUnread})` : ""}
+                      </SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -2270,6 +2290,15 @@ export default function AdminInbox() {
           )}
         </div>
 
+        {isSmsView && (
+          <SmsInboxView
+            channel={filters.sourceFilter as "sms" | "whatsapp"}
+            setChannel={setSourceFilter}
+            smsUnread={smsUnread}
+            whatsappUnread={whatsappUnread}
+          />
+        )}
+        {!isSmsView && (<>
         {showGmailIssue && (
           <Card className="mb-6 border-amber-300 bg-amber-50 dark:bg-amber-950/30" data-testid="card-gmail-not-configured">
             <CardContent className="pt-6">
@@ -2759,6 +2788,7 @@ export default function AdminInbox() {
             </div>
           </>
         )}
+        </>)}
     </>
   );
 }

@@ -1288,6 +1288,36 @@ const enRest = {
     verificationCodeMultipleFound: "Multiple codes found — use the most recent one",
     verificationCodeGmailDown: "Inbox temporarily unavailable — still retrying…",
 
+    // SMS / WhatsApp inbox (Task #308)
+    inboxSourceSms: "SMS",
+    inboxSourceWhatsapp: "WhatsApp",
+    smsChannelChips: "Channel",
+    smsChannelSms: "SMS",
+    smsChannelWhatsapp: "WhatsApp",
+    smsFolderInbox: "Inbox",
+    smsFolderArchived: "Archived",
+    smsBackToList: "Back to conversations",
+    smsOptedOutBadge: "Opted out",
+    smsArchiveAction: "Archive",
+    smsUnarchiveAction: "Unarchive",
+    smsArchivedToast: "Conversation archived",
+    smsUnarchivedToast: "Conversation restored",
+    smsThreadEmpty: "No messages in this conversation yet.",
+    smsOptedOutTitle: "This recipient has opted out",
+    smsOptedOutDesc: "Replies are disabled. They sent STOP and must text START to resume.",
+    smsReplyPlaceholderSms: "Type a reply… (⌘+Enter to send)",
+    smsReplyPlaceholderWhatsapp: "Type a WhatsApp reply… (⌘+Enter to send)",
+    smsReplySend: "Send",
+    smsReplySentToast: "Reply sent",
+    smsReplyFailedToast: "Couldn't send reply",
+    smsEmptyTitle: "No conversations here",
+    smsEmptyDesc: "When someone texts the gemach number, the thread will appear here.",
+    smsListLastSentPrefix: "You:",
+    smsStatusFailed: "Delivery failed",
+    smsStatusDelivered: "Delivered",
+    smsStatusSent: "Sent",
+    smsRetry: "Retry",
+
 } as const;
 
 export default enRest;

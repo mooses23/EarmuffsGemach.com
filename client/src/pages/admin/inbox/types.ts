@@ -1,4 +1,4 @@
-export type SourceFilter = "all" | "email" | "form";
+export type SourceFilter = "all" | "email" | "form" | "sms" | "whatsapp";
 export type ReadFilter = "all" | "unread" | "read";
 export type ReplyFilter = "all" | "unreplied" | "replied";
 export type Folder = "inbox" | "spam" | "trash" | "sent";

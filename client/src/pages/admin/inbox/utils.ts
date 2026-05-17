@@ -92,6 +92,7 @@ export function loadPersistedFilters(): PersistedFilterState {
         : DEFAULT_FILTER_STATE.folder;
     const sourceFilter: SourceFilter =
       parsed.sourceFilter === "all" || parsed.sourceFilter === "email" || parsed.sourceFilter === "form"
+        || parsed.sourceFilter === "sms" || parsed.sourceFilter === "whatsapp"
         ? parsed.sourceFilter
         : DEFAULT_FILTER_STATE.sourceFilter;
     const readFilter: ReadFilter =

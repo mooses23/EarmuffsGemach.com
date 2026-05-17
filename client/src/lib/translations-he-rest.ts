@@ -1289,6 +1289,36 @@ const dict: Record<RestTranslationKey, string> = {
     verificationCodeMultipleFound: "נמצאו כמה קודים — השתמשו בקוד העדכני ביותר",
     verificationCodeGmailDown: "תיבת הדואר זמנית אינה זמינה — עדיין מנסים…",
 
+    // SMS / WhatsApp inbox (Task #308)
+    inboxSourceSms: "SMS",
+    inboxSourceWhatsapp: "ווטסאפ",
+    smsChannelChips: "ערוץ",
+    smsChannelSms: "SMS",
+    smsChannelWhatsapp: "ווטסאפ",
+    smsFolderInbox: "תיבת דואר נכנס",
+    smsFolderArchived: "בארכיון",
+    smsBackToList: "חזרה לשיחות",
+    smsOptedOutBadge: "ביטל הסכמה",
+    smsArchiveAction: "ארכיון",
+    smsUnarchiveAction: "שחזר מארכיון",
+    smsArchivedToast: "השיחה הועברה לארכיון",
+    smsUnarchivedToast: "השיחה שוחזרה",
+    smsThreadEmpty: "אין עדיין הודעות בשיחה זו.",
+    smsOptedOutTitle: "הנמען ביטל את ההסכמה",
+    smsOptedOutDesc: "השליחה מושבתת. הוא שלח STOP וצריך לשלוח START כדי לחדש.",
+    smsReplyPlaceholderSms: "כתוב תשובה… (⌘+Enter לשליחה)",
+    smsReplyPlaceholderWhatsapp: "כתוב תשובת ווטסאפ… (⌘+Enter לשליחה)",
+    smsReplySend: "שלח",
+    smsReplySentToast: "התשובה נשלחה",
+    smsReplyFailedToast: "לא ניתן היה לשלוח את התשובה",
+    smsEmptyTitle: "אין כאן שיחות",
+    smsEmptyDesc: "כאשר מישהו ישלח הודעה למספר הגמ״ח, השיחה תופיע כאן.",
+    smsListLastSentPrefix: "אתה:",
+    smsStatusFailed: "המסירה נכשלה",
+    smsStatusDelivered: "נמסר",
+    smsStatusSent: "נשלח",
+    smsRetry: "נסה שוב",
+
 };
 
 export default dict;
