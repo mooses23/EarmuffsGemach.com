@@ -103,7 +103,17 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
           qc.invalidateQueries({ queryKey: ["/api/admin/sms/conversations"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/inbox/counts"] });
         })
-        .catch(() => { /* non-fatal: badge will refresh on next poll */ });
+        .catch((e) => {
+          // Surface failures so admins notice when unread state isn't
+          // clearing — otherwise a backend regression could silently leave
+          // the badge stuck and look like a UI bug.
+          console.warn("[sms] markRead failed", e);
+          toast({
+            title: t("smsReplyFailedToast"),
+            description: e?.message ?? String(e),
+            variant: "destructive",
+          });
+        });
     }
   };
 
@@ -121,10 +131,13 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
   const replyMutation = useMutation({
     mutationFn: async ({ id, body }: { id: number; body: string }) =>
       apiRequest("POST", `/api/admin/sms/conversations/${id}/reply`, { body }),
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       setReply("");
       qc.invalidateQueries({ queryKey: ["/api/admin/sms/conversations"] });
       qc.invalidateQueries({ queryKey: ["/api/admin/inbox/counts"] });
+      // Refetch the active thread immediately so the newly sent bubble
+      // appears without waiting for the 30 s poll tick.
+      qc.invalidateQueries({ queryKey: ["/api/admin/sms/conversations", vars.id] });
       toast({ title: t("smsReplySentToast") });
     },
     onError: (e: any) => toast({ title: t("smsReplyFailedToast"), description: e?.message ?? String(e), variant: "destructive" }),

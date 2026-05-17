@@ -201,7 +201,7 @@ export default function AdminInbox() {
   // mode we hand the entire list+detail area over to SmsInboxView (which
   // manages its own All/SMS/WhatsApp channel chips internally) and bypass
   // the email/form rendering pipeline below.
-  const isSmsView = filters.sourceFilter === "sms" || filters.sourceFilter === "whatsapp";
+  const isSmsView = filters.sourceFilter === "sms";
 
   // When the user pivots into SMS/WhatsApp, drop any email/form selection so
   // the early `if (selected) return …` detail view doesn't intercept the
