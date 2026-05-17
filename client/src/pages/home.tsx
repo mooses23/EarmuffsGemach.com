@@ -155,7 +155,6 @@ export default function Home() {
               : 'max-h-0 opacity-0 duration-500 pointer-events-none'
           }`}
           aria-hidden={!showStory}
-          {...(!showStory ? { inert: '' as unknown as undefined } : {})}
         >
           <div className="container mx-auto px-4 pt-6 pb-2">
               <div className="max-w-2xl mx-auto">
@@ -202,7 +201,9 @@ export default function Home() {
                         type="button"
                         onClick={handleCloseStory}
                         aria-label={t('close') || 'Collapse'}
-                        className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-amber-300/70 hover:text-amber-200 active:text-amber-100 active:scale-95 transition-all duration-300 ease-out"
+                        tabIndex={showStory ? 0 : -1}
+                        disabled={!showStory}
+                        className="group inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-amber-300/70 hover:text-amber-200 active:text-amber-100 active:scale-95 transition-all duration-300 ease-out disabled:opacity-0"
                         style={{
                           background: 'linear-gradient(180deg, rgba(251,191,36,0.06) 0%, rgba(251,191,36,0.02) 100%)',
                           border: '1px solid rgba(251,191,36,0.15)',
