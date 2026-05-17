@@ -89,6 +89,9 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
       apiRequest("PATCH", `/api/admin/sms/conversations/${id}`, { isArchived }),
     onSuccess: (_data, vars) => {
       qc.invalidateQueries({ queryKey: ["/api/admin/sms/conversations"] });
+      // Archiving an unread thread changes the unread count, so refresh the
+      // shared counts query immediately rather than waiting for its poll.
+      qc.invalidateQueries({ queryKey: ["/api/admin/inbox/counts"] });
       toast({ title: vars.isArchived ? t("smsArchivedToast") : t("smsUnarchivedToast") });
       setSelectedId(null);
     },

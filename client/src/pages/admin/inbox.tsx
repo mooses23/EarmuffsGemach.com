@@ -192,10 +192,7 @@ export default function AdminInbox() {
   // surfaces without a manual refresh.
   const inboxCountsQuery = useQuery<{ inbox: number; sent: number; spam: number; trash: number; smsUnread?: number; whatsappUnread?: number }>({
     queryKey: ["/api/admin/inbox/counts"],
-    // 30 s matches the SMS list/thread cadence so the source-filter unread
-    // badge and the SMS view itself stay roughly in lockstep without extra
-    // backend load.
-    refetchInterval: 30_000,
+    refetchInterval: 15_000,
     refetchIntervalInBackground: false,
   });
   const smsUnread = inboxCountsQuery.data?.smsUnread ?? 0;
