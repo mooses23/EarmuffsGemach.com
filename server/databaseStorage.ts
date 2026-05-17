@@ -23,6 +23,8 @@ import {
   globalSettings, type GlobalSetting, type InsertGlobalSetting,
   disputes, type Dispute, type InsertDispute,
   messageSendLogs, type MessageSendLog, type InsertMessageSendLog,
+  smsConversations, smsMessages,
+  type SmsConversation, type SmsMessage, type SmsChannel,
   restockCodeRequests, type RestockCodeRequest,
   restockShipments, type RestockShipment,
   translationCache, type TranslationCacheEntry,
@@ -1308,6 +1310,174 @@ export class DatabaseStorage implements IStorage {
     return result.length > 0;
   }
 
+  // Task #307: SMS / WhatsApp conversation storage
+  async recordSmsMessage(input: {
+    phone: string;
+    channel: SmsChannel;
+    direction: 'inbound' | 'outbound';
+    body: string;
+    twilioSid?: string | null;
+    locationId?: number | null;
+    sentByUserId?: number | null;
+    deliveryStatus?: string | null;
+    errorMessage?: string | null;
+    isOptedOut?: boolean;
+  }): Promise<{ conversation: SmsConversation; message: SmsMessage }> {
+    return db.transaction(async (tx) => {
+      const preview = input.body.slice(0, 200);
+      const isInbound = input.direction === 'inbound';
+      // Upsert conversation on (phone, channel).
+      // unread_count bumps only on inbound; isArchived auto-resets on inbound.
+      const upserted = await tx.execute(sql`
+        INSERT INTO sms_conversations (
+          phone, channel, location_id, last_message_at,
+          last_message_preview, last_direction,
+          unread_count, is_archived, is_opted_out
+        ) VALUES (
+          ${input.phone}, ${input.channel}, ${input.locationId ?? null}, NOW(),
+          ${preview}, ${input.direction},
+          ${isInbound ? 1 : 0}, FALSE, ${!!input.isOptedOut}
+        )
+        ON CONFLICT (phone, channel) DO UPDATE SET
+          last_message_at = NOW(),
+          last_message_preview = EXCLUDED.last_message_preview,
+          last_direction = EXCLUDED.last_direction,
+          unread_count = sms_conversations.unread_count + ${isInbound ? 1 : 0},
+          is_archived = CASE WHEN ${isInbound} THEN FALSE ELSE sms_conversations.is_archived END,
+          is_opted_out = sms_conversations.is_opted_out OR ${!!input.isOptedOut},
+          location_id = COALESCE(sms_conversations.location_id, EXCLUDED.location_id)
+        RETURNING *
+      `);
+      const row = (upserted as any).rows?.[0] as Record<string, any>;
+      const conversation: SmsConversation = {
+        id: row.id,
+        phone: row.phone,
+        channel: row.channel,
+        locationId: row.location_id,
+        displayName: row.display_name,
+        lastMessageAt: row.last_message_at,
+        lastMessagePreview: row.last_message_preview,
+        lastDirection: row.last_direction,
+        unreadCount: row.unread_count,
+        isArchived: row.is_archived,
+        isOptedOut: row.is_opted_out,
+        createdAt: row.created_at,
+      };
+      const [message] = await tx.insert(smsMessages).values({
+        conversationId: conversation.id,
+        direction: input.direction,
+        body: input.body,
+        twilioSid: input.twilioSid ?? null,
+        deliveryStatus: input.deliveryStatus ?? null,
+        errorMessage: input.errorMessage ?? null,
+        sentByUserId: input.sentByUserId ?? null,
+      }).returning();
+      return { conversation, message };
+    });
+  }
+
+  async listSmsConversations(opts?: {
+    channel?: SmsChannel;
+    folder?: 'inbox' | 'archived';
+    unreadOnly?: boolean;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ rows: SmsConversation[]; total: number }> {
+    const limit = Math.max(1, Math.min(opts?.limit ?? 50, 200));
+    const offset = Math.max(0, opts?.offset ?? 0);
+    const conditions = [] as any[];
+    if (opts?.channel) conditions.push(eq(smsConversations.channel, opts.channel));
+    if (opts?.folder === 'archived') conditions.push(eq(smsConversations.isArchived, true));
+    else if (opts?.folder === 'inbox') conditions.push(eq(smsConversations.isArchived, false));
+    if (opts?.unreadOnly) conditions.push(sql`${smsConversations.unreadCount} > 0`);
+    if (opts?.q && opts.q.trim()) {
+      const pattern = `%${opts.q.trim()}%`;
+      conditions.push(or(
+        ilike(smsConversations.phone, pattern),
+        ilike(smsConversations.displayName, pattern),
+      )!);
+    }
+    const whereClause = conditions.length ? and(...conditions) : undefined;
+    const q = db.select().from(smsConversations);
+    const rows = whereClause
+      ? await q.where(whereClause).orderBy(desc(smsConversations.lastMessageAt)).limit(limit).offset(offset)
+      : await q.orderBy(desc(smsConversations.lastMessageAt)).limit(limit).offset(offset);
+    const totalQ = db.select({ count: sql<number>`count(*)::int` }).from(smsConversations);
+    const totalResult = whereClause ? await totalQ.where(whereClause) : await totalQ;
+    return { rows, total: totalResult[0]?.count ?? 0 };
+  }
+
+  async getSmsConversation(id: number): Promise<SmsConversation | undefined> {
+    const rows = await db.select().from(smsConversations).where(eq(smsConversations.id, id)).limit(1);
+    return rows[0];
+  }
+
+  async getSmsConversationByPhoneChannel(phone: string, channel: SmsChannel): Promise<SmsConversation | undefined> {
+    const rows = await db.select().from(smsConversations)
+      .where(and(eq(smsConversations.phone, phone), eq(smsConversations.channel, channel)))
+      .limit(1);
+    return rows[0];
+  }
+
+  async getSmsMessages(conversationId: number, opts?: { limit?: number }): Promise<SmsMessage[]> {
+    const limit = Math.max(1, Math.min(opts?.limit ?? 500, 1000));
+    // Fetch the latest N (DESC + limit) then reverse so callers receive
+    // messages in chronological ascending order. Without the DESC pass,
+    // a long thread would silently truncate the most recent activity.
+    const rows = await db.select().from(smsMessages)
+      .where(eq(smsMessages.conversationId, conversationId))
+      .orderBy(desc(smsMessages.sentAt))
+      .limit(limit);
+    return rows.reverse();
+  }
+
+  async updateSmsConversation(
+    id: number,
+    data: Partial<Pick<SmsConversation, 'isArchived' | 'isOptedOut' | 'displayName' | 'locationId'>> & { markRead?: boolean },
+  ): Promise<SmsConversation> {
+    const patch: Record<string, unknown> = {};
+    if (data.isArchived !== undefined) patch.isArchived = data.isArchived;
+    if (data.isOptedOut !== undefined) patch.isOptedOut = data.isOptedOut;
+    if (data.displayName !== undefined) patch.displayName = data.displayName;
+    if (data.locationId !== undefined) patch.locationId = data.locationId;
+    if (data.markRead) patch.unreadCount = 0;
+    if (Object.keys(patch).length === 0) {
+      const existing = await this.getSmsConversation(id);
+      if (!existing) throw new Error(`SMS conversation ${id} not found`);
+      return existing;
+    }
+    const result = await db.update(smsConversations).set(patch).where(eq(smsConversations.id, id)).returning();
+    if (!result[0]) throw new Error(`SMS conversation ${id} not found`);
+    return result[0];
+  }
+
+  async updateSmsMessageDeliveryByTwilioSid(sid: string, deliveryStatus: string, errorMessage?: string | null): Promise<boolean> {
+    const patch: Record<string, unknown> = { deliveryStatus };
+    if (errorMessage !== undefined) patch.errorMessage = errorMessage;
+    const result = await db.update(smsMessages)
+      .set(patch)
+      .where(eq(smsMessages.twilioSid, sid))
+      .returning({ id: smsMessages.id });
+    return result.length > 0;
+  }
+
+  async getSmsUnreadCounts(): Promise<{ sms: number; whatsapp: number }> {
+    const rows = await db.select({
+      channel: smsConversations.channel,
+      total: sql<number>`COALESCE(SUM(${smsConversations.unreadCount}), 0)::int`,
+    })
+      .from(smsConversations)
+      .where(eq(smsConversations.isArchived, false))
+      .groupBy(smsConversations.channel);
+    let sms = 0, whatsapp = 0;
+    for (const r of rows) {
+      if (r.channel === 'sms') sms = r.total;
+      else if (r.channel === 'whatsapp') whatsapp = r.total;
+    }
+    return { sms, whatsapp };
+  }
+
   // Playbook Fact operations (admin-editable AI facts)
   async getAllPlaybookFacts(): Promise<PlaybookFact[]> {
     return db.select().from(playbookFacts).orderBy(playbookFacts.category, playbookFacts.factKey);
@@ -1841,6 +2011,53 @@ export async function ensureSchemaUpgrades(): Promise<void> {
   await safe("add message_send_logs.delivery_status", () => db.execute(sql`ALTER TABLE message_send_logs ADD COLUMN IF NOT EXISTS delivery_status TEXT`));
   await safe("add message_send_logs.delivery_error", () => db.execute(sql`ALTER TABLE message_send_logs ADD COLUMN IF NOT EXISTS delivery_error TEXT`));
   await safe("create index message_send_logs_twilio_sid_idx", () => db.execute(sql`CREATE INDEX IF NOT EXISTS message_send_logs_twilio_sid_idx ON message_send_logs (twilio_sid) WHERE twilio_sid IS NOT NULL`));
+
+  // Task #307: SMS / WhatsApp conversation storage
+  await safe("create table sms_conversations", () => db.execute(sql`
+    CREATE TABLE IF NOT EXISTS sms_conversations (
+      id SERIAL PRIMARY KEY,
+      phone TEXT NOT NULL,
+      channel TEXT NOT NULL,
+      location_id INTEGER,
+      display_name TEXT,
+      last_message_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      last_message_preview TEXT,
+      last_direction TEXT,
+      unread_count INTEGER NOT NULL DEFAULT 0,
+      is_archived BOOLEAN NOT NULL DEFAULT FALSE,
+      is_opted_out BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )
+  `));
+  await safe("create unique index sms_conversations_phone_channel_uq", () => db.execute(sql`
+    CREATE UNIQUE INDEX IF NOT EXISTS sms_conversations_phone_channel_uq
+      ON sms_conversations (phone, channel)
+  `));
+  await safe("create index sms_conversations_last_message_idx", () => db.execute(sql`
+    CREATE INDEX IF NOT EXISTS sms_conversations_last_message_idx
+      ON sms_conversations (last_message_at DESC)
+  `));
+  await safe("create table sms_messages", () => db.execute(sql`
+    CREATE TABLE IF NOT EXISTS sms_messages (
+      id SERIAL PRIMARY KEY,
+      conversation_id INTEGER NOT NULL,
+      direction TEXT NOT NULL,
+      body TEXT NOT NULL,
+      twilio_sid TEXT,
+      sent_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      delivery_status TEXT,
+      error_message TEXT,
+      sent_by_user_id INTEGER
+    )
+  `));
+  await safe("create index sms_messages_conversation_idx", () => db.execute(sql`
+    CREATE INDEX IF NOT EXISTS sms_messages_conversation_idx
+      ON sms_messages (conversation_id, sent_at)
+  `));
+  await safe("create index sms_messages_twilio_sid_idx", () => db.execute(sql`
+    CREATE INDEX IF NOT EXISTS sms_messages_twilio_sid_idx
+      ON sms_messages (twilio_sid) WHERE twilio_sid IS NOT NULL
+  `));
 
   // Make sure the confirmation-email-sent timestamp column exists. The
   // gemach_applications schema declares it but older databases (including

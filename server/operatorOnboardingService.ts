@@ -277,6 +277,26 @@ export async function sendWelcomeForLocation(
     };
     const smsResults = await sendOperatorWelcome(heCtx, { sms: true });
     smsResult = smsResults.sms;
+    // Task #307: mirror outbound welcome SMS into the conversation thread.
+    if (smsResult?.ok && loc.phone) {
+      try {
+        const { normalizePhoneForSms, buildOperatorWelcomeMessageBody } = await import('./twilio-client.js');
+        const normalized = normalizePhoneForSms(loc.phone) || loc.phone;
+        const body = resolvedCustomBody || buildOperatorWelcomeMessageBody(heCtx);
+        await storage.recordSmsMessage({
+          phone: normalized,
+          channel: 'sms',
+          direction: 'outbound',
+          body,
+          twilioSid: smsResult.sid || null,
+          locationId: loc.id,
+          sentByUserId: options.sentByUserId ?? null,
+          deliveryStatus: 'queued',
+        });
+      } catch (e: any) {
+        console.error('[onboarding] failed to mirror outbound SMS into conversation:', e?.message);
+      }
+    }
 
     if (!resolvedCustomBody) {
       const enCtx = {
@@ -288,14 +308,57 @@ export async function sendWelcomeForLocation(
         // double-counting delivery events.
         statusCallbackUrl: undefined,
       };
-      sendOperatorWelcome(enCtx, { sms: true }).catch((e: any) =>
-        console.error('[onboarding] EN SMS follow-up failed:', e?.message),
-      );
+      sendOperatorWelcome(enCtx, { sms: true })
+        .then(async (results) => {
+          // Task #307: mirror the EN follow-up into the conversation thread too,
+          // so admins see the full bilingual pair the operator actually received.
+          if (results.sms?.ok && loc.phone) {
+            try {
+              const { normalizePhoneForSms, buildOperatorWelcomeMessageBody } = await import('./twilio-client.js');
+              const normalized = normalizePhoneForSms(loc.phone) || loc.phone;
+              await storage.recordSmsMessage({
+                phone: normalized,
+                channel: 'sms',
+                direction: 'outbound',
+                body: buildOperatorWelcomeMessageBody(enCtx),
+                twilioSid: results.sms.sid || null,
+                locationId: loc.id,
+                sentByUserId: options.sentByUserId ?? null,
+                deliveryStatus: 'queued',
+              });
+            } catch (e: any) {
+              console.error('[onboarding] failed to mirror EN SMS follow-up into conversation:', e?.message);
+            }
+          }
+        })
+        .catch((e: any) =>
+          console.error('[onboarding] EN SMS follow-up failed:', e?.message),
+        );
     }
   }
 
   if (wantsWhatsapp && loc.phone) {
     whatsappResult = await sendOperatorWelcomeWhatsApp(sharedCtx);
+    // Task #307: mirror outbound welcome WhatsApp into the conversation thread.
+    if (whatsappResult?.ok) {
+      try {
+        const { normalizePhoneForSms, buildOperatorWelcomeWhatsAppBody } = await import('./twilio-client.js');
+        const normalized = normalizePhoneForSms(loc.phone) || loc.phone;
+        const body = resolvedCustomBody || buildOperatorWelcomeWhatsAppBody(sharedCtx);
+        await storage.recordSmsMessage({
+          phone: normalized,
+          channel: 'whatsapp',
+          direction: 'outbound',
+          body,
+          twilioSid: whatsappResult.sid || null,
+          locationId: loc.id,
+          sentByUserId: options.sentByUserId ?? null,
+          deliveryStatus: 'queued',
+        });
+      } catch (e: any) {
+        console.error('[onboarding] failed to mirror outbound WhatsApp into conversation:', e?.message);
+      }
+    }
   }
 
   if (wantsEmail && loc.email) {

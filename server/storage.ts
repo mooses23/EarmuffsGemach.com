@@ -21,6 +21,9 @@ import {
   globalSettings, type GlobalSetting, type InsertGlobalSetting,
   disputes, type Dispute, type InsertDispute,
   messageSendLogs, type MessageSendLog, type InsertMessageSendLog,
+  type SmsConversation, type InsertSmsConversation,
+  type SmsMessage, type InsertSmsMessage,
+  type SmsChannel,
   restockCodeRequests, type RestockCodeRequest,
   restockShipments, type RestockShipment,
   type TranslationCacheEntry,
@@ -244,6 +247,38 @@ export interface IStorage {
   createMessageSendLog(log: InsertMessageSendLog): Promise<MessageSendLog>;
   getMessageSendLogs(opts?: { locationId?: number; limit?: number }): Promise<MessageSendLog[]>;
   updateMessageSendLogByTwilioSid(sid: string, deliveryStatus: string, deliveryError?: string): Promise<boolean>;
+
+  // Task #307: SMS / WhatsApp conversation storage
+  /** Upsert the (phone, channel) conversation and append a message. Returns the upserted conversation. */
+  recordSmsMessage(input: {
+    phone: string;
+    channel: SmsChannel;
+    direction: 'inbound' | 'outbound';
+    body: string;
+    twilioSid?: string | null;
+    locationId?: number | null;
+    sentByUserId?: number | null;
+    deliveryStatus?: string | null;
+    errorMessage?: string | null;
+    isOptedOut?: boolean;
+  }): Promise<{ conversation: SmsConversation; message: SmsMessage }>;
+  listSmsConversations(opts?: {
+    channel?: SmsChannel;
+    folder?: 'inbox' | 'archived';
+    unreadOnly?: boolean;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ rows: SmsConversation[]; total: number }>;
+  getSmsConversation(id: number): Promise<SmsConversation | undefined>;
+  getSmsConversationByPhoneChannel(phone: string, channel: SmsChannel): Promise<SmsConversation | undefined>;
+  getSmsMessages(conversationId: number, opts?: { limit?: number }): Promise<SmsMessage[]>;
+  updateSmsConversation(
+    id: number,
+    data: Partial<Pick<SmsConversation, 'isArchived' | 'isOptedOut' | 'displayName' | 'locationId'>> & { markRead?: boolean },
+  ): Promise<SmsConversation>;
+  updateSmsMessageDeliveryByTwilioSid(sid: string, deliveryStatus: string, errorMessage?: string | null): Promise<boolean>;
+  getSmsUnreadCounts(): Promise<{ sms: number; whatsapp: number }>;
 
   // Task #249: Restock verification code requests
   createRestockCodeRequest(locationId: number, requestedAt: Date, expiresAt: Date): Promise<RestockCodeRequest>;
@@ -3548,6 +3583,149 @@ export class MemStorage implements IStorage {
       }
     }
     return false;
+  }
+
+  // SMS / WhatsApp conversation storage — MemStorage in-memory impl
+  private smsConversationsMap = new Map<number, SmsConversation>();
+  private smsConversationCounter = 1;
+  private smsMessagesMap = new Map<number, SmsMessage>();
+  private smsMessageCounter = 1;
+
+  async recordSmsMessage(input: {
+    phone: string;
+    channel: SmsChannel;
+    direction: 'inbound' | 'outbound';
+    body: string;
+    twilioSid?: string | null;
+    locationId?: number | null;
+    sentByUserId?: number | null;
+    deliveryStatus?: string | null;
+    errorMessage?: string | null;
+    isOptedOut?: boolean;
+  }): Promise<{ conversation: SmsConversation; message: SmsMessage }> {
+    const now = new Date();
+    let convo = Array.from(this.smsConversationsMap.values())
+      .find(c => c.phone === input.phone && c.channel === input.channel);
+    if (!convo) {
+      const id = this.smsConversationCounter++;
+      convo = {
+        id,
+        phone: input.phone,
+        channel: input.channel,
+        locationId: input.locationId ?? null,
+        displayName: null,
+        lastMessageAt: now,
+        lastMessagePreview: input.body.slice(0, 200),
+        lastDirection: input.direction,
+        unreadCount: input.direction === 'inbound' ? 1 : 0,
+        isArchived: false,
+        isOptedOut: !!input.isOptedOut,
+        createdAt: now,
+      };
+    } else {
+      convo = {
+        ...convo,
+        locationId: convo.locationId ?? (input.locationId ?? null),
+        lastMessageAt: now,
+        lastMessagePreview: input.body.slice(0, 200),
+        lastDirection: input.direction,
+        unreadCount: input.direction === 'inbound' ? convo.unreadCount + 1 : convo.unreadCount,
+        isOptedOut: input.isOptedOut ? true : convo.isOptedOut,
+        isArchived: input.direction === 'inbound' ? false : convo.isArchived,
+      };
+    }
+    this.smsConversationsMap.set(convo.id, convo);
+    const messageId = this.smsMessageCounter++;
+    const message: SmsMessage = {
+      id: messageId,
+      conversationId: convo.id,
+      direction: input.direction,
+      body: input.body,
+      twilioSid: input.twilioSid ?? null,
+      sentAt: now,
+      deliveryStatus: input.deliveryStatus ?? null,
+      errorMessage: input.errorMessage ?? null,
+      sentByUserId: input.sentByUserId ?? null,
+    };
+    this.smsMessagesMap.set(messageId, message);
+    return { conversation: convo, message };
+  }
+
+  async listSmsConversations(opts?: {
+    channel?: SmsChannel;
+    folder?: 'inbox' | 'archived';
+    unreadOnly?: boolean;
+    q?: string;
+    limit?: number;
+    offset?: number;
+  }): Promise<{ rows: SmsConversation[]; total: number }> {
+    let rows = Array.from(this.smsConversationsMap.values());
+    if (opts?.channel) rows = rows.filter(r => r.channel === opts.channel);
+    if (opts?.folder === 'archived') rows = rows.filter(r => r.isArchived);
+    else if (opts?.folder === 'inbox') rows = rows.filter(r => !r.isArchived);
+    if (opts?.unreadOnly) rows = rows.filter(r => r.unreadCount > 0);
+    if (opts?.q) {
+      const q = opts.q.toLowerCase();
+      rows = rows.filter(r => r.phone.toLowerCase().includes(q) || (r.displayName || '').toLowerCase().includes(q));
+    }
+    rows.sort((a, b) => b.lastMessageAt.getTime() - a.lastMessageAt.getTime());
+    const total = rows.length;
+    const offset = opts?.offset ?? 0;
+    const limit = opts?.limit ?? 50;
+    return { rows: rows.slice(offset, offset + limit), total };
+  }
+
+  async getSmsConversation(id: number): Promise<SmsConversation | undefined> {
+    return this.smsConversationsMap.get(id);
+  }
+
+  async getSmsConversationByPhoneChannel(phone: string, channel: SmsChannel): Promise<SmsConversation | undefined> {
+    return Array.from(this.smsConversationsMap.values()).find(c => c.phone === phone && c.channel === channel);
+  }
+
+  async getSmsMessages(conversationId: number, opts?: { limit?: number }): Promise<SmsMessage[]> {
+    const rows = Array.from(this.smsMessagesMap.values())
+      .filter(m => m.conversationId === conversationId)
+      .sort((a, b) => a.sentAt.getTime() - b.sentAt.getTime());
+    return opts?.limit ? rows.slice(-opts.limit) : rows;
+  }
+
+  async updateSmsConversation(
+    id: number,
+    data: Partial<Pick<SmsConversation, 'isArchived' | 'isOptedOut' | 'displayName' | 'locationId'>> & { markRead?: boolean },
+  ): Promise<SmsConversation> {
+    const existing = this.smsConversationsMap.get(id);
+    if (!existing) throw new Error(`SMS conversation ${id} not found`);
+    const updated: SmsConversation = {
+      ...existing,
+      isArchived: data.isArchived ?? existing.isArchived,
+      isOptedOut: data.isOptedOut ?? existing.isOptedOut,
+      displayName: data.displayName !== undefined ? data.displayName : existing.displayName,
+      locationId: data.locationId !== undefined ? data.locationId : existing.locationId,
+      unreadCount: data.markRead ? 0 : existing.unreadCount,
+    };
+    this.smsConversationsMap.set(id, updated);
+    return updated;
+  }
+
+  async updateSmsMessageDeliveryByTwilioSid(sid: string, deliveryStatus: string, errorMessage?: string | null): Promise<boolean> {
+    for (const [key, row] of Array.from(this.smsMessagesMap.entries())) {
+      if (row.twilioSid === sid) {
+        this.smsMessagesMap.set(key, { ...row, deliveryStatus, errorMessage: errorMessage ?? row.errorMessage ?? null });
+        return true;
+      }
+    }
+    return false;
+  }
+
+  async getSmsUnreadCounts(): Promise<{ sms: number; whatsapp: number }> {
+    let sms = 0, whatsapp = 0;
+    for (const c of Array.from(this.smsConversationsMap.values())) {
+      if (c.isArchived || c.unreadCount === 0) continue;
+      if (c.channel === 'sms') sms += c.unreadCount;
+      else if (c.channel === 'whatsapp') whatsapp += c.unreadCount;
+    }
+    return { sms, whatsapp };
   }
 
   async createRestockCodeRequest(_locationId: number, _requestedAt: Date, _expiresAt: Date): Promise<RestockCodeRequest> {

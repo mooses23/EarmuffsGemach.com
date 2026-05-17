@@ -3492,16 +3492,177 @@ export async function registerRoutes(app: Express): Promise<Server> {
           if (c.isSpam) formSpamUnread++;
         }
       }
+      const smsCounts = await storage.getSmsUnreadCounts().catch(() => ({ sms: 0, whatsapp: 0 }));
       res.json({
-        inbox: gmailUnread.inbox + formInboxUnread,
+        inbox: gmailUnread.inbox + formInboxUnread + smsCounts.sms + smsCounts.whatsapp,
         sent: gmailUnread.sent,
         spam: gmailUnread.spam + formSpamUnread,
         trash: gmailUnread.trash + formTrashUnread,
+        smsUnread: smsCounts.sms,
+        whatsappUnread: smsCounts.whatsapp,
       });
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : "Failed to fetch counts";
       console.error("Error fetching inbox counts:", msg);
-      res.status(200).json({ inbox: 0, sent: 0, spam: 0, trash: 0, error: msg });
+      res.status(200).json({ inbox: 0, sent: 0, spam: 0, trash: 0, smsUnread: 0, whatsappUnread: 0, error: msg });
+    }
+  });
+
+  // ============================================
+  // Task #307: Admin SMS / WhatsApp conversations API
+  // ============================================
+  // List conversations. Query params:
+  //   channel=sms|whatsapp  (optional filter)
+  //   folder=inbox|archived (default inbox)
+  //   unread=1              (only unread)
+  //   q=...                 (matches phone / displayName)
+  //   limit, offset
+  // Inline auth guard — requireAdminMW is declared further down in this file
+  // and would TDZ-crash at registration time if used here.
+  const requireAdminInline = (req: any, res: any): boolean => {
+    if (!req.isAuthenticated || !req.isAuthenticated()) {
+      res.status(401).json({ message: 'Authentication required' });
+      return false;
+    }
+    if (!req.user?.isAdmin) {
+      res.status(403).json({ message: 'Admin access required' });
+      return false;
+    }
+    return true;
+  };
+  app.get("/api/admin/sms/conversations", async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const channelParam = String(req.query.channel || '').toLowerCase();
+      const channel = channelParam === 'sms' || channelParam === 'whatsapp' ? channelParam as 'sms' | 'whatsapp' : undefined;
+      const folderParam = String(req.query.folder || 'inbox').toLowerCase();
+      const folder: 'inbox' | 'archived' = folderParam === 'archived' ? 'archived' : 'inbox';
+      const unreadOnly = req.query.unread === '1' || req.query.unread === 'true';
+      const q = typeof req.query.q === 'string' ? req.query.q : undefined;
+      const limit = Math.max(1, Math.min(parseInt(String(req.query.limit || '50'), 10) || 50, 200));
+      const offset = Math.max(0, parseInt(String(req.query.offset || '0'), 10) || 0);
+      const result = await storage.listSmsConversations({ channel, folder, unreadOnly, q, limit, offset });
+      res.json(result);
+    } catch (err: any) {
+      console.error('[admin/sms/conversations] error:', err);
+      res.status(500).json({ message: err?.message || 'Failed to list conversations' });
+    }
+  });
+
+  // Get a single conversation + its message thread.
+  app.get("/api/admin/sms/conversations/:id", async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid conversation id' });
+      const conversation = await storage.getSmsConversation(id);
+      if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+      const limit = Math.max(1, Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 1000));
+      const messages = await storage.getSmsMessages(id, { limit });
+      res.json({ conversation, messages });
+    } catch (err: any) {
+      console.error('[admin/sms/conversations/:id] error:', err);
+      res.status(500).json({ message: err?.message || 'Failed to fetch conversation' });
+    }
+  });
+
+  // Alias matching the task #307 spec: returns just the messages array.
+  app.get("/api/admin/sms/conversations/:id/messages", async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid conversation id' });
+      const conversation = await storage.getSmsConversation(id);
+      if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+      const limit = Math.max(1, Math.min(parseInt(String(req.query.limit || '500'), 10) || 500, 1000));
+      const messages = await storage.getSmsMessages(id, { limit });
+      res.json({ messages });
+    } catch (err: any) {
+      console.error('[admin/sms/conversations/:id/messages] error:', err);
+      res.status(500).json({ message: err?.message || 'Failed to fetch messages' });
+    }
+  });
+
+  // Update conversation flags: isArchived, isOptedOut, displayName, locationId, markRead.
+  app.patch("/api/admin/sms/conversations/:id", async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid conversation id' });
+      const patchSchema = z.object({
+        isArchived: z.boolean().optional(),
+        isOptedOut: z.boolean().optional(),
+        displayName: z.string().nullable().optional(),
+        locationId: z.number().int().nullable().optional(),
+        markRead: z.boolean().optional(),
+      });
+      const parsed = patchSchema.safeParse(req.body || {});
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid patch body', errors: parsed.error.flatten() });
+      const updated = await storage.updateSmsConversation(id, parsed.data);
+      res.json(updated);
+    } catch (err: any) {
+      console.error('[admin/sms/conversations PATCH] error:', err);
+      const status = /not found/i.test(err?.message || '') ? 404 : 500;
+      res.status(status).json({ message: err?.message || 'Failed to update conversation' });
+    }
+  });
+
+  // Send a reply on a conversation. Routes the body through Twilio on the same
+  // channel (sms or whatsapp) as the conversation, then mirrors it into the thread.
+  app.post("/api/admin/sms/conversations/:id/reply", async (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ message: 'Invalid conversation id' });
+      const replySchema = z.object({ body: z.string().min(1).max(1600) });
+      const parsed = replySchema.safeParse(req.body || {});
+      if (!parsed.success) return res.status(400).json({ message: 'Invalid reply body', errors: parsed.error.flatten() });
+
+      const conversation = await storage.getSmsConversation(id);
+      if (!conversation) return res.status(404).json({ message: 'Conversation not found' });
+      if (conversation.isOptedOut) {
+        return res.status(409).json({ message: 'This contact has opted out — replies are blocked.' });
+      }
+
+      const envBase = (process.env.APP_URL || process.env.SITE_URL || '').trim();
+      const baseUrl = (envBase || `${req.protocol}://${req.get('host')}`).replace(/\/$/, '');
+      const statusCallbackUrl = `${baseUrl}/api/webhooks/twilio/status`;
+
+      let sid: string | null = null;
+      let sendErrorMsg: string | null = null;
+      try {
+        const { sendDirectMessage } = await import('./twilio-client.js');
+        const result = await sendDirectMessage({
+          channel: conversation.channel as 'sms' | 'whatsapp',
+          toPhone: conversation.phone,
+          body: parsed.data.body,
+          statusCallbackUrl,
+        });
+        sid = result.sid;
+      } catch (sendErr: any) {
+        sendErrorMsg = sendErr?.message || 'Send failed';
+      }
+
+      const sentByUserId = (req.user as any)?.id ?? null;
+      const { message } = await storage.recordSmsMessage({
+        phone: conversation.phone,
+        channel: conversation.channel as 'sms' | 'whatsapp',
+        direction: 'outbound',
+        body: parsed.data.body,
+        twilioSid: sid,
+        locationId: conversation.locationId,
+        sentByUserId,
+        deliveryStatus: sid ? 'queued' : 'failed',
+        errorMessage: sendErrorMsg,
+      });
+
+      if (sendErrorMsg) {
+        return res.status(502).json({ message: sendErrorMsg, mirroredMessage: message });
+      }
+      res.status(201).json({ message, sid });
+    } catch (err: any) {
+      console.error('[admin/sms/conversations/:id/reply] error:', err);
+      res.status(500).json({ message: err?.message || 'Failed to send reply' });
     }
   });
 
@@ -3990,6 +4151,45 @@ export async function registerRoutes(app: Express): Promise<Server> {
             statusCallbackUrl,
           });
           smsSid = result.sid;
+          // Task #307: mirror outbound return-reminder into the conversation thread.
+          // sendReturnReminderSMS sends BOTH Hebrew and English back-to-back —
+          // we mirror both so the thread reflects every message the borrower
+          // actually received. The HE message returns a SID; the EN follow-up
+          // is best-effort and has no SID available at this layer.
+          try {
+            const normalizedTo = normalizePhoneForSms(phone!) || phone!;
+            const tw = await import('./twilio-client.js');
+            const sentByUserId = req.isAuthenticated() ? ((req.user as any)?.id ?? null) : null;
+            const reminderCtx = {
+              borrowerName: transaction.borrowerName,
+              borrowerPhone: normalizedTo,
+              locationName,
+              dueDate: transaction.expectedReturnDate ?? null,
+              statusUrl,
+            };
+            await storage.recordSmsMessage({
+              phone: normalizedTo,
+              channel: 'sms',
+              direction: 'outbound',
+              body: tw.buildReturnReminderSmsBody({ ...reminderCtx, language: 'he' }),
+              twilioSid: smsSid,
+              locationId,
+              sentByUserId,
+              deliveryStatus: 'queued',
+            });
+            await storage.recordSmsMessage({
+              phone: normalizedTo,
+              channel: 'sms',
+              direction: 'outbound',
+              body: tw.buildReturnReminderSmsBody({ ...reminderCtx, language: 'en' }),
+              twilioSid: null,
+              locationId,
+              sentByUserId,
+              deliveryStatus: 'queued',
+            });
+          } catch (mirrorErr: any) {
+            console.error('[reminder] failed to mirror outbound SMS into conversation:', mirrorErr?.message);
+          }
         } catch (sendErr: any) {
           // Twilio error 21610 = recipient replied STOP (opted out).
           // Log an event for timeline visibility WITHOUT bumping lastReturnReminderAt
@@ -4169,6 +4369,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
         await storage.updateReturnReminderDeliveryStatus(MessageSid, MessageStatus, ErrorCode ?? null);
         // Update send-log delivery status (covers return-reminder sends that stored a SID).
         await storage.updateMessageSendLogByTwilioSid(MessageSid, MessageStatus.toLowerCase(), ErrorCode || undefined).catch(() => {});
+        // Task #307: mirror delivery status onto sms_messages so the admin inbox
+        // reflects sent → delivered / failed in real time.
+        await storage.updateSmsMessageDeliveryByTwilioSid(MessageSid, MessageStatus.toLowerCase(), ErrorCode || null).catch(() => {});
         // Also attempt to update welcome-message delivery status in case this SID
         // belongs to an operator onboarding SMS/WhatsApp (e.g. if the Twilio console
         // was configured with this URL instead of /api/twilio/onboarding-status).
@@ -4222,17 +4425,56 @@ export async function registerRoutes(app: Express): Promise<Server> {
           return res.status(400).send('Missing From');
         }
 
+        const { To, MessageSid } = req.body as Record<string, string | undefined>;
         const bodyUpper = (Body || '').trim().toUpperCase();
         const isStopKeyword = ['STOP', 'STOPALL', 'UNSUBSCRIBE', 'CANCEL', 'END', 'QUIT'].includes(bodyUpper);
         // Twilio also sets OptOutType='STOP' in the payload when an opt-out keyword is detected.
         const isOptOut = isStopKeyword || OptOutType === 'STOP';
 
+        // WhatsApp messages arrive with From/To prefixed by "whatsapp:".
+        const isWhatsApp = From.startsWith('whatsapp:');
+        const channel: 'sms' | 'whatsapp' = isWhatsApp ? 'whatsapp' : 'sms';
+        const rawFrom = From.replace(/^whatsapp:/i, '');
+        const normalizedFrom = normalizePhoneForSms(rawFrom) || rawFrom;
+
         if (isOptOut) {
-          const normalizedFrom = normalizePhoneForSms(From) || From;
           console.log(`[twilio-inbound-webhook] STOP from ${normalizedFrom}`);
           await storage.markPhoneOptedOut(normalizedFrom);
-        } else {
-          console.log(`[twilio-inbound-webhook] inbound from ${From} (not a STOP keyword, ignored)`);
+        }
+
+        // Resolve the To number (our Twilio number) to a location, when possible,
+        // so the conversation is attributed to the right gemach.
+        let resolvedLocationId: number | null = null;
+        if (To) {
+          try {
+            const rawTo = To.replace(/^whatsapp:/i, '');
+            const normalizedTo = normalizePhoneForSms(rawTo) || rawTo;
+            const locations = await storage.getAllLocations();
+            const match = locations.find((l) => {
+              const lp = normalizePhoneForSms(l.phone || '') || (l.phone || '');
+              return lp && lp === normalizedTo;
+            });
+            if (match) resolvedLocationId = match.id;
+          } catch (e: any) {
+            console.warn('[twilio-inbound-webhook] location resolution failed:', e?.message);
+          }
+        }
+
+        // Persist the inbound message into the conversation thread so admins
+        // can see and reply to it from the unified inbox.
+        try {
+          await storage.recordSmsMessage({
+            phone: normalizedFrom,
+            channel,
+            direction: 'inbound',
+            body: Body || '',
+            twilioSid: MessageSid || null,
+            locationId: resolvedLocationId,
+            deliveryStatus: 'received',
+            isOptedOut: isOptOut,
+          });
+        } catch (e: any) {
+          console.error('[twilio-inbound-webhook] failed to store conversation message:', e?.message);
         }
 
         // Twilio expects a 200 TwiML response (or 204) to confirm receipt.

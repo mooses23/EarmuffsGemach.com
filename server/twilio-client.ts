@@ -359,6 +359,39 @@ export async function sendOperatorWelcomeWhatsApp(ctx: OperatorWelcomeSendContex
   }
 }
 
+// Task #307: Free-form admin reply for an SMS or WhatsApp conversation.
+// Used by the admin inbox reply endpoint. Throws on configuration / send error
+// so the caller can surface a clear failure message.
+export async function sendDirectMessage(opts: {
+  channel: 'sms' | 'whatsapp';
+  toPhone: string;
+  body: string;
+  statusCallbackUrl?: string;
+}): Promise<{ sid: string }> {
+  const base = opts.channel === 'whatsapp' ? getTwilioWhatsAppConfigStatus() : getTwilioConfigStatus();
+  if (!base.configured) {
+    throw new Error(base.reason || `${opts.channel === 'whatsapp' ? 'WhatsApp' : 'SMS'} is not configured.`);
+  }
+  const to = normalizePhoneForSms(opts.toPhone);
+  if (!to) throw new Error('Recipient phone number is missing or invalid.');
+  const client = getClient();
+  const cb = opts.statusCallbackUrl ? { statusCallback: opts.statusCallbackUrl } : {};
+  try {
+    const msg = await client.messages.create({
+      to: opts.channel === 'whatsapp' ? `whatsapp:${to}` : to,
+      from: opts.channel === 'whatsapp' ? whatsappFrom() : process.env.TWILIO_FROM_NUMBER!,
+      body: opts.body,
+      ...cb,
+    });
+    return { sid: msg.sid };
+  } catch (e: any) {
+    const reason = e?.message || `Twilio rejected the ${opts.channel} request.`;
+    const err = new Error(reason);
+    (err as any).twilioCode = typeof e?.code === 'number' ? e.code : undefined;
+    throw err;
+  }
+}
+
 // Fires SMS and/or WhatsApp in parallel, returning per-channel results.
 // Never throws — channel failures are surfaced via {ok:false, error}.
 export async function sendOperatorWelcome(

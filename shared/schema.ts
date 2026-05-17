@@ -760,3 +760,47 @@ export const restockShipments = pgTable("restock_shipments", {
 
 export type RestockShipment = typeof restockShipments.$inferSelect;
 
+// Task #307: Inbound + outbound SMS / WhatsApp conversation storage.
+// One row per (phone, channel) pair. The inbound webhook upserts these,
+// outbound sends mirror into the messages table so the inbox shows full
+// back-and-forth history.
+export const SMS_CHANNELS = ["sms", "whatsapp"] as const;
+export type SmsChannel = typeof SMS_CHANNELS[number];
+
+export const SMS_DIRECTIONS = ["inbound", "outbound"] as const;
+export type SmsDirection = typeof SMS_DIRECTIONS[number];
+
+export const smsConversations = pgTable("sms_conversations", {
+  id: serial("id").primaryKey(),
+  phone: text("phone").notNull(),                  // normalized E.164
+  channel: text("channel").notNull(),              // 'sms' | 'whatsapp'
+  locationId: integer("location_id"),              // nullable; resolved when the To number matches a location
+  displayName: text("display_name"),               // resolved borrower/operator/location name when known
+  lastMessageAt: timestamp("last_message_at").notNull().defaultNow(),
+  lastMessagePreview: text("last_message_preview"),
+  lastDirection: text("last_direction"),           // 'inbound' | 'outbound'
+  unreadCount: integer("unread_count").notNull().default(0),
+  isArchived: boolean("is_archived").notNull().default(false),
+  isOptedOut: boolean("is_opted_out").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const smsMessages = pgTable("sms_messages", {
+  id: serial("id").primaryKey(),
+  conversationId: integer("conversation_id").notNull(),
+  direction: text("direction").notNull(),          // 'inbound' | 'outbound'
+  body: text("body").notNull(),
+  twilioSid: text("twilio_sid"),
+  sentAt: timestamp("sent_at").notNull().defaultNow(),
+  deliveryStatus: text("delivery_status"),         // 'queued' | 'sent' | 'delivered' | 'failed' | ...
+  errorMessage: text("error_message"),
+  sentByUserId: integer("sent_by_user_id"),        // null for inbound
+});
+
+export const insertSmsConversationSchema = createInsertSchema(smsConversations).omit({ id: true, createdAt: true });
+export const insertSmsMessageSchema = createInsertSchema(smsMessages).omit({ id: true, sentAt: true });
+export type SmsConversation = typeof smsConversations.$inferSelect;
+export type InsertSmsConversation = z.infer<typeof insertSmsConversationSchema>;
+export type SmsMessage = typeof smsMessages.$inferSelect;
+export type InsertSmsMessage = z.infer<typeof insertSmsMessageSchema>;
+
