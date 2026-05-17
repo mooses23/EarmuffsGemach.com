@@ -75,9 +75,9 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed to load conversations");
       return res.json();
     },
-    // 15s matches /api/admin/inbox/counts so the source-filter unread
-    // badge, channel chips, and conversation list all stay in lockstep.
-    refetchInterval: 15_000,
+    // 30s polling per task spec; complements the 15s counts poll so the
+    // badge clears quickly while list traffic stays modest.
+    refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   });
 
@@ -89,7 +89,7 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
       if (!res.ok) throw new Error((await res.json().catch(() => ({}))).message || "Failed to load conversation");
       return res.json();
     },
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
     refetchIntervalInBackground: false,
   });
 
