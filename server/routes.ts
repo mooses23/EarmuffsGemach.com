@@ -4522,12 +4522,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
             deliveryStatus: 'received',
             isOptedOut: isOptOut,
           });
-          // Task #309: auto-resolve sender identity (borrower or operator)
-          // on first contact only. We treat a conversation as "never touched"
-          // when BOTH displayName and locationId are null — that way an admin
-          // clearing either field (e.g. unassigning a gemach) is not undone
-          // by a subsequent inbound message.
-          if (conversation && !conversation.displayName && !conversation.locationId) {
+          // Task #309: auto-resolve sender identity (borrower or operator).
+          // Gate on displayName only — recordSmsMessage may already have set
+          // locationId from the inbound To-number mapping, but we still want
+          // to fill in a friendly name. We never overwrite fields that are
+          // already populated, so admin assignments are preserved.
+          if (conversation && !conversation.displayName) {
             try {
               const { resolvePhoneOwner } = await import('./sms-resolver.js');
               const owner = await resolvePhoneOwner(normalizedFrom, storage);
