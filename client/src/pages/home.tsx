@@ -123,10 +123,12 @@ export default function Home() {
           </div>
         )}
 
-        {/* Hero Section — full-bleed image backdrop */}
+        {/* Hero Section */}
         <div className="relative z-10">
-          {/* Full-width hero photo layer, behind the headline + search card */}
-          <div className="absolute inset-x-0 top-0 h-full overflow-hidden pointer-events-none" aria-hidden="true">
+          {/* Full-bleed hero banner — fills the viewport width, stays modest
+              in height (~1.5-2× the original tile), and fades softly into the
+              dedication ribbon above and the headline section below. */}
+          <div className="relative w-full h-72 md:h-[420px] overflow-hidden">
             <picture>
               <source
                 type="image/webp"
@@ -139,37 +141,39 @@ export default function Home() {
                 sizes="100vw"
                 width={1920}
                 height={1080}
-                alt=""
+                alt="Founder's mother holding her grandchild wearing Baby Banz earmuffs"
                 className="w-full h-full object-cover object-center"
                 decoding="async"
                 fetchpriority="high"
               />
+              {/* Soft slate blend — top + bottom edges fade into the
+                  surrounding dark gradient so the photo reads as part of
+                  the background, not a pasted picture. */}
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background:
+                    'linear-gradient(to bottom, rgba(15,23,42,0.45) 0%, rgba(15,23,42,0) 20%, rgba(15,23,42,0) 80%, rgba(15,23,42,0.75) 100%)',
+                }}
+                aria-hidden="true"
+              ></div>
+              <div
+                className="absolute inset-0 pointer-events-none"
+                style={{
+                  background:
+                    'radial-gradient(ellipse at center, transparent 55%, rgba(15,23,42,0.35) 100%)',
+                }}
+                aria-hidden="true"
+              ></div>
             </picture>
-            {/* Soft slate blend — top fades into the dedication ribbon,
-                bottom fades into the next section, middle dims just enough
-                for white text to stay legible over the photo. */}
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  'linear-gradient(to bottom, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0.55) 18%, rgba(15,23,42,0.45) 50%, rgba(15,23,42,0.75) 82%, rgba(15,23,42,0.98) 100%)',
-              }}
-            ></div>
-            <div
-              className="absolute inset-0"
-              style={{
-                background:
-                  'radial-gradient(ellipse at center, transparent 0%, rgba(15,23,42,0.35) 70%, rgba(15,23,42,0.7) 100%)',
-              }}
-            ></div>
           </div>
 
-          <div className="relative container mx-auto px-4 py-16 md:py-28">
+          <div className="container mx-auto px-4 pt-8 md:pt-12 pb-10 md:pb-20">
             <div className="text-center max-w-4xl mx-auto mb-10 md:mb-14">
               <h1 className="text-3xl md:text-5xl lg:text-6xl font-bold text-white mb-5 md:mb-7 leading-tight text-glow">
                 {t("findBabyEarmuffsNearYou")}
               </h1>
-              <p className="text-lg md:text-xl text-slate-200 mb-8 md:mb-10 max-w-2xl mx-auto leading-relaxed">
+              <p className="text-lg md:text-xl text-slate-300 mb-8 md:mb-10 max-w-2xl mx-auto leading-relaxed">
                 {t("homeHeroDescription")}
               </p>
             </div>
