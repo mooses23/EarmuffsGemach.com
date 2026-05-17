@@ -46,70 +46,67 @@ export default function Home() {
             collapsed the photo fills the space, and when expanded the
             wrapper grows so there is no awkward gap before the content
             below. */}
-        <div className="relative min-h-[560px] md:min-h-[920px]">
+        {/* Mobile: tight height so headline sits high. Desktop: cinematic full-bleed. */}
+        <div className="relative min-h-[470px] md:min-h-[680px]">
         <div
           className="absolute inset-0 overflow-hidden pointer-events-none"
           aria-hidden="true"
         >
-          {/* Picture wrapper — full width on mobile so it fills the screen,
-              centered with a portrait-friendly max-width on desktop so the
-              full image shows without aggressive cropping by object-cover.
-              The width matches the source crop's aspect (~0.91) at this
-              container height, leaving slate gradient on the sides. */}
-          <div className="relative h-full w-full md:w-[840px] md:mx-auto">
+          {/* Full-bleed photo — fills the wrapper on all screen sizes.
+              objectPosition pulls the focal point (face + baby) into frame
+              immediately below the banner with no slate gap at the top. */}
+          <div className="relative h-full w-full">
             <picture>
               <source
                 type="image/webp"
                 srcSet={`${heroWebp384} 384w, ${heroWebp640} 640w, ${heroWebp1024} 1024w, ${heroWebp1920} 1920w`}
-                sizes="(min-width: 768px) 840px, 100vw"
+                sizes="100vw"
               />
               <img
                 src={heroJpg1024}
                 srcSet={`${heroJpg384} 384w, ${heroJpg640} 640w, ${heroJpg1024} 1024w, ${heroJpg1920} 1920w`}
-                sizes="(min-width: 768px) 840px, 100vw"
+                sizes="100vw"
                 width={1286}
                 height={1787}
                 alt=""
-                className="w-full h-full object-cover transition-all duration-500"
-                style={{ objectPosition: '50% 18%' }}
+                className="w-full h-full object-cover"
+                style={{ objectPosition: '50% 8%' }}
                 decoding="async"
                 fetchpriority="high"
               />
             </picture>
-            {/* Side fades on desktop — blend the picture's left/right edges
-                into the surrounding slate so the centered photo doesn't
-                look like a hard-edged card. */}
+            {/* Desktop side vignettes — full-height left/right fade into slate
+                so the portrait blends naturally at any viewport width. */}
             <div
-              className="hidden md:block absolute inset-y-0 -left-32 w-40 pointer-events-none"
+              className="hidden md:block absolute inset-y-0 left-0 w-[18%] pointer-events-none"
               style={{
                 background:
-                  'linear-gradient(to right, rgba(15,23,42,1) 0%, rgba(15,23,42,0) 100%)',
+                  'linear-gradient(to right, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0.4) 50%, rgba(15,23,42,0) 100%)',
               }}
             ></div>
             <div
-              className="hidden md:block absolute inset-y-0 -right-32 w-40 pointer-events-none"
+              className="hidden md:block absolute inset-y-0 right-0 w-[18%] pointer-events-none"
               style={{
                 background:
-                  'linear-gradient(to left, rgba(15,23,42,1) 0%, rgba(15,23,42,0) 100%)',
+                  'linear-gradient(to left, rgba(15,23,42,0.85) 0%, rgba(15,23,42,0.4) 50%, rgba(15,23,42,0) 100%)',
               }}
             ></div>
           </div>
-          {/* Subtle vignette so the corners blend rather than hard-cut. */}
+          {/* Subtle corner vignette. */}
           <div
             className="absolute inset-0"
             style={{
               background:
-                'radial-gradient(ellipse at center top, transparent 55%, rgba(15,23,42,0.35) 100%)',
+                'radial-gradient(ellipse at center top, transparent 60%, rgba(15,23,42,0.25) 100%)',
             }}
           ></div>
-          {/* Bottom bleed — long, gradual fade anchored to the wrapper bottom
-              so the photo dissolves into the slate background flush with the
-              headline section below. Painted last so it sits above the photo. */}
+          {/* Bottom fade — starts early and uses many stops for a long,
+              organic dissolve so there is no hard seam into the headline. */}
           <div
-            className="absolute inset-x-0 bottom-0 h-[55%]"
+            className="absolute inset-x-0 bottom-0 h-[70%]"
             style={{
               background:
-                'linear-gradient(to bottom, rgba(15,23,42,0) 0%, rgba(15,23,42,0.15) 35%, rgba(15,23,42,0.55) 65%, rgba(15,23,42,0.9) 88%, rgba(15,23,42,1) 100%)',
+                'linear-gradient(to bottom, rgba(15,23,42,0) 0%, rgba(15,23,42,0.05) 20%, rgba(15,23,42,0.18) 40%, rgba(15,23,42,0.45) 60%, rgba(15,23,42,0.78) 80%, rgba(15,23,42,0.96) 93%, rgba(15,23,42,1) 100%)',
             }}
           ></div>
         </div>
