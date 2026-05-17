@@ -104,14 +104,15 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
           qc.invalidateQueries({ queryKey: ["/api/admin/sms/conversations"] });
           qc.invalidateQueries({ queryKey: ["/api/admin/inbox/counts"] });
         })
-        .catch((e) => {
+        .catch((e: unknown) => {
           // Surface failures so admins notice when unread state isn't
           // clearing — otherwise a backend regression could silently leave
           // the badge stuck and look like a UI bug.
           console.warn("[sms] markRead failed", e);
+          const msg = e instanceof Error ? e.message : String(e);
           toast({
             title: t("smsMarkReadFailed"),
-            description: e?.message ?? String(e),
+            description: msg,
             variant: "destructive",
           });
         });
@@ -126,7 +127,10 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
       toast({ title: vars.isArchived ? t("smsArchivedToast") : t("smsUnarchivedToast") });
       setSelectedId(null);
     },
-    onError: (e: any) => toast({ title: t("error"), description: e?.message ?? String(e), variant: "destructive" }),
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({ title: t("error"), description: msg, variant: "destructive" });
+    },
   });
 
   const replyMutation = useMutation({
@@ -141,7 +145,10 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
       qc.invalidateQueries({ queryKey: ["/api/admin/sms/conversations", vars.id] });
       toast({ title: t("smsReplySentToast") });
     },
-    onError: (e: any) => toast({ title: t("smsReplyFailedToast"), description: e?.message ?? String(e), variant: "destructive" }),
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      toast({ title: t("smsReplyFailedToast"), description: msg, variant: "destructive" });
+    },
   });
 
   // Auto-scroll the thread to the bottom whenever a new message arrives,
