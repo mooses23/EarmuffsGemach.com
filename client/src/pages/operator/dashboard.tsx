@@ -596,8 +596,8 @@ function RestockingInstructions({ location }: { location: Location }) {
                   <ExternalLink className="h-3 w-3" />
                 </button>
               </div>
+              <p className="text-xs text-slate-400 mb-2">{t('restockButtonOpensAndWatches')}</p>
               <ol className="list-decimal list-inside space-y-2 ml-2">
-                <li>{t('goTo')} <a href="https://usa.banzworld.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">usa.banzworld.com</a></li>
                 <li>{t('clickOnAccount')}</li>
                 <li>
                   {t('logInWith')}
@@ -682,8 +682,8 @@ function RestockingInstructions({ location }: { location: Location }) {
                     <ExternalLink className="h-3 w-3" />
                   </button>
                 </div>
+                <p className="text-xs text-slate-400 mb-2">{t('restockButtonOpensAndWatches')}</p>
                 <ol className="list-decimal list-inside space-y-2 ml-2">
-                  <li>{t('goTo')} <a href="https://usa.banzworld.com" target="_blank" rel="noopener noreferrer" className="text-blue-400 hover:underline">usa.banzworld.com</a></li>
                   <li>{t('clickOnAccount')}</li>
                   <li>
                     {t('logInWith')}
