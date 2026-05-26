@@ -1310,8 +1310,6 @@ const enTranslations = {
     verificationCodeRequestNew: "Request new code",
     verificationCodeError: "Could not start a verification code request. Please try again.",
     verificationCodeUnavailable: "Code could not be retrieved (server restarted during the window). Please request a new code.",
-    restockStepLinkText: "RESTOCK NOW",
-    restockStepReturnHint: "return here for your Login Verification Code",
     verificationCodeWatchingInline: "Watching for your verification code…",
     verificationCodeSessionExpired: "Session expired — tap to restart.",
     verificationCodeMultipleFound: "Multiple codes found — use the most recent one",

@@ -1284,6 +1284,8 @@ const dict: Record<RestTranslationKey, string> = {
     verificationCodeError: "לא ניתן להתחיל בקשת קוד אימות. אנא נסו שוב.",
     verificationCodeUnavailable: "לא ניתן לאחזר את הקוד (השרת הופעל מחדש בזמן ההמתנה). אנא בקשו קוד חדש.",
     restockOpenAndWatch: "פתח BabyBanz וצפה בקוד",
+    restockStepLinkText: "הזמן עכשיו",
+    restockStepReturnHint: "חזרו לכאן לקוד האימות שלכם",
     verificationCodeWatchingInline: "ממתינים לקוד האימות שלכם…",
     verificationCodeSessionExpired: "הפגישה פגה — לחצו להפעלה מחדש.",
     verificationCodeMultipleFound: "נמצאו כמה קודים — השתמשו בקוד העדכני ביותר",
