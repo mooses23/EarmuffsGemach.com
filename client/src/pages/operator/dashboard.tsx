@@ -582,22 +582,20 @@ function RestockingInstructions({ location }: { location: Location }) {
 
           {isUsCanada ? (
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <h4 className="font-semibold text-white">{t('usCanadaOrders')}</h4>
-                <button
-                  onClick={() => handleOpenBanzAndWatch('https://usa.banzworld.com')}
-                  disabled={requestCodeMutation.isPending}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-blue-300 text-xs font-medium transition-colors disabled:opacity-60"
-                >
-                  {requestCodeMutation.isPending
-                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    : <ShoppingCart className="h-3.5 w-3.5" />}
-                  {t('restockOpenAndWatch')}
-                  <ExternalLink className="h-3 w-3" />
-                </button>
-              </div>
-              <p className="text-xs text-slate-400 mb-2">{t('restockButtonOpensAndWatches')}</p>
+              <h4 className="font-semibold text-white mb-3">{t('usCanadaOrders')}</h4>
               <ol className="list-decimal list-inside space-y-2 ml-2">
+                <li>
+                  <button
+                    type="button"
+                    onClick={() => handleOpenBanzAndWatch('https://usa.banzworld.com')}
+                    disabled={requestCodeMutation.isPending}
+                    className="text-blue-400 hover:underline font-semibold disabled:opacity-60 inline-flex items-center gap-1"
+                  >
+                    "{t('restockStepLinkText')}"
+                    <ExternalLink className="h-3 w-3" />
+                  </button>
+                  {' '}— {t('restockStepReturnHint')}
+                </li>
                 <li>{t('clickOnAccount')}</li>
                 <li>
                   {t('logInWith')}
@@ -668,22 +666,20 @@ function RestockingInstructions({ location }: { location: Location }) {
 
               <div className="border-t border-white/10 pt-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-400 mb-3">{t('alternativeMethod')}</p>
-                <div className="flex items-center justify-between mb-2">
-                  <h4 className="font-semibold text-white">{t('usCanadaOrders')}</h4>
-                  <button
-                    onClick={() => handleOpenBanzAndWatch('https://usa.banzworld.com')}
-                    disabled={requestCodeMutation.isPending}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/40 rounded-lg text-blue-300 text-xs font-medium transition-colors disabled:opacity-60"
-                  >
-                    {requestCodeMutation.isPending
-                      ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      : <ShoppingCart className="h-3.5 w-3.5" />}
-                    {t('restockOpenAndWatch')}
-                    <ExternalLink className="h-3 w-3" />
-                  </button>
-                </div>
-                <p className="text-xs text-slate-400 mb-2">{t('restockButtonOpensAndWatches')}</p>
+                <h4 className="font-semibold text-white mb-2">{t('usCanadaOrders')}</h4>
                 <ol className="list-decimal list-inside space-y-2 ml-2">
+                  <li>
+                    <button
+                      type="button"
+                      onClick={() => handleOpenBanzAndWatch('https://usa.banzworld.com')}
+                      disabled={requestCodeMutation.isPending}
+                      className="text-blue-400 hover:underline font-semibold disabled:opacity-60 inline-flex items-center gap-1"
+                    >
+                      "{t('restockStepLinkText')}"
+                      <ExternalLink className="h-3 w-3" />
+                    </button>
+                    {' '}— {t('restockStepReturnHint')}
+                  </li>
                   <li>{t('clickOnAccount')}</li>
                   <li>
                     {t('logInWith')}
