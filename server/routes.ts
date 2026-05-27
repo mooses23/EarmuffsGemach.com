@@ -1298,6 +1298,26 @@ export async function registerRoutes(app: Express): Promise<Server> {
     res.json(await getOnboardingTwilioStatus());
   });
 
+  // Twilio webhook URLs — returns the exact URLs the admin must register in the
+  // Twilio console so inbound SMS/WhatsApp messages flow into the inbox. Using
+  // the same APP_URL / SITE_URL fallback chain as the outbound send flows so the
+  // URLs always match what Twilio will actually call. `isBaseUrlEnvSet` tells
+  // the frontend whether to warn that the URL is derived from the request host
+  // (and may not be stable for production).
+  app.get('/api/admin/twilio/webhook-urls', (req, res) => {
+    if (!requireAdminInline(req, res)) return;
+    const envBase = (process.env.APP_URL || process.env.SITE_URL || '').trim();
+    const isBaseUrlEnvSet = envBase.length > 0;
+    const baseUrl = envBase || `${req.protocol}://${req.get('host')}`;
+    const base = baseUrl.replace(/\/$/, '');
+    res.json({
+      inboundUrl: `${base}/api/webhooks/twilio/inbound`,
+      statusCallbackUrl: `${base}/api/webhooks/twilio/status`,
+      baseUrl: base,
+      isBaseUrlEnvSet,
+    });
+  });
+
   // Live message preview (EN + HE) before sending. GET is intentional —
   // this is a read-only computation off of the location row.
   app.get('/api/admin/locations/:id/onboarding-preview', async (req, res) => {

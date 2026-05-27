@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
-import { useConversations, useConversationMessages, type SmsChannel } from "./sms-hooks";
+import { useConversations, useConversationMessages, useTwilioWebhookUrls, type SmsChannel } from "./sms-hooks";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
 import { Button } from "@/components/ui/button";
@@ -29,6 +29,9 @@ import {
   Search,
   HelpCircle,
   Wand2,
+  Copy,
+  ExternalLink,
+  TriangleAlert,
 } from "lucide-react";
 import { SiWhatsapp } from "react-icons/si";
 import type { Location, SmsConversation, SmsMessage } from "@shared/schema";
@@ -88,6 +91,15 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
     unlinkedOnly,
   });
   const threadQuery = useConversationMessages(selectedId);
+  const webhookUrlsQuery = useTwilioWebhookUrls();
+
+  const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
+  function copyUrl(url: string) {
+    navigator.clipboard.writeText(url).then(() => {
+      setCopiedUrl(url);
+      setTimeout(() => setCopiedUrl(null), 2000);
+    });
+  }
 
   // Locations list — used to populate the "Assign to gemach" dropdown and to
   // render the gemach name next to a resolved conversation. Cached
@@ -490,10 +502,100 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
             </Button>
           </div>
         ) : rows.length === 0 ? (
-          <div className="p-10 text-center text-muted-foreground" data-testid="sms-empty-state">
-            <MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-50" />
-            <div className="font-medium text-foreground">{t("smsEmptyTitle")}</div>
-            <div className="text-sm">{t("smsEmptyDesc")}</div>
+          <div className="p-4 flex flex-col gap-4" data-testid="sms-empty-state">
+            {webhookUrlsQuery.data ? (
+              <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-5 flex flex-col gap-4">
+                <div className="flex items-start gap-3">
+                  <MessageSquare className="h-5 w-5 mt-0.5 text-primary shrink-0" />
+                  <div>
+                    <div className="font-semibold text-foreground">Set up Twilio to receive messages</div>
+                    <div className="text-sm text-muted-foreground mt-0.5">
+                      Twilio credentials are configured. To receive inbound SMS and WhatsApp messages here,
+                      register these two URLs in the{" "}
+                      <a
+                        href="https://console.twilio.com/us1/develop/phone-numbers/manage/incoming"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="underline text-primary inline-flex items-center gap-0.5"
+                      >
+                        Twilio console
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                      .
+                    </div>
+                  </div>
+                </div>
+
+                {!webhookUrlsQuery.data.isBaseUrlEnvSet && (
+                  <div className="flex items-start gap-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 text-sm text-amber-700 dark:text-amber-400">
+                    <TriangleAlert className="h-4 w-4 mt-0.5 shrink-0" />
+                    <span>
+                      <strong>Note:</strong> The URLs below are based on the current request host because
+                      {" "}<code className="text-xs font-mono">APP_URL</code> or{" "}
+                      <code className="text-xs font-mono">SITE_URL</code> is not set. Set one of those
+                      environment variables to your production domain so the URL is stable.
+                    </span>
+                  </div>
+                )}
+
+                <ol className="flex flex-col gap-3 text-sm">
+                  <li className="flex flex-col gap-1">
+                    <span className="font-medium text-foreground">
+                      1. Open your Twilio phone number → Messaging → "A message comes in" (Webhook)
+                    </span>
+                    <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs break-all">
+                      <span className="flex-1 select-all">{webhookUrlsQuery.data.inboundUrl}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyUrl(webhookUrlsQuery.data!.inboundUrl)}
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="Copy inbound URL"
+                      >
+                        {copiedUrl === webhookUrlsQuery.data.inboundUrl ? (
+                          <Check className="h-3.5 w-3.5 text-green-500" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    <span className="text-xs text-muted-foreground">Method: HTTP POST</span>
+                  </li>
+
+                  <li className="flex flex-col gap-1">
+                    <span className="font-medium text-foreground">
+                      2. In the same page → "Message status changes to" (Webhook)
+                    </span>
+                    <div className="flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs break-all">
+                      <span className="flex-1 select-all">{webhookUrlsQuery.data.statusCallbackUrl}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyUrl(webhookUrlsQuery.data!.statusCallbackUrl)}
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label="Copy status callback URL"
+                      >
+                        {copiedUrl === webhookUrlsQuery.data.statusCallbackUrl ? (
+                          <Check className="h-3.5 w-3.5 text-green-500" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </div>
+                    <span className="text-xs text-muted-foreground">Method: HTTP POST</span>
+                  </li>
+
+                  <li className="text-muted-foreground">
+                    3. Save changes in the Twilio console, then send a test SMS or WhatsApp message to your Twilio
+                    number — it will appear here within seconds.
+                  </li>
+                </ol>
+              </div>
+            ) : (
+              <div className="p-10 text-center text-muted-foreground">
+                <MessageSquare className="h-10 w-10 mx-auto mb-2 opacity-50" />
+                <div className="font-medium text-foreground">{t("smsEmptyTitle")}</div>
+                <div className="text-sm">{t("smsEmptyDesc")}</div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="divide-y" role="list">

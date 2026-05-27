@@ -1,6 +1,13 @@
 import { useQuery } from "@tanstack/react-query";
 import type { SmsConversation, SmsMessage } from "@shared/schema";
 
+export interface TwilioWebhookUrls {
+  inboundUrl: string;
+  statusCallbackUrl: string;
+  baseUrl: string;
+  isBaseUrlEnvSet: boolean;
+}
+
 export type SmsChannel = "all" | "sms" | "whatsapp";
 export type SmsFolder = "inbox" | "archived";
 
@@ -63,5 +70,17 @@ export function useConversationMessages(conversationId: number | null) {
     },
     refetchInterval: POLL_MS,
     refetchIntervalInBackground: false,
+  });
+}
+
+export function useTwilioWebhookUrls() {
+  return useQuery<TwilioWebhookUrls>({
+    queryKey: ["/api/admin/twilio/webhook-urls"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/twilio/webhook-urls", { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load webhook URLs");
+      return res.json();
+    },
+    staleTime: 5 * 60 * 1000,
   });
 }
