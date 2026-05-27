@@ -18,6 +18,7 @@ import {
   Shield, AlertTriangle, BookOpen, Phone, Bell, X,
   CheckCircle2, XCircle, Download, Send, MailCheck, Plus,
   ArrowRight, Activity, Package, Truck, KeyRound,
+  Copy, Check, ExternalLink,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
@@ -343,6 +344,32 @@ export default function Dashboard() {
     queryKey: ["/api/admin/restock-shipments"],
     staleTime: 60_000,
   });
+  const twilioStatusQ = useQuery<{
+    sms: { configured: boolean; reason?: string };
+    whatsapp: { configured: boolean; reason?: string };
+  }>({
+    queryKey: ["/api/admin/twilio-status"],
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const webhookUrlsQ = useQuery<{
+    inboundUrl: string;
+    statusCallbackUrl: string;
+    baseUrl: string;
+    isBaseUrlEnvSet: boolean;
+  }>({
+    queryKey: ["/api/admin/twilio/webhook-urls"],
+    staleTime: 5 * 60 * 1000,
+    enabled: !!(twilioStatusQ.data?.sms.configured || twilioStatusQ.data?.whatsapp.configured),
+  });
+  const [copiedWebhookUrl, setCopiedWebhookUrl] = useState<string | null>(null);
+  function copyWebhookUrl(url: string) {
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(url).then(
+      () => { setCopiedWebhookUrl(url); setTimeout(() => setCopiedWebhookUrl(null), 2000); },
+      () => {},
+    );
+  }
 
   const counts = summaryQ.data?.counts;
   const totalLocations = counts?.totalLocations ?? 0;
@@ -740,6 +767,53 @@ export default function Dashboard() {
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">—</p>
+            )}
+
+            {/* Twilio webhook URLs — only shown when SMS or WhatsApp is configured */}
+            {webhookUrlsQ.data && (
+              <div className="mt-4 pt-4 border-t flex flex-col gap-2">
+                <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                  <MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />
+                  Twilio Webhook URLs
+                  <a
+                    href="https://console.twilio.com/us1/develop/phone-numbers/manage/incoming"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="ml-auto text-xs text-primary flex items-center gap-0.5 hover:underline"
+                  >
+                    Open Twilio console
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+                {!webhookUrlsQ.data.isBaseUrlEnvSet && (
+                  <p className="text-xs text-amber-600 dark:text-amber-400">
+                    Set <code className="font-mono">APP_URL</code> or <code className="font-mono">SITE_URL</code> to get a stable production URL.
+                  </p>
+                )}
+                {[
+                  { label: "A message comes in", url: webhookUrlsQ.data.inboundUrl },
+                  { label: "Status callback", url: webhookUrlsQ.data.statusCallbackUrl },
+                ].map(({ label, url }) => (
+                  <div key={url} className="flex flex-col gap-0.5">
+                    <span className="text-xs text-muted-foreground">{label}</span>
+                    <div className="flex items-center gap-2 rounded bg-muted px-2 py-1.5 font-mono text-xs break-all">
+                      <span className="flex-1 select-all">{url}</span>
+                      <button
+                        type="button"
+                        onClick={() => copyWebhookUrl(url)}
+                        className="shrink-0 text-muted-foreground hover:text-foreground transition-colors"
+                        aria-label={`Copy ${label} URL`}
+                      >
+                        {copiedWebhookUrl === url ? (
+                          <Check className="h-3 w-3 text-green-500" />
+                        ) : (
+                          <Copy className="h-3 w-3" />
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </CardContent>
         </Card>

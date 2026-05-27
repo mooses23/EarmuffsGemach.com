@@ -93,12 +93,28 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
   const threadQuery = useConversationMessages(selectedId);
   const webhookUrlsQuery = useTwilioWebhookUrls();
 
+  const twilioStatusQuery = useQuery<{
+    sms: { configured: boolean; reason?: string };
+    whatsapp: { configured: boolean; reason?: string };
+  }>({
+    queryKey: ["/api/admin/twilio-status"],
+    staleTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: false,
+  });
+  const twilioConfigured =
+    twilioStatusQuery.data?.sms.configured ||
+    twilioStatusQuery.data?.whatsapp.configured;
+
   const [copiedUrl, setCopiedUrl] = useState<string | null>(null);
   function copyUrl(url: string) {
-    navigator.clipboard.writeText(url).then(() => {
-      setCopiedUrl(url);
-      setTimeout(() => setCopiedUrl(null), 2000);
-    });
+    if (!navigator.clipboard) return;
+    navigator.clipboard.writeText(url).then(
+      () => {
+        setCopiedUrl(url);
+        setTimeout(() => setCopiedUrl(null), 2000);
+      },
+      () => {},
+    );
   }
 
   // Locations list — used to populate the "Assign to gemach" dropdown and to
@@ -503,7 +519,7 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
           </div>
         ) : rows.length === 0 ? (
           <div className="p-4 flex flex-col gap-4" data-testid="sms-empty-state">
-            {webhookUrlsQuery.data ? (
+            {twilioConfigured && webhookUrlsQuery.data ? (
               <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-5 flex flex-col gap-4">
                 <div className="flex items-start gap-3">
                   <MessageSquare className="h-5 w-5 mt-0.5 text-primary shrink-0" />
