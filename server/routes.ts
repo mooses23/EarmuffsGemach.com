@@ -6172,7 +6172,41 @@ export async function registerRoutes(app: Express): Promise<Server> {
         if (!req.file) {
           return res.status(400).json({ message: "No image file provided" });
         }
-        const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+        const sharp = (await import("sharp")).default;
+        // The stored value is "data:image/webp;base64,<b64>" so the base64
+        // section alone must stay under (100 KB - prefix) to keep the full
+        // data-URL ≤ 100 KB.  Base64 expands binary by 4/3, so the binary
+        // WebP buffer must be ≤ floor(availableChars × 3/4).
+        const DATA_URL_PREFIX = "data:image/webp;base64,";
+        const MAX_STORED_BYTES = 100 * 1024; // 100 KB hard cap on stored string
+        const MAX_BIN_BYTES = Math.floor((MAX_STORED_BYTES - DATA_URL_PREFIX.length) * 3 / 4);
+
+        // Phase 1: quality reduction at fixed 640 px width.
+        let quality = 80;
+        let width = 640;
+        let compressed: Buffer;
+        do {
+          compressed = await sharp(req.file.buffer)
+            .resize({ width, withoutEnlargement: true })
+            .webp({ quality })
+            .toBuffer();
+          quality -= 10;
+        } while (compressed.length > MAX_BIN_BYTES && quality >= 10);
+
+        // Phase 2: if still over budget, progressively shrink dimensions too.
+        const fallbackWidths = [480, 320, 240];
+        for (const w of fallbackWidths) {
+          if (compressed.length <= MAX_BIN_BYTES) break;
+          compressed = await sharp(req.file.buffer)
+            .resize({ width: w })
+            .webp({ quality: 60 })
+            .toBuffer();
+        }
+
+        const dataUrl = `${DATA_URL_PREFIX}${compressed.toString("base64")}`;
+        if (dataUrl.length > MAX_STORED_BYTES) {
+          return res.status(400).json({ message: "Image could not be compressed below 100 KB. Please use a simpler image." });
+        }
         await storage.setGlobalSetting(HERO_IMAGE_KEY, dataUrl);
         res.json({ url: dataUrl });
       } catch (err: any) {
