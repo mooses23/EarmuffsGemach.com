@@ -120,6 +120,9 @@ import {
   ChevronUp,
   DollarSign,
   BarChart3,
+  ImageIcon,
+  Upload,
+  RotateCcw as ResetIcon,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -548,6 +551,142 @@ function NotificationSettingsForm() {
   );
 }
 
+function HeroPhotoForm() {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+  const [resetting, setResetting] = useState(false);
+
+  const { data, isLoading } = useQuery<{ url: string | null }>({
+    queryKey: ["/api/site/hero-image"],
+  });
+
+  const currentUrl = data?.url ?? null;
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!fileInputRef.current) return;
+    fileInputRef.current.value = "";
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      toast({ title: "File too large", description: "Please choose an image under 5 MB.", variant: "destructive" });
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const res = await fetch("/api/admin/site/hero-image", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Upload failed");
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/site/hero-image"] });
+      toast({ title: "Photo updated", description: "The hero portrait has been replaced." });
+    } catch (err: any) {
+      toast({ title: "Upload failed", description: err.message, variant: "destructive" });
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function handleReset() {
+    setResetting(true);
+    try {
+      const res = await fetch("/api/admin/site/hero-image", {
+        method: "DELETE",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.message || "Reset failed");
+      }
+      queryClient.invalidateQueries({ queryKey: ["/api/site/hero-image"] });
+      toast({ title: "Reset to default", description: "The static portrait has been restored." });
+    } catch (err: any) {
+      toast({ title: "Reset failed", description: err.message, variant: "destructive" });
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  if (isLoading) {
+    return <p className="text-sm text-muted-foreground">Loading…</p>;
+  }
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-muted-foreground">
+        Replace the portrait shown on the home page. Upload any JPG, PNG, or WebP image (max 5 MB). When no custom photo is set the original static image is used.
+      </p>
+
+      <div className="flex items-center gap-4">
+        <div
+          className="rounded-xl overflow-hidden border flex-shrink-0"
+          style={{ width: 80, height: 80 }}
+        >
+          {currentUrl ? (
+            <img src={currentUrl} alt="Current hero" className="w-full h-full object-cover" style={{ objectPosition: '50% 12%' }} />
+          ) : (
+            <div className="w-full h-full bg-muted flex items-center justify-center">
+              <ImageIcon className="h-8 w-8 text-muted-foreground" />
+            </div>
+          )}
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs text-muted-foreground">
+            {currentUrl ? "Custom photo is active" : "Using static default photo"}
+          </p>
+          <div className="flex gap-2 flex-wrap">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={uploading || resetting}
+              data-testid="button-upload-hero-photo"
+            >
+              {uploading ? (
+                <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Uploading…</>
+              ) : (
+                <><Upload className="h-3.5 w-3.5 mr-1.5" /> Upload new photo</>
+              )}
+            </Button>
+            {currentUrl && (
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={handleReset}
+                disabled={uploading || resetting}
+                data-testid="button-reset-hero-photo"
+              >
+                {resetting ? (
+                  <><Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" /> Resetting…</>
+                ) : (
+                  <><ResetIcon className="h-3.5 w-3.5 mr-1.5" /> Reset to default</>
+                )}
+              </Button>
+            )}
+          </div>
+        </div>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp"
+        className="hidden"
+        onChange={handleFileChange}
+        data-testid="input-hero-photo-file"
+      />
+    </div>
+  );
+}
+
 function DomainSettingsForm() {
   const { toast } = useToast();
   const queryClient = useQueryClient();
@@ -634,11 +773,11 @@ function LocationSettingsSheet({
             <Settings className="h-5 w-5" /> Settings
           </SheetTitle>
           <SheetDescription>
-            Stripe charge limits + fee override, notification email, domain link rewriting, and region taxonomy.
+            Stripe charge limits + fee override, notification email, domain link rewriting, hero photo, and region taxonomy.
           </SheetDescription>
         </SheetHeader>
         <Tabs defaultValue={initialTab ?? "stripe"} className="mt-4">
-          <TabsList className="grid grid-cols-2 sm:grid-cols-4 w-full gap-1 h-auto">
+          <TabsList className="grid grid-cols-3 sm:grid-cols-5 w-full gap-1 h-auto">
             <TabsTrigger value="stripe" className="text-xs">
               <CreditCard className="h-3.5 w-3.5 mr-1" /> Stripe
             </TabsTrigger>
@@ -647,6 +786,9 @@ function LocationSettingsSheet({
             </TabsTrigger>
             <TabsTrigger value="domain" className="text-xs">
               <Globe className="h-3.5 w-3.5 mr-1" /> Domain
+            </TabsTrigger>
+            <TabsTrigger value="hero" className="text-xs">
+              <ImageIcon className="h-3.5 w-3.5 mr-1" /> Photo
             </TabsTrigger>
             <TabsTrigger value="regions" className="text-xs">
               <MapPin className="h-3.5 w-3.5 mr-1" /> Regions
@@ -660,6 +802,9 @@ function LocationSettingsSheet({
           </TabsContent>
           <TabsContent value="domain" className="mt-4">
             <DomainSettingsForm />
+          </TabsContent>
+          <TabsContent value="hero" className="mt-4">
+            <HeroPhotoForm />
           </TabsContent>
           <TabsContent value="regions" className="mt-4">
             <div className="space-y-3">

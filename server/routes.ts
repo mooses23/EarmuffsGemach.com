@@ -43,6 +43,7 @@ import { geocodeAddress, geocodeAddressDetailed, clearGeocodeCacheForAddress, ge
 import { translate, detectLang, type SupportedLang } from "./translation-service.js";
 import { z } from "zod";
 import { computeReplyWasEdited } from "./reply-edit-detection.js";
+import multer from "multer";
 
 // Utility function to detect card brand
 function detectCardBrand(cardNumber: string): string {
@@ -6123,6 +6124,78 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
     await setForceWwwDomain(forceWww);
     res.json({ forceWww });
+  });
+
+  // ===========================================================================
+  // Hero image — admins can upload a custom portrait for the home page.
+  // GET /api/site/hero-image  — public, returns { url: string | null }
+  // POST /api/admin/site/hero-image  — upload (multipart/form-data, field "image")
+  // DELETE /api/admin/site/hero-image — reset to static fallback
+  // ===========================================================================
+
+  const HERO_IMAGE_KEY = "site.heroImage";
+
+  const heroImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: 5 * 1024 * 1024 }, // 5 MB
+    fileFilter: (_req, file, cb) => {
+      if (file.mimetype.startsWith("image/")) {
+        cb(null, true);
+      } else {
+        cb(new Error("Only image files are allowed"));
+      }
+    },
+  });
+
+  app.get("/api/site/hero-image", async (req, res) => {
+    try {
+      const row = await storage.getGlobalSetting(HERO_IMAGE_KEY);
+      res.setHeader("Cache-Control", "public, max-age=60, stale-while-revalidate=300");
+      res.json({ url: row?.value ?? null });
+    } catch (err) {
+      console.error("[hero-image] GET failed:", err);
+      res.status(500).json({ message: "Failed to load hero image" });
+    }
+  });
+
+  app.post(
+    "/api/admin/site/hero-image",
+    (req, res, next) => {
+      if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      next();
+    },
+    heroImageUpload.single("image"),
+    async (req: any, res: any) => {
+      try {
+        if (!req.file) {
+          return res.status(400).json({ message: "No image file provided" });
+        }
+        const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString("base64")}`;
+        await storage.setGlobalSetting(HERO_IMAGE_KEY, dataUrl);
+        res.json({ url: dataUrl });
+      } catch (err: any) {
+        if (err?.message === "Only image files are allowed") {
+          return res.status(400).json({ message: err.message });
+        }
+        console.error("[hero-image] POST failed:", err);
+        res.status(500).json({ message: "Failed to upload hero image" });
+      }
+    },
+  );
+
+  app.delete("/api/admin/site/hero-image", async (req, res) => {
+    if (!req.isAuthenticated() || !((req.user as any)?.isAdmin)) {
+      return res.status(403).json({ message: "Admin access required" });
+    }
+    try {
+      await storage.deleteGlobalSetting(HERO_IMAGE_KEY);
+      res.json({ url: null });
+    } catch (err) {
+      console.error("[hero-image] DELETE failed:", err);
+      res.status(500).json({ message: "Failed to reset hero image" });
+    }
   });
 
   // ===========================================================================

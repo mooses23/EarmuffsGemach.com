@@ -1,22 +1,26 @@
 import { useState } from "react";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 import { HierarchicalLocationSearch } from "@/components/locations/hierarchical-location-search";
 import { useLanguage } from "@/hooks/use-language";
 // Stable URLs from /public — match the <link rel="preload"> in index.html
 // so the browser doesn't download a hashed duplicate.
 const heroJpg384 = "/img/hero-384.jpg";
 const heroJpg640 = "/img/hero-640.jpg";
-const heroJpg1024 = "/img/hero-1024.jpg";
-const heroJpg1920 = "/img/hero-1920.jpg";
 const heroWebp384 = "/img/hero-384.webp";
 const heroWebp640 = "/img/hero-640.webp";
-const heroWebp1024 = "/img/hero-1024.webp";
-const heroWebp1920 = "/img/hero-1920.webp";
 import { MapPin, Phone, RotateCcw, ChevronUp } from "lucide-react";
 
 export default function Home() {
   const { t } = useLanguage();
   const [showStory, setShowStory] = useState(false);
+
+  const { data: heroData } = useQuery<{ url: string | null }>({
+    queryKey: ["/api/site/hero-image"],
+    staleTime: 60_000,
+  });
+
+  const customHeroUrl = heroData?.url ?? null;
 
   const handleBannerClick = () => {
     if (navigator.vibrate) {
@@ -91,25 +95,35 @@ export default function Home() {
                 transition: 'opacity 0.5s ease',
               }}
             >
-              <picture>
-                <source
-                  type="image/webp"
-                  srcSet={`${heroWebp384} 384w, ${heroWebp640} 640w`}
-                  sizes="160px"
-                />
+              {customHeroUrl ? (
                 <img
-                  src={heroJpg640}
-                  srcSet={`${heroJpg384} 384w, ${heroJpg640} 640w`}
-                  sizes="160px"
-                  width={640}
-                  height={800}
+                  src={customHeroUrl}
                   alt=""
                   className="w-full h-full object-cover"
                   style={{ objectPosition: '50% 12%' }}
                   decoding="async"
-                  fetchpriority="high"
                 />
-              </picture>
+              ) : (
+                <picture>
+                  <source
+                    type="image/webp"
+                    srcSet={`${heroWebp384} 384w, ${heroWebp640} 640w`}
+                    sizes="160px"
+                  />
+                  <img
+                    src={heroJpg640}
+                    srcSet={`${heroJpg384} 384w, ${heroJpg640} 640w`}
+                    sizes="160px"
+                    width={640}
+                    height={800}
+                    alt=""
+                    className="w-full h-full object-cover"
+                    style={{ objectPosition: '50% 12%' }}
+                    decoding="async"
+                    fetchpriority="high"
+                  />
+                </picture>
+              )}
             </div>
           </div>
 
