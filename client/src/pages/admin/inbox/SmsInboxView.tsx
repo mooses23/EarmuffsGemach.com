@@ -517,7 +517,7 @@ export function SmsInboxView({ smsUnread, whatsappUnread }: Props) {
               {t("smsRetry")}
             </Button>
           </div>
-        ) : rows.length === 0 ? (
+        ) : rows.length === 0 && listQuery.data?.total === 0 && channel === "all" && !showArchived && !debouncedSearch && !unlinkedOnly ? (
           <div className="p-4 flex flex-col gap-4" data-testid="sms-empty-state">
             {twilioConfigured && webhookUrlsQuery.data ? (
               <div className="rounded-lg border bg-card text-card-foreground shadow-sm p-5 flex flex-col gap-4">
