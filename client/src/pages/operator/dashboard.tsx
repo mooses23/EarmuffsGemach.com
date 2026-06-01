@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from "react";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { driver } from "driver.js";
 import type { Side } from "driver.js";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -3821,6 +3822,7 @@ export default function OperatorDashboard() {
         </div>
       </div>
 
+      <ErrorBoundary variant="dark" label="Operator dashboard error">
       <div className="container py-6">
         <Tabs value={activeTab} onValueChange={(v) => { if (v !== "return") setPendingReturnTx(null); setActiveTab(v as any); }}>
           <div className="flex flex-col gap-4 mb-6">
@@ -4189,6 +4191,7 @@ export default function OperatorDashboard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      </ErrorBoundary>
     </div>
   );
 }

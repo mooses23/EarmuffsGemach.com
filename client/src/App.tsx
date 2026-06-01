@@ -1,5 +1,5 @@
 import React, { lazy, Suspense, type ComponentType } from "react";
-import { Switch, Route, Redirect } from "wouter";
+import { Switch, Route, Redirect, useLocation } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,6 +11,7 @@ import { AuthProvider } from "@/hooks/use-auth";
 import { LanguageProvider } from "@/hooks/use-language";
 import { OperatorAuthProvider } from "@/hooks/use-operator-auth";
 import { ensureRest, type Language } from "@/lib/translations";
+import { ErrorBoundary } from "@/components/error-boundary";
 
 function detectLang(): Language {
   if (typeof localStorage !== "undefined" && localStorage.getItem("language") === "he") return "he";
@@ -74,15 +75,26 @@ function PageLoader() {
   );
 }
 
+function RouteErrorBoundary({ children }: { children: React.ReactNode }) {
+  const [location] = useLocation();
+  return (
+    <ErrorBoundary key={location} label="Page error — something went wrong">
+      {children}
+    </ErrorBoundary>
+  );
+}
+
 function Router() {
   return (
     <Suspense fallback={<PageLoader />}>
-      <Switch>
-        <Route path="/welcome/:token" component={WelcomePage} />
-        <Route>
-          <LayoutRouter />
-        </Route>
-      </Switch>
+      <RouteErrorBoundary>
+        <Switch>
+          <Route path="/welcome/:token" component={WelcomePage} />
+          <Route>
+            <LayoutRouter />
+          </Route>
+        </Switch>
+      </RouteErrorBoundary>
     </Suspense>
   );
 }

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -596,6 +597,7 @@ export default function Dashboard() {
   };
 
   return (
+    <ErrorBoundary label="Admin dashboard error">
     <>
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
         <h1 className="text-2xl sm:text-3xl font-bold">{t('adminDashboard')}</h1>
@@ -977,5 +979,6 @@ export default function Dashboard() {
         </Card>
       )}
     </>
+    </ErrorBoundary>
   );
 }
