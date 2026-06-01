@@ -288,6 +288,20 @@ export function HierarchicalLocationSearch() {
     return m;
   }, [userCoords, proximityContext, distanceMap, locations]);
 
+  // City-center distance for each location — used to sort tiers 2/3/4 when
+  // the location itself has no precise GPS coords.
+  const cityCenterDistMap = useMemo(() => {
+    if (!userCoords) return new Map<number, number>();
+    const m = new Map<number, number>();
+    for (const loc of locations) {
+      if (loc.cityCategoryId == null) continue;
+      const center = cityCenters[loc.cityCategoryId];
+      if (!center) continue;
+      m.set(loc.id, haversineKm(userCoords.lat, userCoords.lon, center.lat, center.lon));
+    }
+    return m;
+  }, [userCoords, locations, cityCenters]);
+
   const sortedByDistance = useMemo(() => {
     if (!userCoords) return [] as Location[];
     const t1: Location[] = [], t2: Location[] = [], t3: Location[] = [], t4: Location[] = [];
@@ -299,8 +313,15 @@ export function HierarchicalLocationSearch() {
       else t4.push(loc);
     }
     t1.sort((a, b) => (distanceMap.get(a.id) ?? Infinity) - (distanceMap.get(b.id) ?? Infinity));
+    // Sort tiers 2/3/4 by city-center distance so locations in nearer cities
+    // appear first even when they lack precise GPS coordinates.
+    const byCityCenter = (a: Location, b: Location) =>
+      (cityCenterDistMap.get(a.id) ?? Infinity) - (cityCenterDistMap.get(b.id) ?? Infinity);
+    t2.sort(byCityCenter);
+    t3.sort(byCityCenter);
+    t4.sort(byCityCenter);
     return [...t1, ...t2, ...t3, ...t4];
-  }, [userCoords, filteredLocations, distanceMap, tierMap]);
+  }, [userCoords, filteredLocations, distanceMap, tierMap, cityCenterDistMap]);
 
   const usStates = useMemo(() => {
     if (!selectedRegion || selectedRegion.slug !== "united-states") return [];
@@ -450,8 +471,15 @@ export function HierarchicalLocationSearch() {
         cityLocations = [...withCoords, ...withoutCoords];
       }
 
+      // Fall back to city-center distance when no location has precise coords.
+      const cityCenterDist = (() => {
+        if (!nearestActive || !userCoords) return Infinity;
+        const center = cityCenters[city.id];
+        if (!center) return Infinity;
+        return haversineKm(userCoords.lat, userCoords.lon, center.lat, center.lon);
+      })();
       const nearestDist = nearestActive
-        ? Math.min(...cityLocations.map(l => distanceMap.get(l.id) ?? Infinity))
+        ? Math.min(...cityLocations.map(l => distanceMap.get(l.id) ?? Infinity), cityCenterDist)
         : Infinity;
 
       entries.push({ slug: city.slug, city, locations: cityLocations, nearestDist });
@@ -466,7 +494,7 @@ export function HierarchicalLocationSearch() {
       result[entry.slug] = { city: entry.city, locations: entry.locations };
     }
     return result;
-  }, [selectedRegion, cityCategories, filteredLocations, selectedState, selectedSubRegion, selectedCommunity, selectedDistrict, selectedDistrictCommunity, nearestActive, distanceMap]);
+  }, [selectedRegion, cityCategories, filteredLocations, selectedState, selectedSubRegion, selectedCommunity, selectedDistrict, selectedDistrictCommunity, nearestActive, distanceMap, userCoords, cityCenters]);
 
   if (!selectedRegion) {
     return (
