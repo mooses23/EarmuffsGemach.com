@@ -11,6 +11,7 @@ export function AdminNavTabs() {
     { label: t('transactions'), href: "/admin/transactions" },
     { label: t('inboxTitle'), href: "/admin/inbox" },
     { label: t('applications'), href: "/admin/applications" },
+    { label: "Settings", href: "/admin/settings" },
   ];
 
   const isActive = (href: string) => {
@@ -27,7 +28,7 @@ export function AdminNavTabs() {
 
   return (
     <div className="w-full overflow-x-auto [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] mb-8">
-      <div className="inline-flex h-10 items-center justify-start rounded-md bg-muted p-1 text-muted-foreground w-max min-w-full sm:grid sm:w-full sm:grid-cols-5">
+      <div className="inline-flex h-10 items-center justify-start rounded-md bg-muted p-1 text-muted-foreground w-max min-w-full sm:grid sm:w-full sm:grid-cols-6">
         {tabs.map((tab) => (
           <Link
             key={tab.href}

@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLocations, getRegions, updateLocation, deleteLocation } from "@/lib/api";
-import { Region, Location, CityCategory, OPERATOR_WELCOME_CHANNELS, type OperatorWelcomeChannel, type MessageSendLog } from "@shared/schema";
+import { Region, Location, CityCategory, OPERATOR_WELCOME_CHANNELS, type OperatorWelcomeChannel } from "@shared/schema";
 import { localizeIsraelDistrict, IL_DISTRICT_ORDER } from "@/lib/location-names";
 import { Checkbox } from "@/components/ui/checkbox";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
@@ -114,7 +114,6 @@ import {
   Bell,
   Globe,
   Info,
-  History,
   Clock,
   MinusCircle,
   ChevronUp,
@@ -123,7 +122,9 @@ import {
   ImageIcon,
   Upload,
   RotateCcw as ResetIcon,
+  Package,
 } from "lucide-react";
+import { SiWhatsapp } from "react-icons/si";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
@@ -886,6 +887,445 @@ function ServiceStatusBar({
   );
 }
 
+const ADMIN_COLOR_SWATCHES: Record<string, string> = {
+  red: "#EF4444", blue: "#3B82F6", black: "#1F2937", white: "#F9FAFB",
+  pink: "#EC4899", purple: "#8B5CF6", green: "#22C55E", orange: "#F97316",
+  yellow: "#EAB308", gray: "#6B7280",
+};
+
+function InlineNameInputs({
+  location,
+  queryClient,
+  t,
+  language,
+}: {
+  location: Location;
+  queryClient: ReturnType<typeof useQueryClient>;
+  t: (key: string) => string;
+  language: string;
+}) {
+  const { toast } = useToast();
+  const [nameEn, setNameEn] = useState(location.name || "");
+  const [nameHe, setNameHe] = useState(location.nameHe || "");
+  useEffect(() => { setNameEn(location.name || ""); }, [location.name]);
+  useEffect(() => { setNameHe(location.nameHe || ""); }, [location.nameHe]);
+
+  const saveNameMut = useMutation({
+    mutationFn: async (payload: { name?: string; nameHe?: string }) => {
+      const res = await apiRequest("PATCH", `/api/locations/${location.id}`, payload);
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/locations"] }),
+    onError: (err: Error) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+  });
+
+  return (
+    <div className="space-y-1 mb-1">
+      <div className="flex items-center gap-1">
+        <Input
+          value={nameEn}
+          onChange={(e) => setNameEn(e.target.value)}
+          onBlur={() => {
+            const trimmed = nameEn.trim();
+            if (trimmed && trimmed !== location.name) saveNameMut.mutate({ name: trimmed });
+          }}
+          placeholder={t("nameEn")}
+          className="h-7 text-sm font-bold py-0 bg-transparent border-transparent hover:border-input focus:border-input px-1"
+          data-testid={`input-name-en-${location.id}`}
+        />
+        {saveNameMut.isPending && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
+      </div>
+      {(language === "he" || nameHe) && (
+        <Input
+          value={nameHe}
+          dir="rtl"
+          onChange={(e) => setNameHe(e.target.value)}
+          onBlur={() => {
+            const trimmed = nameHe.trim();
+            if (trimmed !== (location.nameHe || "")) saveNameMut.mutate({ nameHe: trimmed || undefined });
+          }}
+          placeholder={t("nameHe")}
+          className="h-6 text-xs py-0 bg-transparent border-transparent hover:border-input focus:border-input px-1 text-foreground/60"
+          data-testid={`input-name-he-${location.id}`}
+        />
+      )}
+    </div>
+  );
+}
+
+function AdminInventoryCircle({ color, quantity }: { color: string; quantity: number }) {
+  const bgColor = ADMIN_COLOR_SWATCHES[color] || "#9CA3AF";
+  const isLight = color === "white" || color === "yellow";
+  return (
+    <div
+      className="relative w-6 h-6 rounded-full flex items-center justify-center"
+      style={{
+        backgroundColor: bgColor,
+        boxShadow: "inset 0 2px 4px rgba(255,255,255,0.4), inset 0 -2px 4px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.12)",
+        border: isLight ? "1px solid #d1d5db" : "none",
+      }}
+      title={`${color}: ${quantity}`}
+    >
+      <span
+        className={`text-[9px] font-bold ${isLight ? "text-gray-700" : "text-white"}`}
+        style={{ textShadow: isLight ? "none" : "0 1px 1px rgba(0,0,0,0.4)" }}
+      >
+        {quantity}
+      </span>
+    </div>
+  );
+}
+
+interface AdminLocationCardProps {
+  location: Location;
+  regions: Region[];
+  cityCategories: CityCategory[];
+  language: string;
+  t: (key: string) => string;
+  isSelected: boolean;
+  onToggleSelect: (id: number, checked: boolean) => void;
+  onChangePin: (loc: Location) => void;
+  onRestockEmail: (loc: Location) => void;
+  onDelete: (loc: Location) => void;
+  onSendWelcome: (loc: Location) => void;
+  onEdit: (loc: Location) => void;
+  regeocodeIsPending: boolean;
+  regeocodeVariables: number | undefined;
+  onRegeocodeClick: (id: number) => void;
+}
+
+function AdminLocationCard({
+  location, regions, cityCategories, language, t,
+  isSelected, onToggleSelect, onChangePin, onRestockEmail,
+  onDelete, onSendWelcome, onEdit: _onEdit,
+  regeocodeIsPending, regeocodeVariables, onRegeocodeClick,
+}: AdminLocationCardProps) {
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
+  const [phoneValue, setPhoneValue] = useState(location.phone || "");
+  const [emailValue, setEmailValue] = useState(location.email || "");
+  const [addressValue, setAddressValue] = useState(location.address || "");
+  const [addressHeValue, setAddressHeValue] = useState((location as any).addressHe || "");
+
+  useEffect(() => { setPhoneValue(location.phone || ""); }, [location.phone]);
+  useEffect(() => { setEmailValue(location.email || ""); }, [location.email]);
+  useEffect(() => { setAddressValue(location.address || ""); }, [location.address]);
+  useEffect(() => { setAddressHeValue((location as any).addressHe || ""); }, [(location as any).addressHe]);
+
+  const { data: inventoryData } = useQuery<{ inventory: { color: string; quantity: number }[]; total: number }>({
+    queryKey: ["/api/locations", location.id, "inventory"],
+    queryFn: async () => {
+      const res = await fetch(`/api/locations/${location.id}/inventory`);
+      if (!res.ok) return { inventory: [], total: 0 };
+      return res.json();
+    },
+  });
+  const inventory = (inventoryData?.inventory ?? []).filter((i) => i.quantity > 0);
+
+  const savePhoneMut = useMutation({
+    mutationFn: async (phone: string) => {
+      const res = await apiRequest("PATCH", `/api/locations/${location.id}`, { phone });
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/locations"] }),
+    onError: (err: Error) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+  });
+
+  const saveEmailMut = useMutation({
+    mutationFn: async (email: string) => {
+      const res = await apiRequest("PATCH", `/api/locations/${location.id}`, { email });
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/locations"] }),
+    onError: (err: Error) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+  });
+
+  const saveAddressMut = useMutation({
+    mutationFn: async (payload: { address: string; addressHe?: string }) => {
+      const res = await apiRequest("PATCH", `/api/locations/${location.id}`, payload);
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["/api/locations"] }),
+    onError: (err: Error) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+  });
+
+  const cardToggleStatus = useMutation({
+    mutationFn: ({ id, isActive }: { id: number; isActive: boolean }) => updateLocation(id, { isActive }),
+    onSuccess: () => {
+      toast({ title: t("statusUpdated"), description: t("statusUpdateSuccess") });
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+    },
+    onError: (err: Error) => toast({ title: t("error"), description: err.message, variant: "destructive" }),
+  });
+
+  const isOnboarded = !!location.operatorPin && location.operatorPin !== "1234";
+  const hasCoords = location.latitude != null && location.longitude != null;
+  const hasAddress = !!(location.address || "").trim();
+  const isRegeocodePending = regeocodeIsPending && regeocodeVariables === location.id;
+
+  const region = regions.find((r) => r.id === location.regionId);
+  const cc = location.cityCategoryId ? cityCategories.find((c) => c.id === location.cityCategoryId) : null;
+  const locName = language === "he" && location.nameHe ? location.nameHe : location.name;
+  const cleanPhone = (phone: string) => phone.replace(/[^+\d]/g, "");
+  const prefillMsg = encodeURIComponent(`Hi, I'd like to borrow earmuffs from ${locName}`);
+  const locContactPerson = language === "he" && (location as any).contactPersonHe ? (location as any).contactPersonHe : location.contactPerson;
+
+  return (
+    <div
+      className={`glass-card p-5 rounded-2xl relative overflow-hidden transition-all duration-300 border ${
+        isSelected
+          ? "border-primary/50 bg-primary/5 shadow-[0_0_20px_rgba(59,130,246,0.1)]"
+          : "border-white/10 hover:border-white/20"
+      }`}
+      data-testid={`card-location-${location.id}`}
+    >
+      {/* Header: checkbox + bilingual name + code badges + action menu */}
+      <div className="flex items-start gap-3 mb-3">
+        <Checkbox
+          checked={isSelected}
+          onCheckedChange={(v) => onToggleSelect(location.id, !!v)}
+          className="mt-1 w-4 h-4 shrink-0"
+          data-testid={`checkbox-location-${location.id}`}
+        />
+        <div className="flex-1 min-w-0">
+          <InlineNameInputs location={location} queryClient={queryClient} t={t} language={language} />
+          <div className="flex flex-wrap gap-1 mt-1">
+            {location.locationCode && (
+              <Badge variant="outline" className="text-xs font-mono py-0">{location.locationCode}</Badge>
+            )}
+            {!location.cityCategoryId && (
+              <Badge className="text-[10px] py-0 bg-amber-500/15 text-amber-300 border border-amber-500/30 gap-0.5">
+                <AlertTriangle className="h-2.5 w-2.5" />{t("noCommunity")}
+              </Badge>
+            )}
+            {region?.slug === "israel" && cc && !cc.districtCode && (
+              <Badge className="text-[10px] py-0 bg-amber-500/15 text-amber-300 border border-amber-500/30 gap-0.5">
+                <AlertTriangle className="h-2.5 w-2.5" />{t("noDistrict")}
+              </Badge>
+            )}
+            {region?.slug === "united-states" && cc && !cc.stateCode && (
+              <Badge className="text-[10px] py-0 bg-amber-500/15 text-amber-300 border border-amber-500/30 gap-0.5">
+                <AlertTriangle className="h-2.5 w-2.5" />{t("noState")}
+              </Badge>
+            )}
+            {region?.slug === "israel" && cc?.districtCode && (
+              <Badge className="text-[10px] py-0 bg-blue-500/15 text-blue-300 border border-blue-500/30">
+                {localizeIsraelDistrict(language as "en" | "he", cc.districtCode)}
+              </Badge>
+            )}
+          </div>
+        </div>
+        <DropdownMenu modal={false}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              variant="ghost" size="icon"
+              className="h-8 w-8 shrink-0 rounded-full text-muted-foreground hover:text-foreground"
+              data-testid={`menu-location-${location.id}`}
+            >
+              <MoreVertical className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-48">
+            <DropdownMenuLabel>{t("actions")}</DropdownMenuLabel>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onChangePin(location)}>
+              <KeyRound className="mr-2 h-4 w-4" />{t("changePin")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onRestockEmail(location)} disabled={!location.email}>
+              <Mail className="mr-2 h-4 w-4" />{t("sendRestockEmail")}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onSendWelcome(location)}>
+              <Send className="mr-2 h-4 w-4" />{t("sendWelcome")}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => onDelete(location)} className="text-red-500 focus:text-red-500">
+              <Trash2 className="mr-2 h-4 w-4" />{t("deleteLocation")}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+
+      {/* Contact person */}
+      <div className="flex items-center gap-2 text-sm mb-2">
+        <ShieldCheck className="h-4 w-4 text-muted-foreground shrink-0" />
+        <span className="truncate text-foreground/80">{locContactPerson}</span>
+      </div>
+
+      {/* Phone — always-visible inline input + contact action buttons */}
+      <div className="flex items-center gap-2 mb-2">
+        <Phone className={`h-4 w-4 shrink-0 ${!phoneValue ? "text-amber-400/70" : "text-muted-foreground"}`} />
+        <Input
+          type="tel"
+          value={phoneValue}
+          onChange={(e) => setPhoneValue(e.target.value)}
+          onBlur={() => {
+            const trimmed = phoneValue.trim();
+            if (trimmed !== (location.phone || "")) savePhoneMut.mutate(trimmed);
+          }}
+          placeholder={t("phoneNumber")}
+          className={`h-7 text-sm py-0 flex-1 ${!phoneValue ? "border-amber-400/50 focus:border-amber-400 placeholder:text-amber-400/50" : ""}`}
+          data-testid={`input-phone-inline-${location.id}`}
+        />
+        {savePhoneMut.isPending && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
+        {phoneValue && (
+          <div className="flex items-center gap-0.5 shrink-0">
+            <a href={`tel:${cleanPhone(phoneValue)}`} onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-500/20 text-emerald-300 hover:bg-emerald-500/30 border border-emerald-500/30 transition-colors"
+              title={t("callAction")}><Phone className="h-3 w-3" /></a>
+            <a href={`sms:${cleanPhone(phoneValue)}?body=${prefillMsg}`} onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-blue-500/20 text-blue-300 hover:bg-blue-500/30 border border-blue-500/30 transition-colors"
+              title={t("smsAction")}><MessageSquare className="h-3 w-3" /></a>
+            <a href={`https://wa.me/${cleanPhone(phoneValue).replace(/^\+/, "")}?text=${prefillMsg}`}
+              target="_blank" rel="noopener noreferrer" onClick={(e) => e.stopPropagation()}
+              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-green-500/20 text-green-300 hover:bg-green-500/30 border border-green-500/30 transition-colors"
+              title={t("whatsappAction")}><SiWhatsapp className="h-3 w-3" /></a>
+          </div>
+        )}
+      </div>
+
+      {/* Email — always-visible inline input */}
+      <div className="flex items-center gap-2 mb-2">
+        <Mail className={`h-4 w-4 shrink-0 ${!emailValue ? "text-amber-400/70" : "text-muted-foreground"}`} />
+        <Input
+          type="email"
+          value={emailValue}
+          onChange={(e) => setEmailValue(e.target.value)}
+          onBlur={() => {
+            const trimmed = emailValue.trim();
+            if (trimmed !== (location.email || "")) saveEmailMut.mutate(trimmed);
+          }}
+          placeholder={t("emailAddress")}
+          className={`h-7 text-sm py-0 flex-1 ${!emailValue ? "border-amber-400/50 focus:border-amber-400 placeholder:text-amber-400/50" : ""}`}
+          data-testid={`input-email-inline-${location.id}`}
+        />
+        {saveEmailMut.isPending && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0" />}
+      </div>
+
+      {/* Address (EN) — always-visible inline input */}
+      <div className="flex items-start gap-2 mb-1">
+        <MapPin className={`h-4 w-4 mt-1.5 shrink-0 ${!addressValue ? "text-amber-400/70" : "text-muted-foreground"}`} />
+        <div className="flex-1 min-w-0">
+          <Input
+            type="text"
+            value={addressValue}
+            onChange={(e) => setAddressValue(e.target.value)}
+            onBlur={() => {
+              const trimmed = addressValue.trim();
+              if (trimmed !== (location.address || "")) saveAddressMut.mutate({ address: trimmed, addressHe: addressHeValue.trim() || undefined });
+            }}
+            placeholder={t("addressPlaceholder")}
+            className={`h-7 text-sm py-0 w-full ${!addressValue ? "border-amber-400/50 focus:border-amber-400 placeholder:text-amber-400/50" : ""}`}
+            data-testid={`input-address-inline-${location.id}`}
+          />
+        </div>
+        {saveAddressMut.isPending && <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0 mt-1.5" />}
+        {addressValue && !hasCoords && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <button type="button" onClick={() => onRegeocodeClick(location.id)} disabled={isRegeocodePending}
+                className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-400 text-xs px-1.5 py-0.5 hover:bg-amber-500/20 transition-colors disabled:opacity-60 shrink-0 mt-1"
+                data-testid={`btn-regeocode-${location.id}`}>
+                {isRegeocodePending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                {t("regeocodeLabel")}
+              </button>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">{t("regeocodeTooltip")}</TooltipContent>
+          </Tooltip>
+        )}
+      </div>
+      {/* Address (HE) — shown when in Hebrew mode or when value exists */}
+      {(language === "he" || addressHeValue) && (
+        <div className="flex items-center gap-2 mb-2 pl-6">
+          <Input
+            type="text"
+            dir="rtl"
+            value={addressHeValue}
+            onChange={(e) => setAddressHeValue(e.target.value)}
+            onBlur={() => {
+              const trimmed = addressHeValue.trim();
+              if (trimmed !== ((location as any).addressHe || "")) saveAddressMut.mutate({ address: addressValue.trim(), addressHe: trimmed || undefined });
+            }}
+            placeholder={t("addressHe")}
+            className="h-7 text-sm py-0 w-full"
+            data-testid={`input-address-he-inline-${location.id}`}
+          />
+        </div>
+      )}
+      <div className="mb-3" />
+
+      {/* Inventory circles */}
+      <div className="flex items-center gap-2 mb-3">
+        <Package className="h-4 w-4 text-muted-foreground shrink-0" />
+        {inventory.length > 0 ? (
+          <span className="flex items-center gap-1 flex-wrap">
+            {inventory.map((item) => <AdminInventoryCircle key={item.color} color={item.color} quantity={item.quantity} />)}
+          </span>
+        ) : (
+          <span className="text-muted-foreground/60 text-xs">{t("noStockData")}</span>
+        )}
+      </div>
+
+      {/* Status row: Active toggle + onboarded + GPS + SMS failure */}
+      <div className="flex flex-wrap items-center gap-1.5 pt-3 border-t border-white/10">
+        <button
+          type="button"
+          onClick={() => cardToggleStatus.mutate({ id: location.id, isActive: !location.isActive })}
+          disabled={cardToggleStatus.isPending}
+          className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors disabled:opacity-60 ${
+            location.isActive
+              ? "bg-emerald-500/15 text-emerald-300 border-emerald-500/30 hover:bg-emerald-500/25"
+              : "bg-muted/50 text-muted-foreground border-white/10 hover:bg-muted"
+          }`}
+          data-testid={`btn-toggle-status-${location.id}`}
+        >
+          {cardToggleStatus.isPending
+            ? <Loader2 className="h-3 w-3 animate-spin" />
+            : location.isActive ? <CheckCircle className="h-3 w-3" /> : <XCircle className="h-3 w-3" />
+          }
+          {location.isActive ? t("active") : t("inactive")}
+        </button>
+
+        <Badge variant="outline" className={`border-transparent text-xs ${isOnboarded ? "bg-primary/15 text-primary" : "bg-muted/50 text-muted-foreground"}`}>
+          {isOnboarded ? <><ShieldCheck className="h-3 w-3 mr-1 inline-block" />{t("onboarded")}</> : t("notOnboarded")}
+        </Badge>
+
+        {hasCoords && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Badge variant="outline" className="border-transparent bg-emerald-500/10 text-emerald-400 gap-1 text-xs">
+                <MapPin className="h-3 w-3" />{t("gps")}
+              </Badge>
+            </TooltipTrigger>
+            <TooltipContent className="text-xs">{t("gpsTooltip")}</TooltipContent>
+          </Tooltip>
+        )}
+
+        {(() => {
+          const smsStatus = location.welcomeSmsStatus?.toLowerCase();
+          const waStatus = location.welcomeWhatsappStatus?.toLowerCase();
+          const smsIsFailed = smsStatus === "undelivered" || smsStatus === "failed";
+          const waIsFailed = waStatus === "undelivered" || waStatus === "failed";
+          if (!smsIsFailed && !waIsFailed) return null;
+          const errorText = location.welcomeSmsError || location.welcomeWhatsappError || null;
+          const failedLabel = smsIsFailed ? t("smsFailed") : t("whatsappFailed");
+          return (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Badge variant="outline" className="border-red-500/40 bg-red-500/15 text-red-300 cursor-help text-xs">
+                  {failedLabel}
+                </Badge>
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs text-xs">
+                {errorText || t("messageNotDelivered")}
+              </TooltipContent>
+            </Tooltip>
+          );
+        })()}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminLocations() {
   const { toast } = useToast();
   const { t, language } = useLanguage();
@@ -916,16 +1356,6 @@ export default function AdminLocations() {
   const [newPin, setNewPin] = useState("");
   const [confirmPin, setConfirmPin] = useState("");
 
-  // ===== Inline email editing =====
-  const [isEmailDialogOpen, setIsEmailDialogOpen] = useState(false);
-  const [emailEditLocation, setEmailEditLocation] = useState<Location | null>(null);
-  const [emailEditValue, setEmailEditValue] = useState("");
-
-  // ===== Inline phone editing =====
-  const [isPhoneDialogOpen, setIsPhoneDialogOpen] = useState(false);
-  const [phoneEditLocation, setPhoneEditLocation] = useState<Location | null>(null);
-  const [phoneEditValue, setPhoneEditValue] = useState("");
-
   // ===== Restock email =====
   const [restockEmailTarget, setRestockEmailTarget] = useState<Location | null>(null);
 
@@ -940,21 +1370,6 @@ export default function AdminLocations() {
   // ===== Onboarding (SMS / Email welcome) =====
   const [isRegionDialogOpen, setIsRegionDialogOpen] = useState(false);
   const [editingRegion, setEditingRegion] = useState<Region | null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsInitialTab, setSettingsInitialTab] = useState<string | undefined>(undefined);
-
-  // Deep-link via URL hash, e.g. #settings=notifications opens the
-  // settings sheet on the Notify tab. Used by the admin dashboard's
-  // "Configure now" alert action.
-  useEffect(() => {
-    const m = /#settings=([a-z]+)/i.exec(window.location.hash);
-    if (m) {
-      setSettingsInitialTab(m[1].toLowerCase());
-      setSettingsOpen(true);
-      try { history.replaceState(null, "", window.location.pathname + window.location.search); } catch {}
-    }
-  }, []);
-
   const [welcomeDialogOpen, setWelcomeDialogOpen] = useState(false);
   const [welcomeTarget, setWelcomeTarget] = useState<{ kind: "single"; id: number; loc: Location } | { kind: "selected" } | { kind: "all-not-onboarded" } | null>(null);
   const [defaultChannel, setDefaultChannelState] = useState<OperatorWelcomeChannel>(() => {
@@ -976,19 +1391,13 @@ export default function AdminLocations() {
   const [streamState, setStreamState] = useState<{ log: string; n: number; total: number } | null>(null);
   const [sendFailures, setSendFailures] = useState<Array<{ name: string; error: string }>>([]);
   const [sendReport, setSendReport] = useState<{ sent: number; failed: number; skipped: number; eligible?: number } | null>(null);
-  const [sendHistoryOpen, setSendHistoryOpen] = useState(false);
   // Broken-link warning state for bulk campaigns. The pending action is invoked
   // when the admin clicks "Send anyway" after seeing the warning.
   const [brokenLinkWarning, setBrokenLinkWarning] = useState<
     { links: { url: string; reason?: string }[]; onConfirm: () => void } | null
   >(null);
   const [linkCheckPending, setLinkCheckPending] = useState(false);
-
-  const sendHistoryQuery = useQuery<MessageSendLog[]>({
-    queryKey: ["/api/admin/message-send-logs"],
-    enabled: sendHistoryOpen,
-    refetchInterval: sendHistoryOpen ? 10000 : false,
-  });
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
 
   const sendRestockEmailMutation = useMutation({
     mutationFn: (locationId: number) =>
@@ -1665,52 +2074,6 @@ export default function AdminLocations() {
     },
   });
 
-  const saveEmailMutation = useMutation({
-    mutationFn: async ({ id, email }: { id: number; email: string }) => {
-      const res = await apiRequest("PATCH", `/api/locations/${id}`, { email });
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Email updated", description: "The operator email has been saved." });
-      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
-      setIsEmailDialogOpen(false);
-      setEmailEditLocation(null);
-      setEmailEditValue("");
-    },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const handleEditEmail = (location: Location) => {
-    setEmailEditLocation(location);
-    setEmailEditValue(location.email || "");
-    setIsEmailDialogOpen(true);
-  };
-
-  const savePhoneMutation = useMutation({
-    mutationFn: async ({ id, phone }: { id: number; phone: string }) => {
-      const res = await apiRequest("PATCH", `/api/locations/${id}`, { phone });
-      return res.json();
-    },
-    onSuccess: () => {
-      toast({ title: "Phone updated", description: "The operator phone number has been saved." });
-      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
-      setIsPhoneDialogOpen(false);
-      setPhoneEditLocation(null);
-      setPhoneEditValue("");
-    },
-    onError: (error: Error) => {
-      toast({ title: "Error", description: error.message, variant: "destructive" });
-    },
-  });
-
-  const handleEditPhone = (location: Location) => {
-    setPhoneEditLocation(location);
-    setPhoneEditValue(location.phone || "");
-    setIsPhoneDialogOpen(true);
-  };
-
   const toggleLocationStatus = (id: number, isActive: boolean) => {
     toggleStatusMutation.mutate({ id, isActive: !isActive });
   };
@@ -1953,53 +2316,64 @@ export default function AdminLocations() {
           locations={locations}
         />
 
-        <LocationSettingsSheet
-          key={settingsInitialTab ?? "default"}
-          open={settingsOpen}
-          onOpenChange={setSettingsOpen}
-          onManageRegions={() => { setEditingRegion(null); setIsRegionDialogOpen(true); }}
-          initialTab={settingsInitialTab}
-        />
-
         {/* ===================================================================
-            DRILL-IN LOCATIONS MANAGEMENT (Direction 1 redesign)
-            New order: toolbar → filter chips → ServiceStatusBar → Send History
-                       → Region strip → Community pills → Summary → Cards
+            DRILL-IN LOCATIONS MANAGEMENT — Borrower-style glassmorphism
             =================================================================== */}
         <div className="pb-32 space-y-5">
-          {/* Toolbar (always visible) — breadcrumb + search + filters + Settings + Add */}
-          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 glass-panel p-4 rounded-2xl">
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <button
-                type="button"
-                onClick={() => { setSelectedRegionId(null); setSelectedDistrictFilter(null); }}
-                className="inline-flex items-center hover:text-foreground transition-colors"
-                aria-label="Back to all regions"
-                data-testid="button-breadcrumb-home"
-              >
-                <Home className="h-4 w-4" />
-              </button>
-              {selectedRegionId !== null && (
-                <>
-                  <ChevronRight className="h-4 w-4" />
-                  <span className="text-foreground font-medium">{selectedRegionName}</span>
-                </>
-              )}
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <div className="relative flex-1 min-w-[180px]">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder={t('search')}
-                  className="pl-9 h-9"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  data-testid="input-search-locations"
-                />
+          {/* Simplified toolbar: breadcrumb + search + filter toggle + add */}
+          <div className="flex flex-wrap items-center gap-3 glass-panel p-4 rounded-2xl">
+            {selectedRegionId !== null && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <button
+                  type="button"
+                  onClick={() => { setSelectedRegionId(null); setSelectedDistrictFilter(null); }}
+                  className="inline-flex items-center hover:text-foreground transition-colors"
+                  aria-label="Back to all regions"
+                  data-testid="button-breadcrumb-home"
+                >
+                  <Home className="h-4 w-4" />
+                </button>
+                <ChevronRight className="h-4 w-4" />
+                <span className="text-foreground font-medium">{selectedRegionName}</span>
               </div>
+            )}
+            <div className="relative flex-1 min-w-[160px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder={t('search')}
+                className="pl-9 h-9"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                data-testid="input-search-locations"
+              />
+            </div>
+            <Button
+              variant={filtersExpanded ? "secondary" : "outline"}
+              size="sm"
+              className="h-9 shrink-0"
+              onClick={() => setFiltersExpanded(v => !v)}
+              data-testid="button-toggle-filters"
+            >
+              <Settings className="h-4 w-4 mr-1" />
+              {t("filters")}
+              {isFilterActive && <span className="ml-1.5 flex h-2 w-2 rounded-full bg-primary" />}
+            </Button>
+            <Button
+              size="sm"
+              className="h-9 shrink-0"
+              onClick={() => setIsCreateDialogOpen(true)}
+              data-testid="button-add-location-card-header"
+            >
+              <Plus className="h-4 w-4 mr-1" />
+              {t('addNewLocation')}
+            </Button>
+          </div>
+
+          {/* Collapsible filter strip */}
+          {filtersExpanded && (
+            <div className="flex flex-wrap items-center gap-2 glass-panel/50 p-3 rounded-xl border border-white/5" data-testid="filter-strip">
               <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-9 w-[140px]">
+                <SelectTrigger className="h-8 w-[140px] text-sm">
                   <SelectValue placeholder={t('status')} />
                 </SelectTrigger>
                 <SelectContent>
@@ -2008,16 +2382,14 @@ export default function AdminLocations() {
                   <SelectItem value="inactive">{t('inactiveOnly')}</SelectItem>
                 </SelectContent>
               </Select>
-              {/* Task #294: GPS coverage filter — surfaces locations with an
-                  address but no coordinates, so admins can re-geocode in bulk. */}
               <Select value={coordsFilter} onValueChange={setCoordsFilter}>
-                <SelectTrigger className="h-9 w-[180px]" data-testid="select-coords-filter">
-                  <SelectValue placeholder="Coordinates" />
+                <SelectTrigger className="h-8 w-[180px] text-sm" data-testid="select-coords-filter">
+                  <SelectValue placeholder={t("allCoordinates")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All coordinates</SelectItem>
+                  <SelectItem value="all">{t("allCoordinates")}</SelectItem>
                   <SelectItem value="missing">
-                    Missing coordinates{missingCoordsCount > 0 ? ` (${missingCoordsCount})` : ""}
+                    {t("missingCoords")}{missingCoordsCount > 0 ? ` (${missingCoordsCount})` : ""}
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -2028,39 +2400,26 @@ export default function AdminLocations() {
                   setOnboardingFilter(v);
                 }}
               >
-                <SelectTrigger className="h-9 w-[160px]">
-                  <SelectValue placeholder="Contact status" />
+                <SelectTrigger className="h-8 w-[160px] text-sm">
+                  <SelectValue placeholder={t("allContacts")} />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All contacts</SelectItem>
-                  <SelectItem value="not-sent">Not messaged</SelectItem>
-                  <SelectItem value="sent">Messaged (awaiting)</SelectItem>
-                  <SelectItem value="failed">Failed delivery</SelectItem>
-                  <SelectItem value="onboarded">Onboarded</SelectItem>
-                  <SelectItem value="no-phone">No phone (cannot send)</SelectItem>
+                  <SelectItem value="all">{t("allContacts")}</SelectItem>
+                  <SelectItem value="not-sent">{t("notMessaged")}</SelectItem>
+                  <SelectItem value="sent">{t("messagedAwaiting")}</SelectItem>
+                  <SelectItem value="failed">{t("failedDelivery")}</SelectItem>
+                  <SelectItem value="onboarded">{t("onboarded")}</SelectItem>
+                  <SelectItem value="no-phone">{t("noPhoneCannotSend")}</SelectItem>
                 </SelectContent>
               </Select>
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-9"
-                onClick={() => setSettingsOpen(true)}
-                data-testid="button-open-settings"
-              >
-                <Settings className="h-4 w-4 mr-1" />
-                Settings
-              </Button>
-              <Button
-                size="sm"
-                className="h-9"
-                onClick={() => setIsCreateDialogOpen(true)}
-                data-testid="button-add-location-card-header"
-              >
-                <Plus className="h-4 w-4 mr-1" />
-                {t('addNewLocation')}
-              </Button>
+              {isFilterActive && (
+                <Button variant="ghost" size="sm" className="h-8 text-xs"
+                  onClick={() => { setSearchTerm(""); setStatusFilter("all"); setOnboardingFilter("all"); setCoordsFilter("all"); }}>
+                  {t('clearAll')}
+                </Button>
+              )}
             </div>
-          </div>
+          )}
 
           {/* Task #294: summary banner — one-click shortcut to the missing-coords
               view, only shown when there's actionable work AND the filter isn't
@@ -2075,8 +2434,7 @@ export default function AdminLocations() {
                 <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
                 <span>
                   <strong>{missingCoordsCount}</strong>{" "}
-                  {missingCoordsCount === 1 ? "location is" : "locations are"} missing GPS
-                  coordinates — borrowers won't see them in "Find nearest to me".
+                  {missingCoordsCount === 1 ? t("locationSingular") : t("locations")} {t("missingCoords").toLowerCase()}
                 </span>
               </div>
               <Button
@@ -2086,7 +2444,7 @@ export default function AdminLocations() {
                 onClick={() => setCoordsFilter("missing")}
                 data-testid="btn-show-missing-coords"
               >
-                Show only these
+                {t("showOnly")}
               </Button>
             </div>
           )}
@@ -2109,13 +2467,13 @@ export default function AdminLocations() {
               )}
               {onboardingFilter !== "all" && (
                 <Badge variant="secondary" className="flex items-center gap-1">
-                  Contact: {onboardingFilter === "not-sent" ? "Not messaged" : onboardingFilter === "sent" ? "Messaged (awaiting)" : onboardingFilter === "failed" ? "Failed" : onboardingFilter === "no-phone" ? "No phone" : "Onboarded"}
+                  {t("allContacts")}: {onboardingFilter === "not-sent" ? t("notMessaged") : onboardingFilter === "sent" ? t("messagedAwaiting") : onboardingFilter === "failed" ? t("failedDelivery") : onboardingFilter === "no-phone" ? t("noPhoneCannotSend") : t("onboarded")}
                   <button onClick={() => setOnboardingFilter("all")} className="ml-1 hover:text-destructive">×</button>
                 </Badge>
               )}
               {coordsFilter !== "all" && (
                 <Badge variant="secondary" className="flex items-center gap-1" data-testid="chip-coords-filter">
-                  Coordinates: {coordsFilter === "missing" ? "Missing" : coordsFilter}
+                  {t("allCoordinates")}: {coordsFilter === "missing" ? t("missingCoords") : coordsFilter}
                   <button onClick={() => setCoordsFilter("all")} className="ml-1 hover:text-destructive">×</button>
                 </Badge>
               )}
@@ -2130,249 +2488,77 @@ export default function AdminLocations() {
             </div>
           )}
 
-          {/* Service Status Bar (Twilio / Email / WhatsApp) */}
-          <ServiceStatusBar status={serviceStatusQuery.data} loading={serviceStatusQuery.isLoading} />
-
-          {/* Message Send History (collapsible) — moved here per request */}
-          <Card>
-            <CardHeader className="pb-2 cursor-pointer select-none" onClick={() => setSendHistoryOpen(v => !v)}>
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <History className="h-4 w-4 text-muted-foreground" />
-                  <CardTitle className="text-base">Message Send History</CardTitle>
-                  {!sendHistoryOpen && sendHistoryQuery.data && sendHistoryQuery.data.some(l => l.status === "failed") && (
-                    <Badge variant="destructive" className="text-xs">
-                      {sendHistoryQuery.data.filter(l => l.status === "failed").length} failed
-                    </Badge>
-                  )}
-                </div>
-                {sendHistoryOpen
-                  ? <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                  : <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                }
-              </div>
-              <CardDescription className="text-xs mt-0.5">
-                Permanent log of every message send attempt — successes, failures, and skipped locations.
-              </CardDescription>
-            </CardHeader>
-            {sendHistoryOpen && (
-              <CardContent className="pt-0">
-                {sendHistoryQuery.isLoading && (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground py-4">
-                    <Loader2 className="h-4 w-4 animate-spin" /> Loading send history…
-                  </div>
-                )}
-                {sendHistoryQuery.isError && (
-                  <p className="text-sm text-destructive py-4">Failed to load send history.</p>
-                )}
-                {sendHistoryQuery.data && sendHistoryQuery.data.length === 0 && (
-                  <p className="text-sm text-muted-foreground py-4">No send history yet. Logs will appear here after you send messages to locations.</p>
-                )}
-                {sendHistoryQuery.data && sendHistoryQuery.data.length > 0 && (() => {
-                  const logs = sendHistoryQuery.data;
-                  const isDeliveryBad = (l: typeof logs[0]) =>
-                    l.deliveryStatus === "undelivered" || l.deliveryStatus === "failed";
-                  const failedCount = logs.filter(l => l.status === "failed" || isDeliveryBad(l)).length;
-                  const deliveredCount = logs.filter(l => l.deliveryStatus === "delivered").length;
-                  const sentCount = logs.filter(l => l.status === "sent" && !l.deliveryStatus).length;
-                  const skippedCount = logs.filter(l => l.status === "skipped").length;
-                  return (
-                    <div className="space-y-3">
-                      <div className="flex flex-wrap gap-2 text-xs">
-                        {deliveredCount > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
-                            <CheckCircle className="h-3 w-3" />{deliveredCount} delivered
-                          </span>
-                        )}
-                        {sentCount > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-50 text-green-700 border border-green-200">
-                            <CheckCircle className="h-3 w-3" />{sentCount} sent (pending confirmation)
-                          </span>
-                        )}
-                        {failedCount > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200">
-                            <XCircle className="h-3 w-3" />{failedCount} undelivered
-                          </span>
-                        )}
-                        {skippedCount > 0 && (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200">
-                            <MinusCircle className="h-3 w-3" />{skippedCount} skipped
-                          </span>
-                        )}
-                        <span className="text-muted-foreground">(last {logs.length} entries)</span>
-                      </div>
-                      <div className="rounded border overflow-hidden">
-                        <div className="max-h-96 overflow-y-auto">
-                          <Table>
-                            <TableHeader>
-                              <TableRow className="bg-muted/30">
-                                <TableHead className="text-xs py-2 w-32">When</TableHead>
-                                <TableHead className="text-xs py-2">Location</TableHead>
-                                <TableHead className="text-xs py-2 w-20">Channel</TableHead>
-                                <TableHead className="text-xs py-2 w-20">Status</TableHead>
-                                <TableHead className="text-xs py-2">Reason / Error</TableHead>
-                              </TableRow>
-                            </TableHeader>
-                            <TableBody>
-                              {logs.map((log, i) => {
-                                const isNewBatch = i === 0 || log.batchId !== logs[i - 1].batchId;
-                                const sentAt = new Date(log.sentAt);
-                                const daysAgo = Math.floor((Date.now() - sentAt.getTime()) / 86400000);
-                                const timeStr = daysAgo === 0
-                                  ? sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
-                                  : daysAgo === 1
-                                    ? `Yesterday ${sentAt.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })}`
-                                    : sentAt.toLocaleDateString(undefined, { month: "short", day: "numeric" });
-                                return (
-                                  <TableRow
-                                    key={log.id}
-                                    className={`text-xs ${(log.status === "failed" || log.deliveryStatus === "undelivered" || log.deliveryStatus === "failed") ? "bg-red-50/40 dark:bg-red-950/20" : log.status === "skipped" ? "bg-amber-50/30 dark:bg-amber-950/10" : log.deliveryStatus === "delivered" ? "bg-green-50/20 dark:bg-green-950/10" : ""} ${isNewBatch && log.batchId && i > 0 ? "border-t-2 border-muted" : ""}`}
-                                  >
-                                    <TableCell className="py-1.5 text-muted-foreground whitespace-nowrap">
-                                      <div className="flex items-center gap-1">
-                                        <Clock className="h-3 w-3 shrink-0" />
-                                        {timeStr}
-                                      </div>
-                                      {isNewBatch && log.batchId && (
-                                        <span className="text-[10px] text-muted-foreground/60 block mt-0.5">
-                                          {log.batchId === 'restock' ? 'restock' : 'batch'}
-                                        </span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="py-1.5 font-medium">
-                                      {log.locationName}
-                                      <span className="text-muted-foreground font-normal ml-1 text-[11px]">({log.locationCode})</span>
-                                    </TableCell>
-                                    <TableCell className="py-1.5">
-                                      <span className="inline-flex items-center gap-0.5">
-                                        {log.channel === "sms" && <MessageSquare className="h-3 w-3" />}
-                                        {log.channel === "whatsapp" && <MessageCircle className="h-3 w-3" />}
-                                        {log.channel === "email" && <Mail className="h-3 w-3" />}
-                                        {log.channel}
-                                      </span>
-                                    </TableCell>
-                                    <TableCell className="py-1.5">
-                                      {log.status === "sent" && (
-                                        <div className="flex flex-col gap-0.5">
-                                          {/* If Twilio has confirmed delivery, replace the "Sent" chip */}
-                                          {!log.deliveryStatus && (
-                                            <span className="inline-flex items-center gap-1 text-green-700">
-                                              <CheckCircle className="h-3 w-3" /> Sent
-                                            </span>
-                                          )}
-                                          {log.deliveryStatus === "delivered" && (
-                                            <span className="inline-flex items-center gap-1 text-green-700 font-medium">
-                                              <CheckCircle className="h-3 w-3" /> Delivered
-                                            </span>
-                                          )}
-                                          {(log.deliveryStatus === "undelivered" || log.deliveryStatus === "failed") && (
-                                            <span className="inline-flex items-center gap-1 text-red-700 font-medium">
-                                              <XCircle className="h-3 w-3" /> {log.deliveryStatus === "failed" ? "Failed" : "Undelivered"}
-                                            </span>
-                                          )}
-                                          {log.deliveryStatus && log.deliveryStatus !== "delivered" && log.deliveryStatus !== "undelivered" && log.deliveryStatus !== "failed" && (
-                                            <span className="inline-flex items-center gap-1 text-slate-500 text-[11px]">
-                                              <Clock className="h-3 w-3" /> {log.deliveryStatus}
-                                            </span>
-                                          )}
-                                        </div>
-                                      )}
-                                      {log.status === "failed" && (
-                                        <span className="inline-flex items-center gap-1 text-red-700 font-medium">
-                                          <XCircle className="h-3 w-3" /> Failed
-                                        </span>
-                                      )}
-                                      {log.status === "skipped" && (
-                                        <span className="inline-flex items-center gap-1 text-amber-700">
-                                          <MinusCircle className="h-3 w-3" /> Skipped
-                                        </span>
-                                      )}
-                                    </TableCell>
-                                    <TableCell className="py-1.5 text-muted-foreground max-w-[200px] truncate">
-                                      {log.deliveryError || log.error || "—"}
-                                    </TableCell>
-                                  </TableRow>
-                                );
-                              })}
-                            </TableBody>
-                          </Table>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })()}
-              </CardContent>
-            )}
-          </Card>
-
-          {/* Compact Region Strip — moved BELOW toolbar/ServiceStatusBar/Send History.
-              Each card has a bulk-select checkbox to add/remove ALL its locations. */}
-          <div className="flex gap-3 overflow-x-auto pb-3 -mx-2 px-2">
-            {regionStats.map(({ region, count, onboarded, missingContact }) => {
-              const regionName = language === "he" && region.nameHe ? region.nameHe : region.name;
-              const isActive = selectedRegionId === region.id;
-              const regionLocIds = filteredLocations.filter(l => l.regionId === region.id).map(l => l.id);
-              const allRegionSelected = allIdsSelected(regionLocIds);
-              const someRegionSelected = !allRegionSelected && regionLocIds.some(id => selectedIds.has(id));
-              return (
-                <div
-                  key={region.id}
-                  className={`flex-shrink-0 relative p-4 rounded-2xl transition-all border min-w-[220px] ${
-                    isActive
-                      ? "bg-primary/20 border-primary/50 shadow-[0_0_20px_rgba(59,130,246,0.2)]"
-                      : "glass-card hover:bg-white/5"
-                  }`}
-                  data-testid={`region-card-${region.id}`}
-                >
-                  <div
-                    className="absolute top-3 right-3 z-10"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <Checkbox
-                      checked={allRegionSelected}
-                      onCheckedChange={(v) => toggleManyIds(regionLocIds, !!v)}
-                      aria-label={`Select all locations in ${regionName}`}
-                      className={`w-5 h-5 ${someRegionSelected ? "data-[state=unchecked]:bg-primary/30 data-[state=unchecked]:border-primary/60" : ""}`}
-                      data-testid={`checkbox-region-${region.id}`}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedRegionId(region.id);
-                      setSelectedCityCategoryId("all");
-                      setSelectedDistrictFilter(null);
-                    }}
-                    className="text-left w-full pr-8"
-                    data-testid={`region-card-button-${region.id}`}
-                  >
-                    <h3 className="text-foreground font-semibold flex items-center gap-2">
-                      {regionName}
-                    </h3>
-                    <div className="flex flex-wrap gap-1.5 mt-3">
-                      <Badge variant="secondary" className="text-xs">
-                        {count} {count === 1 ? t('locationSingular') : t('locations')}
-                      </Badge>
-                      {onboarded > 0 && (
-                        <Badge variant="outline" className="text-xs bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
-                          {onboarded} onboarded
-                        </Badge>
-                      )}
-                      {missingContact > 0 && (
-                        <Badge variant="outline" className="text-xs bg-orange-500/15 text-orange-300 border-orange-500/30">
-                          {missingContact} missing contact
-                        </Badge>
-                      )}
-                    </div>
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-
+          {/* Large glassmorphism region cards — click to drill in */}
           {selectedRegionId === null ? (
-            <div className="text-sm text-muted-foreground text-center py-8">
-              Select a region above to view its locations.
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {regionStats.map(({ region, count, onboarded, missingContact }) => {
+                const regionName = language === "he" && region.nameHe ? region.nameHe : region.name;
+                const regionLocIds = filteredLocations.filter(l => l.regionId === region.id).map(l => l.id);
+                const allRegionSelected = allIdsSelected(regionLocIds);
+                const someRegionSelected = !allRegionSelected && regionLocIds.some(id => selectedIds.has(id));
+                const allCommunities = cityCategories.filter(cc =>
+                  locations.some(l => l.regionId === region.id && l.cityCategoryId === cc.id)
+                );
+                const previewCommunities = allCommunities.slice(0, 3);
+                return (
+                  <div
+                    key={region.id}
+                    className="glass-card glass-highlight p-6 rounded-2xl border border-white/10 hover:border-white/20 transition-all duration-300 relative group"
+                    data-testid={`region-card-${region.id}`}
+                  >
+                    <div className="absolute top-4 right-4 z-10" onClick={(e) => e.stopPropagation()}>
+                      <Checkbox
+                        checked={allRegionSelected}
+                        onCheckedChange={(v) => toggleManyIds(regionLocIds, !!v)}
+                        aria-label={`Select all locations in ${regionName}`}
+                        className={`w-5 h-5 ${someRegionSelected ? "data-[state=unchecked]:bg-primary/30 data-[state=unchecked]:border-primary/60" : ""}`}
+                        data-testid={`checkbox-region-${region.id}`}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedRegionId(region.id);
+                        setSelectedCityCategoryId("all");
+                        setSelectedDistrictFilter(null);
+                      }}
+                      className="text-left w-full pr-8"
+                      data-testid={`region-card-button-${region.id}`}
+                    >
+                      <h3 className="text-xl font-bold text-foreground mb-1 group-hover:text-primary transition-colors">{regionName}</h3>
+                      <p className="text-sm text-muted-foreground mb-4">
+                        {count} {count === 1 ? t("locationSingular") : t("locations")}
+                      </p>
+                      {previewCommunities.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-4">
+                          {previewCommunities.map(cc => (
+                            <span key={cc.id} className="text-xs px-2 py-0.5 rounded-full bg-white/10 text-foreground/70 border border-white/10">
+                              {language === "he" && cc.nameHe ? cc.nameHe : cc.name}
+                            </span>
+                          ))}
+                          {allCommunities.length > 3 && (
+                            <span className="text-xs px-2 py-0.5 rounded-full bg-white/5 text-muted-foreground">
+                              {t("nMoreCommunities").replace("{n}", String(allCommunities.length - 3))}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      <div className="flex flex-wrap gap-1.5">
+                        {onboarded > 0 && (
+                          <Badge variant="outline" className="text-xs bg-emerald-500/15 text-emerald-300 border-emerald-500/30">
+                            {t("onboardedCount").replace("{n}", String(onboarded))}
+                          </Badge>
+                        )}
+                        {missingContact > 0 && (
+                          <Badge variant="outline" className="text-xs bg-orange-500/15 text-orange-300 border-orange-500/30">
+                            {t("missingContactCount").replace("{n}", String(missingContact))}
+                          </Badge>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           ) : (
             <div className="space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -2437,7 +2623,7 @@ export default function AdminLocations() {
                           onClick={() => setSelectedCityCategoryId("all")}
                           data-testid="pill-community-all"
                         >
-                          All
+                          {t("communityAll")}
                         </button>
                       </div>
                     );
@@ -2567,316 +2753,30 @@ export default function AdminLocations() {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {visibleLocations.map((location) => {
-                    const isSelected = selectedIds.has(location.id);
-                    const isOnboarded = !!location.onboardedAt;
-                    const isPinCustomized = !!location.operatorPin && location.operatorPin !== '1234';
-                    return (
-                      <div
-                        key={location.id}
-                        className={`glass-card p-5 rounded-2xl relative overflow-hidden transition-all duration-300 border ${
-                          isSelected
-                            ? "border-primary/50 bg-primary/5 shadow-[0_0_20px_rgba(59,130,246,0.1)]"
-                            : "border-white/10 hover:border-white/20"
-                        }`}
-                        data-testid={`card-location-${location.id}`}
-                      >
-                        <div className="absolute top-3 right-3 z-10 flex gap-2 items-center">
-                          <DropdownMenu modal={false}>
-                            <DropdownMenuTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8 rounded-full text-muted-foreground hover:text-foreground"
-                                data-testid={`menu-location-${location.id}`}
-                              >
-                                <MoreVertical className="h-4 w-4" />
-                              </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
-                              <DropdownMenuLabel>{t('actions')}</DropdownMenuLabel>
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem onClick={() => handleEditLocation(location)}>
-                                <Edit className="mr-2 h-4 w-4" />
-                                {t('editLocation')}
-                              </DropdownMenuItem>
-                              <DropdownMenuItem onClick={() => handleChangePinForLocation(location)}>
-                                <KeyRound className="mr-2 h-4 w-4" />
-                                Change PIN
-                              </DropdownMenuItem>
-                              <DropdownMenuItem
-                                onClick={() => setRestockEmailTarget(location)}
-                                disabled={!location.email}
-                              >
-                                <Mail className="mr-2 h-4 w-4" />
-                                {t('sendRestockEmail')}
-                              </DropdownMenuItem>
-                              {!isOnboarded && (
-                                <DropdownMenuItem onClick={() => openSinglePicker(location)}>
-                                  <Send className="mr-2 h-4 w-4" />
-                                  Send Welcome
-                                </DropdownMenuItem>
-                              )}
-                              <DropdownMenuSeparator />
-                              <DropdownMenuItem
-                                onClick={() => handleDeleteLocation(location)}
-                                className="text-red-500 focus:text-red-500"
-                              >
-                                <Trash2 className="mr-2 h-4 w-4" />
-                                {t('deleteLocationConfirm')}
-                              </DropdownMenuItem>
-                            </DropdownMenuContent>
-                          </DropdownMenu>
-                          <Checkbox
-                            checked={isSelected}
-                            onCheckedChange={(v) => toggleOne(location.id, !!v)}
-                            aria-label={`Select ${location.name}`}
-                            className="w-5 h-5"
-                            data-testid={`checkbox-location-${location.id}`}
-                          />
-                        </div>
-
-                        <div className="pr-20">
-                          <h4 className="text-lg font-bold text-foreground mb-1 leading-tight">
-                            {/* Task #289: always render BOTH languages.
-                                When the canonical opposite-language column
-                                is missing, BilingualValue auto-translates
-                                and allows admin correction (saved back to
-                                locations.name / locations.nameHe). */}
-                            <BilingualValue
-                              en={location.name}
-                              he={location.nameHe}
-                              allowEdit
-                              recordType="location"
-                              recordId={location.id}
-                              fieldKey="name"
-                            />
-                          </h4>
-                          <div className="flex flex-wrap gap-1.5 mb-3">
-                            {location.locationCode && (
-                              <Badge variant="outline" className="text-xs font-mono">
-                                {location.locationCode}
-                              </Badge>
-                            )}
-                            {(() => {
-                              const region = regions.find(r => r.id === location.regionId);
-                              const cc = location.cityCategoryId
-                                ? cityCategories.find(c => c.id === location.cityCategoryId)
-                                : null;
-
-                              // No community assigned at all
-                              if (!location.cityCategoryId) {
-                                return (
-                                  <Badge className="text-[10px] py-0 bg-amber-500/15 text-amber-300 border border-amber-500/30 gap-0.5">
-                                    <AlertTriangle className="h-2.5 w-2.5" />
-                                    No community
-                                  </Badge>
-                                );
-                              }
-                              // Israel — missing district
-                              if (region?.slug === "israel" && !cc?.districtCode) {
-                                return (
-                                  <Badge className="text-[10px] py-0 bg-amber-500/15 text-amber-300 border border-amber-500/30 gap-0.5">
-                                    <AlertTriangle className="h-2.5 w-2.5" />
-                                    No district
-                                  </Badge>
-                                );
-                              }
-                              // USA — missing state
-                              if (region?.slug === "united-states" && !cc?.stateCode) {
-                                return (
-                                  <Badge className="text-[10px] py-0 bg-amber-500/15 text-amber-300 border border-amber-500/30 gap-0.5">
-                                    <AlertTriangle className="h-2.5 w-2.5" />
-                                    No state
-                                  </Badge>
-                                );
-                              }
-                              // Israel — has district → show blue badge
-                              if (region?.slug === "israel" && cc?.districtCode) {
-                                return (
-                                  <Badge className="text-[10px] py-0 bg-blue-500/15 text-blue-300 border border-blue-500/30">
-                                    {localizeIsraelDistrict(language as "en" | "he", cc.districtCode)}
-                                  </Badge>
-                                );
-                              }
-                              return null;
-                            })()}
-                          </div>
-                        </div>
-
-                        <div className="space-y-2 mb-4 text-sm">
-                          <div className="flex items-center gap-2">
-                            <ShieldCheck className="h-4 w-4 text-muted-foreground shrink-0" />
-                            <span className="text-foreground/90">{localized(location, "contactPerson")}</span>
-                          </div>
-                          <div className="flex items-start gap-2">
-                            <Phone className={`h-4 w-4 mt-0.5 shrink-0 ${location.phone ? "text-muted-foreground" : "text-orange-400/70"}`} />
-                            {location.phone ? (
-                              <button
-                                type="button"
-                                onClick={() => handleEditPhone(location)}
-                                className="text-foreground/90 hover:text-foreground hover:underline transition-colors text-left"
-                                data-testid={`btn-edit-phone-${location.id}`}
-                              >
-                                {location.phone}
-                              </button>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] py-0 border-orange-500/40 text-orange-400 bg-orange-500/10 cursor-pointer"
-                                onClick={() => handleEditPhone(location)}
-                              >
-                                MISSING PHONE
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-start gap-2">
-                            <Mail className={`h-4 w-4 mt-0.5 shrink-0 ${location.email ? "text-muted-foreground" : "text-orange-400/70"}`} />
-                            {location.email ? (
-                              <button
-                                type="button"
-                                onClick={() => handleEditEmail(location)}
-                                className="text-foreground/90 hover:text-foreground hover:underline transition-colors text-left truncate"
-                                title={location.email}
-                              >
-                                {location.email}
-                              </button>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] py-0 border-orange-500/40 text-orange-400 bg-orange-500/10 cursor-pointer"
-                                onClick={() => handleEditEmail(location)}
-                              >
-                                MISSING EMAIL
-                              </Badge>
-                            )}
-                          </div>
-                          <div className="flex items-start gap-2">
-                            <MapPin className={`h-4 w-4 mt-0.5 shrink-0 ${location.address ? "text-muted-foreground" : "text-orange-400/70"}`} />
-                            {location.address ? (
-                              <button
-                                type="button"
-                                onClick={() => handleEditLocation(location)}
-                                className="text-foreground/90 hover:text-foreground hover:underline transition-colors text-left"
-                              >
-                                <span className="block">{location.address}</span>
-                                {location.addressHe && (
-                                  <span className="block text-foreground/70">{location.addressHe}</span>
-                                )}
-                              </button>
-                            ) : (
-                              <Badge
-                                variant="outline"
-                                className="text-[10px] py-0 border-orange-500/40 text-orange-400 bg-orange-500/10 cursor-pointer"
-                                onClick={() => handleEditLocation(location)}
-                              >
-                                MISSING ADDRESS
-                              </Badge>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-1.5 pt-3 border-t border-white/10">
-                          <Badge
-                            variant="outline"
-                            className={`border-transparent ${location.isActive ? "bg-emerald-500/15 text-emerald-300" : "bg-muted text-muted-foreground"}`}
-                          >
-                            {location.isActive ? t('active') : t('inactive')}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={`border-transparent ${isPinCustomized ? "bg-primary/15 text-primary" : "bg-muted text-muted-foreground"}`}
-                          >
-                            {isPinCustomized ? "Onboarded" : "Not onboarded"}
-                          </Badge>
-                          {/* Task #282: geocoding status indicator */}
-                          {(() => {
-                            const hasCoords = location.latitude != null && location.longitude != null;
-                            const hasAddress = !!(location.address || "").trim();
-                            const isRegeocodePending = regeocodeLocationMutation.isPending && regeocodeLocationMutation.variables === location.id;
-                            if (hasCoords) {
-                              return (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Badge variant="outline" className="border-transparent bg-emerald-500/10 text-emerald-400 gap-1">
-                                      <MapPin className="h-3 w-3" /> GPS
-                                    </Badge>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-xs">Has GPS coordinates — shows in "Find nearest to me"</TooltipContent>
-                                </Tooltip>
-                              );
-                            } else if (hasAddress) {
-                              return (
-                                <div className="inline-flex items-center gap-1">
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <span className="inline-flex items-center gap-0.5 text-amber-400 text-xs">
-                                        <AlertTriangle className="h-3 w-3" />
-                                      </span>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="text-xs">No GPS coordinates yet</TooltipContent>
-                                  </Tooltip>
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <button
-                                        type="button"
-                                        onClick={() => regeocodeLocationMutation.mutate(location.id)}
-                                        disabled={isRegeocodePending}
-                                        className="inline-flex items-center gap-1 rounded-full border border-amber-500/40 bg-amber-500/10 text-amber-400 text-xs px-2 py-0.5 hover:bg-amber-500/20 transition-colors disabled:opacity-60"
-                                        data-testid={`btn-regeocode-${location.id}`}
-                                      >
-                                        {isRegeocodePending ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-                                        Re-geocode
-                                      </button>
-                                    </TooltipTrigger>
-                                    <TooltipContent className="text-xs">Click to geocode coordinates from address</TooltipContent>
-                                  </Tooltip>
-                                </div>
-                              );
-                            } else {
-                              return (
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Badge variant="outline" className="border-transparent bg-muted text-muted-foreground gap-1">
-                                      <span className="text-muted-foreground/50 font-bold text-xs leading-none">—</span>
-                                    </Badge>
-                                  </TooltipTrigger>
-                                  <TooltipContent className="text-xs">No address — add an address to enable geocoding</TooltipContent>
-                                </Tooltip>
-                              );
-                            }
-                          })()}
-                          {(() => {
-                            const sms = location.welcomeSmsStatus?.toLowerCase();
-                            const wa = location.welcomeWhatsappStatus?.toLowerCase();
-                            const smsFailed = sms === 'undelivered' || sms === 'failed';
-                            const waFailed = wa === 'undelivered' || wa === 'failed';
-                            const isUndelivered = smsFailed || waFailed;
-                            if (!isUndelivered) return null;
-                            const errorText = location.welcomeSmsError || location.welcomeWhatsappError || null;
-                            const failedChannel = smsFailed ? 'SMS' : 'WhatsApp';
-                            const failedStatus = smsFailed ? sms : wa;
-                            const statusLabel = failedStatus === 'failed' ? 'failed' : 'undelivered';
-                            return (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Badge
-                                    variant="outline"
-                                    className="border-red-500/40 bg-red-500/15 text-red-300 cursor-help"
-                                  >
-                                    {failedChannel} {statusLabel}
-                                  </Badge>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs text-xs">
-                                  {errorText || "Twilio reported the message was not delivered. Check your A2P campaign registration."}
-                                </TooltipContent>
-                              </Tooltip>
-                            );
-                          })()}
-                        </div>
-                      </div>
-                    );
-                  })}
+                  {visibleLocations.length === 0 ? (
+                    <div className="col-span-full text-center py-12 text-muted-foreground">
+                      <p className="text-sm">{t("noLocationsFound")}</p>
+                    </div>
+                  ) : visibleLocations.map((location) => (
+                    <AdminLocationCard
+                      key={location.id}
+                      location={location}
+                      regions={regions}
+                      cityCategories={cityCategories}
+                      language={language}
+                      t={t}
+                      isSelected={selectedIds.has(location.id)}
+                      onToggleSelect={toggleOne}
+                      onChangePin={handleChangePinForLocation}
+                      onRestockEmail={(loc) => setRestockEmailTarget(loc)}
+                      onDelete={handleDeleteLocation}
+                      onSendWelcome={openSinglePicker}
+                      onEdit={handleEditLocation}
+                      regeocodeIsPending={regeocodeLocationMutation.isPending}
+                      regeocodeVariables={regeocodeLocationMutation.variables as number | undefined}
+                      onRegeocodeClick={(id) => regeocodeLocationMutation.mutate(id)}
+                    />
+                  ))}
                 </div>
               )}
             </div>
@@ -2891,7 +2791,7 @@ export default function AdminLocations() {
                 <div className="bg-primary text-primary-foreground w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold shadow-[0_0_10px_rgba(59,130,246,0.5)]">
                   {selectedCount}
                 </div>
-                <span className="text-foreground font-medium text-sm">selected</span>
+                <span className="text-foreground font-medium text-sm">{t("bulkSelected")}</span>
               </div>
               <div className="hidden md:block h-8 w-px bg-white/10" />
               <div className="flex items-center gap-2 w-full md:w-auto">
@@ -2903,7 +2803,7 @@ export default function AdminLocations() {
                   data-testid="button-bulk-message"
                 >
                   <MessageSquare className="h-4 w-4 mr-2" />
-                  Message ({messageableCount}/{selectedCount})
+                  {t("messageAction")} ({messageableCount}/{selectedCount})
                 </Button>
                 <Button
                   size="sm"
@@ -2914,7 +2814,24 @@ export default function AdminLocations() {
                   data-testid="button-bulk-send-welcome"
                 >
                   <Send className="h-4 w-4 mr-2" />
-                  Send Welcome
+                  {t("sendWelcome")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  className="rounded-full flex-1 md:flex-none"
+                  onClick={() => {
+                    if (window.confirm(`${t("bulkDeleteSelected")} (${selectedCount})?`)) {
+                      Array.from(selectedIds).forEach(id => {
+                        deleteMutation.mutate(id);
+                      });
+                      setSelectedIds(new Set());
+                    }
+                  }}
+                  data-testid="button-bulk-delete"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  {t("bulkDeleteSelected")}
                 </Button>
                 <Button
                   size="icon"
@@ -3627,104 +3544,6 @@ export default function AdminLocations() {
                 {changePinMutation.isPending
                   ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
                   : <><ShieldCheck className="h-4 w-4 mr-2" />Save PIN</>
-                }
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit Email Dialog */}
-        <Dialog open={isEmailDialogOpen} onOpenChange={(open) => {
-          setIsEmailDialogOpen(open);
-          if (!open) { setEmailEditValue(""); setEmailEditLocation(null); }
-        }}>
-          <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Mail className="h-5 w-5 text-primary" />
-                Edit Operator Email
-              </DialogTitle>
-              <DialogDescription>
-                {emailEditLocation ? (
-                  <>Update the contact email for <strong>{emailEditLocation.name}</strong> ({emailEditLocation.locationCode}). This does not re-trigger SMS onboarding.</>
-                ) : ""}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="admin-email-edit">Email address</Label>
-                <Input
-                  id="admin-email-edit"
-                  type="email"
-                  placeholder="operator@example.com"
-                  value={emailEditValue}
-                  onChange={(e) => setEmailEditValue(e.target.value)}
-                  data-testid="input-email-edit"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsEmailDialogOpen(false)}>Cancel</Button>
-              <Button
-                onClick={() => {
-                  if (!emailEditLocation || !emailEditValue.trim()) return;
-                  saveEmailMutation.mutate({ id: emailEditLocation.id, email: emailEditValue.trim() });
-                }}
-                disabled={saveEmailMutation.isPending || !emailEditValue.trim()}
-                data-testid="button-save-email"
-              >
-                {saveEmailMutation.isPending
-                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
-                  : <><Save className="h-4 w-4 mr-2" />Save Email</>
-                }
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-
-        {/* Edit Phone Dialog */}
-        <Dialog open={isPhoneDialogOpen} onOpenChange={(open) => {
-          setIsPhoneDialogOpen(open);
-          if (!open) { setPhoneEditValue(""); setPhoneEditLocation(null); }
-        }}>
-          <DialogContent className="sm:max-w-[400px] max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Phone className="h-5 w-5 text-primary" />
-                Edit Operator Phone
-              </DialogTitle>
-              <DialogDescription>
-                {phoneEditLocation ? (
-                  <>Update or clear the phone number for <strong>{phoneEditLocation.name}</strong> ({phoneEditLocation.locationCode}). Leave blank to remove the number.</>
-                ) : ""}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-2">
-              <div className="space-y-2">
-                <Label htmlFor="admin-phone-edit">Phone number (E.164 format, e.g. +15551234567)</Label>
-                <Input
-                  id="admin-phone-edit"
-                  type="tel"
-                  placeholder="+1 (555) 123-4567"
-                  value={phoneEditValue}
-                  onChange={(e) => setPhoneEditValue(e.target.value)}
-                  data-testid="input-phone-edit"
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsPhoneDialogOpen(false)}>Cancel</Button>
-              <Button
-                onClick={() => {
-                  if (!phoneEditLocation) return;
-                  savePhoneMutation.mutate({ id: phoneEditLocation.id, phone: phoneEditValue.trim() });
-                }}
-                disabled={savePhoneMutation.isPending}
-                data-testid="button-save-phone"
-              >
-                {savePhoneMutation.isPending
-                  ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Saving…</>
-                  : <><Save className="h-4 w-4 mr-2" />Save Phone</>
                 }
               </Button>
             </DialogFooter>

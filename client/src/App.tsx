@@ -61,6 +61,7 @@ const AdminApplications = lazyWithRest(() => import("@/pages/admin/applications"
 const AdminInbox = lazyWithRest(() => import("@/pages/admin/inbox"));
 const AdminGlossary = lazyWithRest(() => import("@/pages/admin/glossary"));
 const AdminPaymentStatus = lazyWithRest(() => import("@/pages/admin/payment-status-monitor"));
+const AdminSettings = lazyWithRest(() => import("@/pages/admin/settings"));
 
 const OperatorIndex = lazyWithRest(() => import("@/pages/operator/index"));
 const OperatorLogin = lazyWithRest(() => import("@/pages/operator/login"));
@@ -124,6 +125,7 @@ function LayoutRouter() {
         <ProtectedRoute path="/admin/applications" component={withAdminLayout(AdminApplications)} requiredRole="admin" />
         <ProtectedRoute path="/admin/inbox" component={withAdminLayout(AdminInbox)} requiredRole="admin" />
         <ProtectedRoute path="/admin/glossary" component={withAdminLayout(AdminGlossary)} requiredRole="admin" />
+        <ProtectedRoute path="/admin/settings" component={withAdminLayout(AdminSettings)} requiredRole="admin" />
 
         {/* Redirects — merged pages now live inside /admin/transactions */}
         <Route path="/admin/payment-status" component={withAdminLayout(AdminPaymentStatus)} />
