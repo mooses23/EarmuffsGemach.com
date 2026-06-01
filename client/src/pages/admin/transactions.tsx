@@ -1001,6 +1001,8 @@ export default function AdminTransactions() {
   // ── Analytics computations (use full dataset for accurate totals) ─────────
   const returnedCount = useMemo(() => allTransactions.filter((t) => t.isReturned).length, [allTransactions]);
   const activeBorrows = allTransactions.length - returnedCount;
+  const activeCount = activeBorrows;
+  const allCount = allTransactions.length;
   const returnRate = allTransactions.length > 0 ? Math.round((returnedCount / allTransactions.length) * 100) : 0;
   const totalDeposits = useMemo(() => allTransactions.reduce((sum, t) => sum + (t.depositAmount ?? 0), 0), [allTransactions]);
 
@@ -1216,26 +1218,41 @@ export default function AdminTransactions() {
             <Button
               variant={filterStatus === "all" ? "default" : "outline"}
               size="sm"
-              className="whitespace-nowrap"
+              className="whitespace-nowrap gap-1.5"
               onClick={() => handleSetFilterStatus("all")}
             >
               {t("allTransactions")}
+              {allCount > 0 && (
+                <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none ${filterStatus === "all" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                  {allCount}
+                </span>
+              )}
             </Button>
             <Button
               variant={filterStatus === "active" ? "default" : "outline"}
               size="sm"
-              className="whitespace-nowrap"
+              className="whitespace-nowrap gap-1.5"
               onClick={() => handleSetFilterStatus("active")}
             >
               {t("activeOnly")}
+              {activeCount > 0 && (
+                <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none ${filterStatus === "active" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                  {activeCount}
+                </span>
+              )}
             </Button>
             <Button
               variant={filterStatus === "returned" ? "default" : "outline"}
               size="sm"
-              className="whitespace-nowrap"
+              className="whitespace-nowrap gap-1.5"
               onClick={() => handleSetFilterStatus("returned")}
             >
               {t("returnedOnly")}
+              {returnedCount > 0 && (
+                <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none ${filterStatus === "returned" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
+                  {returnedCount}
+                </span>
+              )}
             </Button>
             <Button
               variant={filterStatus === "has-card" ? "default" : "outline"}
@@ -1246,7 +1263,7 @@ export default function AdminTransactions() {
               <CreditCard className="h-3.5 w-3.5" />
               {t("cardOnFile")}
               {cardOnFileCount > 0 && (
-                <span className="ml-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-semibold leading-none">
+                <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none ${filterStatus === "has-card" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
                   {cardOnFileCount}
                 </span>
               )}
@@ -1260,7 +1277,7 @@ export default function AdminTransactions() {
               <AlertTriangle className="h-3.5 w-3.5" />
               {t("expiringSoon")}
               {expiringSoonCount > 0 && (
-                <span className="ml-0.5 rounded-full bg-white/20 px-1.5 py-0.5 text-xs font-semibold leading-none">
+                <span className={`rounded-full px-1.5 py-0.5 text-xs font-semibold leading-none ${filterStatus === "expiring-soon" ? "bg-primary-foreground/20 text-primary-foreground" : "bg-muted text-muted-foreground"}`}>
                   {expiringSoonCount}
                 </span>
               )}

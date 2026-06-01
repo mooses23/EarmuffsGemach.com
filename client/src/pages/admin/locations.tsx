@@ -2193,6 +2193,7 @@ export default function AdminLocations() {
   // remain visible without requiring a manual expand.
 
   const isFilterActive = searchTerm !== "" || statusFilter !== "all" || onboardingFilter !== "all" || coordsFilter !== "all";
+  const activeFilterCount = (searchTerm !== "" ? 1 : 0) + (statusFilter !== "all" ? 1 : 0) + (onboardingFilter !== "all" ? 1 : 0) + (coordsFilter !== "all" ? 1 : 0);
 
   const toggleRegion = useCallback((regionId: number) => {
     setExpandedRegions(prev => {
@@ -2356,7 +2357,11 @@ export default function AdminLocations() {
             >
               <Settings className="h-4 w-4 mr-1" />
               {t("filters")}
-              {isFilterActive && <span className="ml-1.5 flex h-2 w-2 rounded-full bg-primary" />}
+              {activeFilterCount > 0 && (
+                <span className="ml-1 rounded-full bg-primary text-primary-foreground px-1.5 py-0.5 text-xs font-semibold leading-none">
+                  {activeFilterCount}
+                </span>
+              )}
             </Button>
             <Button
               size="sm"
@@ -3580,6 +3585,7 @@ export default function AdminLocations() {
                         </div>
                         <div className="rounded-md border bg-muted/30 px-3 py-2 text-xs text-muted-foreground space-y-1">
                           <p className="font-medium text-foreground">{t('emailPreviewLabel')}</p>
+                          <p className="italic text-foreground/80">Hello, <strong>{restockEmailTarget.nameHe || restockEmailTarget.name}</strong> gemach!</p>
                           <p>{t('emailOrderLinkLabel')} <span className="font-mono">{orderSite}</span></p>
                           <p>{t('emailLoginLabel')} earmuffsgemach@gmail.com / Babybanz</p>
                           <p>{t('emailDiscountCodesLabel')} GEMACHSHIP (free shipping) + GEMACH (50% off)</p>
