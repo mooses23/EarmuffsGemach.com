@@ -665,17 +665,15 @@ export default function AdminTransactions() {
 
   const bulkMarkReturnedMutation = useMutation({
     mutationFn: async ({ ids }: { ids: number[] }) => {
-      const selectedTxns = transactions.filter((tx) => ids.includes(tx.id));
       const results = await Promise.allSettled(
         ids.map((id) => {
           const customAmount = bulkRefundAmounts[id];
-          let refundAmount: number;
-          if (customAmount !== undefined) {
-            refundAmount = Math.max(0, parseFloat(customAmount) || 0);
-          } else {
-            const tx = selectedTxns.find((t) => t.id === id);
-            refundAmount = tx?.depositAmount ?? 20;
-          }
+          // Amounts must always be pre-populated (either from dialog initializer or
+          // from selectAllResults). Defaulting to 0 if somehow missing is safe — it
+          // means no refund rather than a random incorrect charge.
+          const refundAmount = customAmount !== undefined
+            ? Math.max(0, parseFloat(customAmount) || 0)
+            : 0;
           return markTransactionReturned(id, { refundAmount });
         })
       );
@@ -906,14 +904,31 @@ export default function AdminTransactions() {
     setAllResultsSelected(false);
   }, [selectableFilteredIds]);
 
-  // Select all non-returned items across all pages (fetches IDs from server)
+  // Select all non-returned items across all pages (fetches IDs + depositAmounts from server).
+  // Only valid when no client-side-only filters are active (region / district / has-card /
+  // expiring-soon) because those cannot be communicated to the server-side IDs endpoint.
+  const canSelectAllResults =
+    filterStatus !== "has-card" &&
+    filterStatus !== "expiring-soon" &&
+    filterRegionId === null &&
+    !filterDistrict;
+
   const selectAllResults = useCallback(async () => {
     try {
       const params = new URLSearchParams({ status: serverStatus, search: debouncedSearch });
       const res = await fetch(`/api/admin/transactions/ids?${params}`, { credentials: "include" });
       if (!res.ok) throw new Error("Failed");
-      const { ids } = await res.json();
-      setSelectedIds(new Set(ids));
+      const { transactions: allTxItems } = await res.json() as {
+        transactions: { id: number; depositAmount: number | null }[];
+        total: number;
+      };
+      // Pre-populate exact refund amounts so the mutation never falls back to a guess
+      const amounts: Record<number, string> = {};
+      allTxItems.forEach(tx => {
+        amounts[tx.id] = String(tx.depositAmount ?? 20);
+      });
+      setSelectedIds(new Set(allTxItems.map(tx => tx.id)));
+      setBulkRefundAmounts(amounts);
       setAllResultsSelected(true);
     } catch {
       toast({ title: t("error"), description: "Failed to select all results", variant: "destructive" });
@@ -1323,7 +1338,7 @@ export default function AdminTransactions() {
                 Select page ({selectableFilteredIds.length})
               </button>
             )}
-            {allPageSelected && totalPages > 1 && !allResultsSelected && (
+            {allPageSelected && totalPages > 1 && !allResultsSelected && canSelectAllResults && (
               <button
                 type="button"
                 onClick={selectAllResults}
@@ -1347,11 +1362,17 @@ export default function AdminTransactions() {
               size="sm"
               className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
               onClick={() => {
-              const amounts: Record<number, string> = {};
-              transactions.filter(tx => selectedIds.has(tx.id)).forEach(tx => {
-                amounts[tx.id] = String(tx.depositAmount ?? 20);
+              setBulkRefundAmounts(prev => {
+                const next = { ...prev };
+                // Only initialise amounts for current-page items not already set
+                // (off-page items were pre-populated by selectAllResults with exact amounts)
+                transactions.filter(tx => selectedIds.has(tx.id)).forEach(tx => {
+                  if (next[tx.id] === undefined) {
+                    next[tx.id] = String(tx.depositAmount ?? 20);
+                  }
+                });
+                return next;
               });
-              setBulkRefundAmounts(amounts);
               setIsBulkConfirmOpen(true);
             }}
             >

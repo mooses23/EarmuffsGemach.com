@@ -2222,8 +2222,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         status,
         search,
       });
-      const ids = result.data.filter(tx => !tx.isReturned).map(tx => tx.id);
-      res.json({ ids, total: ids.length });
+      const activeItems = result.data.filter(tx => !tx.isReturned);
+      // Return id + depositAmount so the client can pre-populate exact refund amounts
+      res.json({
+        transactions: activeItems.map(tx => ({ id: tx.id, depositAmount: tx.depositAmount })),
+        total: activeItems.length,
+      });
     } catch (error) {
       console.error("Error fetching transaction IDs:", error);
       res.status(500).json({ message: "Failed to fetch transaction IDs" });
