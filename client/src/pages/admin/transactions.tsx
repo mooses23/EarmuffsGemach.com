@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useCallback } from "react";
+import React, { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import type { ElementType } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { getLocations, getTransactions, markTransactionReturned } from "@/lib/api";
@@ -529,6 +529,15 @@ export default function AdminTransactions() {
   const [confirmStep, setConfirmStep] = useState(false);
   const [analyticsOpen, setAnalyticsOpen] = useState(false);
 
+  // ── Auto-open return dialog when arriving from recent-activity ────────
+  const [pendingReturnTxId] = useState<number | null>(() => {
+    if (typeof window === "undefined") return null;
+    const v = new URLSearchParams(window.location.search).get("returnTx");
+    const n = v ? parseInt(v, 10) : NaN;
+    return isNaN(n) ? null : n;
+  });
+  const autoOpenedReturnRef = useRef(false);
+
   // ── Charge card dialog state ─────────────────────────────────────────
   const [isChargeDialogOpen, setIsChargeDialogOpen] = useState(false);
   const [chargeTransaction, setChargeTransaction] = useState<Transaction | null>(null);
@@ -649,6 +658,18 @@ export default function AdminTransactions() {
     queryKey: ["/api/operator/stripe-settings"],
   });
   const maxCardAgeDays = stripeSettings?.maxCardAgeDays ?? 90;
+
+  const { data: pendingReturnTx } = useQuery<Transaction | null>({
+    queryKey: ["/api/transactions", pendingReturnTxId],
+    queryFn: async () => {
+      if (!pendingReturnTxId) return null;
+      const res = await fetch(`/api/transactions/${pendingReturnTxId}`, { credentials: "include" });
+      if (!res.ok) return null;
+      return res.json();
+    },
+    enabled: !!pendingReturnTxId,
+    staleTime: 60_000,
+  });
 
   const markReturnedMutation = useMutation({
     mutationFn: ({ id, refundAmount, notes }: { id: number; refundAmount?: number; notes?: string }) =>
@@ -781,6 +802,16 @@ export default function AdminTransactions() {
     setRefundNotes("");
     setConfirmStep(false);
   };
+
+  useEffect(() => {
+    if (!pendingReturnTx || autoOpenedReturnRef.current || pendingReturnTx.isReturned) return;
+    autoOpenedReturnRef.current = true;
+    openRefundDialog(pendingReturnTx);
+    const sp = new URLSearchParams(window.location.search);
+    sp.delete("returnTx");
+    const newSearch = sp.toString();
+    window.history.replaceState(null, "", newSearch ? `${window.location.pathname}?${newSearch}` : window.location.pathname);
+  }, [pendingReturnTx]);
 
   const handleProcessRefund = () => {
     if (!refundTransaction) return;
@@ -1687,26 +1718,54 @@ export default function AdminTransactions() {
                   </div>
                 </div>
               ))}
-            {allResultsSelected && selectedIds.size > transactions.filter(tx => selectedIds.has(tx.id)).length && (
-              <p className="text-xs text-slate-400 px-1 pt-1">
-                + {selectedIds.size - transactions.filter(tx => selectedIds.has(tx.id)).length} more from other pages — full deposit will be refunded
-              </p>
-            )}
+            {allResultsSelected && (() => {
+              const currentPageIds = new Set(transactions.filter(tx => selectedIds.has(tx.id)).map(tx => tx.id));
+              const offPageIds = Array.from(selectedIds).filter(id => !currentPageIds.has(id));
+              if (offPageIds.length === 0) return null;
+              const firstAmt = bulkRefundAmounts[offPageIds[0]] ?? "";
+              const allSame = offPageIds.every(id => (bulkRefundAmounts[id] ?? "") === firstAmt);
+              return (
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-white/10 bg-blue-950/30 px-3 py-2 text-sm mt-1">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <span className="text-slate-300 truncate">{offPageIds.length} more transaction{offPageIds.length !== 1 ? "s" : ""} (other pages)</span>
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <DollarSign className="h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      placeholder="varies"
+                      value={allSame ? firstAmt : ""}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBulkRefundAmounts(prev => {
+                          const next = { ...prev };
+                          offPageIds.forEach(id => { next[id] = val; });
+                          return next;
+                        });
+                      }}
+                      className="w-16 rounded border border-white/20 bg-white/5 px-2 py-0.5 text-xs text-white text-right focus:outline-none focus:ring-1 focus:ring-primary"
+                      disabled={bulkMarkReturnedMutation.isPending}
+                    />
+                    <span className="text-xs text-slate-400">each</span>
+                  </div>
+                </div>
+              );
+            })()}
           </div>
 
           <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
             <div className="flex items-center justify-between">
               <span className="text-xs text-slate-400">Total to be refunded</span>
               <span className="text-sm font-semibold text-emerald-400">
-                ${transactions
-                  .filter((tx) => selectedIds.has(tx.id))
-                  .reduce((sum, tx) => {
-                    const amt = bulkRefundAmounts[tx.id] !== undefined
-                      ? parseFloat(bulkRefundAmounts[tx.id]) || 0
-                      : (tx.depositAmount ?? 20);
-                    return sum + amt;
-                  }, 0)
-                  .toFixed(2)}
+                ${Array.from(selectedIds).reduce((sum, id) => {
+                  if (bulkRefundAmounts[id] !== undefined) {
+                    return sum + (parseFloat(bulkRefundAmounts[id]) || 0);
+                  }
+                  const tx = transactions.find(t => t.id === id);
+                  return sum + (tx?.depositAmount ?? 0);
+                }, 0).toFixed(2)}
               </span>
             </div>
           </div>

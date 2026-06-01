@@ -72,9 +72,15 @@ export class EmailNotificationService {
         ? new Date(transaction.actualReturnDate).toLocaleDateString()
         : 'today';
       const subject = `Your deposit refund has been processed — Baby Banz Gemach`;
+      const itemDesc = transaction.headbandColor
+        ? `Baby Banz Earmuffs (${transaction.headbandColor})`
+        : 'Baby Banz Earmuffs';
+      const depositDesc = transaction.depositAmount
+        ? ` of $${Number(refundAmount).toFixed(2)} (original deposit: $${Number(transaction.depositAmount).toFixed(2)})`
+        : ` of $${Number(refundAmount).toFixed(2)}`;
       const body = `Hi ${firstName},
 
-Your Baby Banz Earmuffs have been returned and your deposit refund of $${Number(refundAmount).toFixed(2)} has been processed.
+Your ${itemDesc} have been returned and your deposit refund${depositDesc} has been processed.
 
 Transaction: #${transaction.id}
 Return date: ${returnDate}

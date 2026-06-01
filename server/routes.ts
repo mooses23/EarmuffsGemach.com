@@ -2254,6 +2254,20 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  app.get("/api/transactions/:id", async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (isNaN(id)) return res.status(400).json({ message: "Invalid transaction id" });
+      const transactions = await storage.getAllTransactions();
+      const tx = transactions.find(t => t.id === id);
+      if (!tx) return res.status(404).json({ message: "Transaction not found" });
+      res.json(tx);
+    } catch (error) {
+      console.error("Error fetching transaction:", error);
+      res.status(500).json({ message: "Failed to fetch transaction" });
+    }
+  });
+
   app.post("/api/transactions", async (req, res) => {
     try {
       // Handle expectedReturnDate conversion if needed
@@ -6808,8 +6822,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
           action: tx.isReturned ? "returned" : "lent",
           name: tx.borrowerName,
           subtitle: locName.get(tx.locationId) || `Location #${tx.locationId}`,
-          // Filter hint: focus the specific tx and prefilter by status.
-          href: `/admin/transactions?focus=${tx.id}&status=${tx.isReturned ? 'returned' : 'open'}`,
+          href: tx.isReturned
+            ? `/admin/transactions?focus=${tx.id}&status=returned`
+            : `/admin/transactions?returnTx=${tx.id}`,
         });
       }
       for (const app of apps) {
