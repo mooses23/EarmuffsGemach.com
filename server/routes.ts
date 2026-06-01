@@ -506,7 +506,13 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/locations", async (req, res) => {
     try {
-      const locationData = insertLocationSchema.parse(req.body);
+      const nextLocationCode = await storage.getNextLocationCode();
+      const bodyWithCode = {
+        ...req.body,
+        locationCode: req.body.locationCode || nextLocationCode,
+        operatorPin: req.body.operatorPin || null,
+      };
+      const locationData = insertLocationSchema.parse(bodyWithCode);
       const location = await storage.createLocation(locationData);
       res.status(201).json(location);
     } catch (error) {

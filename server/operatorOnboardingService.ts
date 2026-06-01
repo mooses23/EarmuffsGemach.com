@@ -70,10 +70,19 @@ function applyMessageTemplate(
     .replace(/\{\{url\}\}/gi, values.url);
 }
 
-/** Detects the operator's preferred message language from their location row. */
-function detectLanguage(loc: Location): 'en' | 'he' {
-  if (loc.nameHe || loc.addressHe || loc.contactPersonHe) {
-    return 'he';
+/**
+ * Detects the operator's preferred message language.
+ * Returns 'he' only when the location belongs to an Israel region;
+ * defaults to English for every other region.
+ */
+async function detectLanguage(loc: Location): Promise<'en' | 'he'> {
+  try {
+    const region = await storage.getRegion(loc.regionId);
+    if (region && /israel/i.test(region.name + ' ' + (region.slug ?? ''))) {
+      return 'he';
+    }
+  } catch {
+    // Fall through to English on any storage error
   }
   return 'en';
 }
@@ -107,7 +116,7 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     : await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
   const claimUrlPreview = buildClaimUrl(baseUrl, ensured.token);
   const loginUrlPreview = `${baseUrl.replace(/\/$/, '')}/operator/login`;
-  const language = detectLanguage(loc);
+  const language = await detectLanguage(loc);
   const enBody = buildOperatorWelcomeMessageBody({
     locationName: loc.name,
     locationCode: loc.locationCode,
@@ -222,7 +231,7 @@ export async function sendWelcomeForLocation(
     return { locationId, locationName: loc.name, channel: options.channel, ok: false, skipped: 'no phone on file' };
   }
 
-  const language = detectLanguage(loc);
+  const language = await detectLanguage(loc);
   const ensured = await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
   const claimUrl = buildClaimUrl(options.baseUrl, ensured.token);
   const localizedName = language === 'he' ? (loc.nameHe || loc.name) : loc.name;
