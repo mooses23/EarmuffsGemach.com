@@ -18,7 +18,7 @@ import {
   Shield, AlertTriangle, BookOpen, Phone, Bell, X,
   CheckCircle2, XCircle, Download, Send, MailCheck, Plus,
   ArrowRight, Activity, Package, Truck, KeyRound,
-  Copy, Check, ExternalLink,
+  Copy, Check, ExternalLink, Database, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { Link } from "wouter";
 import { useLanguage } from "@/hooks/use-language";
@@ -46,6 +46,14 @@ interface SystemStatus {
   database: { ok: boolean; latencyMs?: number; error?: string };
   stripe: { ok: boolean; configured: boolean; latencyMs?: number; error?: string };
   gmail: { ok: boolean; configured: boolean; message?: string };
+}
+interface SchemaCheckResult {
+  ok: boolean;
+  baselineMissing: boolean;
+  changedLineCount: number;
+  compactDiff: string;
+  compactDiffTruncated: boolean;
+  emailSentToAdmin: boolean;
 }
 interface DashboardSummary {
   counts: {
@@ -362,6 +370,13 @@ export default function Dashboard() {
     staleTime: 5 * 60 * 1000,
     enabled: !!(twilioStatusQ.data?.sms.configured || twilioStatusQ.data?.whatsapp.configured),
   });
+  const schemaQ = useQuery<SchemaCheckResult>({
+    queryKey: ["/api/admin/schema-snapshot/check"],
+    staleTime: 10 * 60_000,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
+  const [schemaExpanded, setSchemaExpanded] = useState(false);
   const [copiedWebhookUrl, setCopiedWebhookUrl] = useState<string | null>(null);
   function copyWebhookUrl(url: string) {
     if (!navigator.clipboard) return;
@@ -764,6 +779,64 @@ export default function Dashboard() {
                   detail={statusQ.data.stripe.latencyMs !== undefined ? `${statusQ.data.stripe.latencyMs}ms` : undefined}
                   testId="status-row-stripe"
                 />
+
+                {/* Schema drift row */}
+                {schemaQ.data && (
+                  <div data-testid="status-row-schema">
+                    <div className="flex justify-between items-center">
+                      <span className="text-sm flex items-center gap-2">
+                        <Database className={`h-3.5 w-3.5 ${schemaQ.data.ok ? 'text-green-600' : 'text-amber-500'}`} aria-hidden="true" />
+                        Schema
+                      </span>
+                      <div className="flex items-center gap-2">
+                        {!schemaQ.data.ok && schemaQ.data.compactDiff && (
+                          <button
+                            type="button"
+                            onClick={() => setSchemaExpanded(v => !v)}
+                            className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-0.5 transition-colors"
+                            aria-expanded={schemaExpanded}
+                            data-testid="schema-diff-toggle"
+                          >
+                            {schemaExpanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                            View diff
+                          </button>
+                        )}
+                        <Badge
+                          variant={schemaQ.data.ok ? "default" : "destructive"}
+                          data-testid="schema-status-badge"
+                        >
+                          {schemaQ.data.baselineMissing
+                            ? 'No baseline'
+                            : schemaQ.data.ok
+                            ? 'OK'
+                            : `Drift (${schemaQ.data.changedLineCount} lines)`}
+                        </Badge>
+                      </div>
+                    </div>
+                    {schemaExpanded && !schemaQ.data.ok && schemaQ.data.compactDiff && (
+                      <div className="mt-2 rounded border bg-muted/40 overflow-auto max-h-56">
+                        <pre className="p-2 text-[10px] leading-4 font-mono whitespace-pre-wrap break-all">
+                          {schemaQ.data.compactDiff.split('\n').map((line, i) => (
+                            <span
+                              key={i}
+                              className={
+                                line.startsWith('+') ? 'text-green-600 dark:text-green-400' :
+                                line.startsWith('-') ? 'text-red-600 dark:text-red-400' :
+                                line.startsWith('@@') ? 'text-blue-500 dark:text-blue-400' :
+                                'text-muted-foreground'
+                              }
+                            >
+                              {line}{'\n'}
+                            </span>
+                          ))}
+                          {schemaQ.data.compactDiffTruncated && (
+                            <span className="text-muted-foreground italic">… diff truncated …</span>
+                          )}
+                        </pre>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">—</p>
