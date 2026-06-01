@@ -1425,11 +1425,11 @@ export default function AdminLocations() {
 
   // Template strings used for bulk sends (placeholder tokens are substituted per-location on the server)
   const BULK_TEMPLATE_EN =
-    "Hi {{name}}, you've been invited to manage your {{code}} gemach dashboard. Your one-time login PIN is {{pin}}. Tap here to get started:\n{{url}}\n— Earmuffs Gemach";
+    "Hi {{name}}, thanks for running your gemach for us. Your PIN is {{pin}}. Sign in here:\n{{url}}\nLOG IN TO RESTOCK HEADBANDS, UPDATE YOUR PROFILE, AND ACCEPT CREDIT-CARD DEPOSITS.\n— Earmuffs Gemach";
   const BULK_TEMPLATE_EN_EMAIL =
-    "Hi {{name}},\n\nYou've been invited to manage your {{code}} gemach dashboard.\nYour one-time login PIN is: {{pin}}\n\nClick here to get started:\n{{url}}\n\n— Earmuffs Gemach";
+    "Welcome to the Baby Banz Gemach operator dashboard, {{name}}!\n\nYour location is now live and ready to manage. Here's how to get started in 4 quick steps:\n\nStep 1 — Open your dashboard\n  {{url}}\n\nStep 2 — Sign in with your location credentials\n  Location code:  {{code}}\n  Temporary PIN:  {{pin}}\n\nStep 3 — Change your PIN\n  After signing in, go to Settings → Change PIN and set a private PIN that only you know.\n\nStep 4 — Complete your profile\n  Add your phone number, opening hours, and any notes for borrowers so families can reach you easily.\n\nThat's it — you're all set! Reply to this email any time you need help.\n\nLOG IN TO RESTOCK HEADBANDS, UPDATE YOUR PROFILE, AND ACCEPT CREDIT-CARD DEPOSITS.\n\n— Baby Banz Gemach";
   const BULK_TEMPLATE_HE =
-    'שלום {{name}}, הוזמנת לנהל את דשבורד הגמ"ח שלך ({{code}}). קוד הכניסה החד-פעמי שלך: {{pin}}. לחץ כאן להתחלה:\n{{url}}\n— גמ"ח אטמי';
+    'שלום {{name}}, תודה שאתה מנהל את הגמ"ח שלך עבורנו. קוד הכניסה שלך: {{pin}}. התחבר כאן:\n{{url}}\nהתחבר כדי לחדש מלאי, לעדכן את הפרופיל שלך ולקבל פיקדונות בכרטיס אשראי.\n— גמ"ח אטמי';
 
   /** Returns the channel-appropriate EN bulk template. */
   const getBulkTemplateEN = (ch: OperatorWelcomeChannel) => ch === "email" ? BULK_TEMPLATE_EN_EMAIL : BULK_TEMPLATE_EN;
