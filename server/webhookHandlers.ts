@@ -141,11 +141,24 @@ export class WebhookHandlers {
       );
       
       if (payment) {
-        const refundAmount = charge.amount_refunded / 100;
+        const refundAmountDollars = charge.amount_refunded / 100;
         await storage.updatePaymentStatus(payment.id, 'refunded', {
-          notes: `Refunded $${refundAmount} via webhook at ${new Date().toISOString()}`
+          notes: `Refunded $${refundAmountDollars} via webhook at ${new Date().toISOString()}`
         });
         console.log(`Updated payment ${payment.id} to refunded`);
+
+        // Sync transaction state and restock inventory.
+        // markPhysicallyReturnedForRefund is CAS-guarded on isReturned=false so
+        // duplicate webhook deliveries cannot double-restock or double-set the flag.
+        const returned = await storage.markPhysicallyReturnedForRefund(payment.transactionId, true);
+        if (returned) {
+          // markPhysicallyReturnedForRefund does not set refundAmount. Use
+          // markTransactionReturned to set it (idempotently re-asserts isReturned=true).
+          await storage.markTransactionReturned(payment.transactionId, refundAmountDollars);
+          console.log(`Synced transaction ${payment.transactionId}: isReturned=true, refundAmount=$${refundAmountDollars}, inventory restocked`);
+        } else {
+          console.log(`Transaction ${payment.transactionId} was already marked returned (duplicate webhook or prior manual return)`);
+        }
       }
     } catch (error) {
       console.error('Error handling charge.refunded:', error);

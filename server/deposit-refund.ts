@@ -4,7 +4,6 @@
  */
 
 import { storage } from "./storage.js";
-import { DepositSyncService } from "./deposit-sync.js";
 import type { UserRole } from "./depositService.js";
 
 export class DepositRefundService {
@@ -61,22 +60,17 @@ export class DepositRefundService {
 
       let refundStatus = 'pending';
       if (completedPayment) {
-        // Create refund payment record
-        await storage.createPayment({
-          transactionId,
-          paymentMethod: completedPayment.paymentMethod,
-          paymentProvider: completedPayment.paymentProvider,
-          depositAmount: refundAmount,
-          totalAmount: refundAmount,
-          status: 'refund_pending',
-          externalPaymentId: `refund_${completedPayment.externalPaymentId}`
+        // Update the original payment row to 'refunded' — do NOT create a second
+        // payment row, which would produce two contradictory records in the admin
+        // transaction view and could trigger a double-refund if both paths run.
+        await storage.updatePaymentStatus(completedPayment.id, 'refunded', {
+          refundedAt: new Date().toISOString(),
+          refundAmount,
+          returnNotes: returnData.returnNotes,
+          condition: returnData.condition,
         });
-        
         refundStatus = 'refund_initiated';
       }
-
-      // Sync refund across system
-      await DepositSyncService.processDepositRefund(transactionId);
 
       return {
         transaction: updatedTransaction,

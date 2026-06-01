@@ -486,7 +486,20 @@ export class DepositService {
       return { success: false, error: 'No completed payment found for this transaction' };
     }
 
+    // Guard: reject if the transaction is already returned (prevents double-refund).
+    if (transaction.isReturned) {
+      return { success: false, error: 'Transaction has already been returned and refunded' };
+    }
+
     const amountToRefund = refundAmount ? refundAmount * 100 : payment.depositAmount;
+
+    // Guard: reject if the requested amount exceeds the original deposit.
+    if (amountToRefund > payment.depositAmount) {
+      return {
+        success: false,
+        error: `Refund amount ($${(amountToRefund / 100).toFixed(2)}) exceeds original deposit ($${(payment.depositAmount / 100).toFixed(2)})`,
+      };
+    }
 
     if (payment.paymentMethod === 'stripe' && payment.externalPaymentId) {
       try {
