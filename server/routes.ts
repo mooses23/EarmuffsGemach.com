@@ -36,7 +36,7 @@ import { groupContactsByThread } from "./inbox-threading.js";
 import {
   generateEmailResponse, translateText, generateWelcomeOpener,
   reindexFact, reindexFaq, reindexDoc, reindexReplyExample, backfillEmbeddings, seedKnowledgeDocs,
-  migrateDomainInKnowledgeBase,
+  migrateDomainInKnowledgeBase, scrubInternalUrlsInKnowledgeBase,
 } from "./openai-client.js";
 import { filterLocationTree } from "./location-tree-filter.js";
 import { geocodeAddress, geocodeAddressDetailed, clearGeocodeCacheForAddress, getCachedCityCenters, hasMissingCityCenters, backfillCityCenters } from "./geocoder.js";
@@ -225,6 +225,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // docs are also covered by the domain replacement pass.
   seedKnowledgeDocs()
     .then(() => migrateDomainInKnowledgeBase())
+    // Task #324: strip fabricated internal/webhook links from the knowledge
+    // base so they can't be retrieved and reinforced into new AI drafts.
+    .then(() => scrubInternalUrlsInKnowledgeBase())
     .catch(() => {});
 
   // Helper to check operator authorization - supports both Passport auth and PIN-based session

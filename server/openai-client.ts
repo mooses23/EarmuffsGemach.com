@@ -15,6 +15,7 @@ import {
   DEFAULT_DRAFT_MODEL,
   DEFAULT_EMBED_MODEL,
 } from './config-defaults.js';
+import { sanitizeDraftUrls, containsBadSiteUrl } from './draft-url-guard.js';
 
 // Lazy OpenAI instance.
 //
@@ -373,6 +374,76 @@ export async function migrateDomainInKnowledgeBase(): Promise<{ updated: number 
     console.log(`[domain-migration] Updated ${updated} knowledge base record(s): ${OLD_DOMAIN} → ${NEW_DOMAIN}`);
   }
   return { updated };
+}
+
+// Task #324: Idempotent startup scrub that removes fabricated internal/webhook
+// links (e.g. `${SITE_URL}/api/webhooks/twilio/apply`) from the AI knowledge
+// base so they can no longer be retrieved and reinforced into new drafts.
+// Knowledge docs, playbook facts, and FAQ entries are rewritten in place via
+// the same allowlist guard used on live drafts and re-indexed. Reply examples
+// (no update method) are de-indexed instead so a polluted past reply can't be
+// surfaced as a few-shot example. Safe to run on every startup.
+export async function scrubInternalUrlsInKnowledgeBase(): Promise<{ updated: number; deindexed: number }> {
+  let updated = 0;
+  let deindexed = 0;
+  const reindexPromises: Promise<void>[] = [];
+  try {
+    const docs = await storage.getAllKnowledgeDocs().catch(() => [] as KnowledgeDoc[]);
+    for (const d of docs) {
+      if (!containsBadSiteUrl(d.body, SITE_URL)) continue;
+      const newBody = sanitizeDraftUrls(d.body, SITE_URL);
+      const patched = await storage.updateKnowledgeDoc(d.id, { body: newBody });
+      if (patched) reindexPromises.push(reindexDoc(patched));
+      updated++;
+    }
+
+    const facts = await storage.getAllPlaybookFacts().catch(() => []);
+    for (const f of facts) {
+      if (!containsBadSiteUrl(f.factValue, SITE_URL)) continue;
+      const newValue = sanitizeDraftUrls(f.factValue, SITE_URL);
+      const patched = await storage.updatePlaybookFact(f.id, { factValue: newValue });
+      if (patched) reindexPromises.push(reindexFact(patched));
+      updated++;
+    }
+
+    const faqs = await storage.getAllFaqEntries().catch(() => [] as FaqEntry[]);
+    for (const faq of faqs) {
+      const answerHit = containsBadSiteUrl(faq.answer, SITE_URL);
+      const questionHit = containsBadSiteUrl(faq.question, SITE_URL);
+      if (!answerHit && !questionHit) continue;
+      const newAnswer = answerHit ? sanitizeDraftUrls(faq.answer, SITE_URL) : faq.answer;
+      const newQuestion = questionHit ? sanitizeDraftUrls(faq.question, SITE_URL) : faq.question;
+      const patched = await storage.updateFaqEntry(faq.id, { answer: newAnswer, question: newQuestion });
+      if (patched) reindexPromises.push(reindexFaq(patched));
+      updated++;
+    }
+
+    // Reply examples have no update method; de-index any that contain a bad
+    // site link so retrieval stops surfacing them as few-shot examples.
+    const replies = await storage.getRecentReplyExamples(500).catch(() => [] as ReplyExample[]);
+    for (const r of replies) {
+      const hit = containsBadSiteUrl(r.sentReply, SITE_URL)
+        || containsBadSiteUrl(r.incomingBody, SITE_URL)
+        || containsBadSiteUrl(r.incomingSubject, SITE_URL);
+      if (!hit) continue;
+      await storage.deleteKbEmbedding('reply_example', r.id).catch(() => {});
+      deindexed++;
+    }
+
+    if (reindexPromises.length > 0) {
+      const results = await Promise.allSettled(reindexPromises);
+      const failures = results.filter(r => r.status === 'rejected').length;
+      if (failures > 0) {
+        console.warn(`[url-scrub] ${failures} reindex operation(s) failed — embeddings may be stale.`);
+      }
+    }
+  } catch (err) {
+    console.warn('scrubInternalUrlsInKnowledgeBase failed:', err instanceof Error ? err.message : String(err));
+  }
+  if (updated > 0 || deindexed > 0) {
+    console.log(`[url-scrub] Rewrote ${updated} knowledge base record(s) and de-indexed ${deindexed} reply example(s) containing internal/webhook links.`);
+  }
+  return { updated, deindexed };
 }
 
 export async function backfillEmbeddings(): Promise<{ scanned: number; created: number }> {
@@ -856,6 +927,8 @@ WRITING STYLE
 - Friendly, respectful, concise (4-10 sentences). No corporate jargon.
 - Match the language the sender wrote in (English or Hebrew). If Hebrew, write in fluent, natural Hebrew.
 - Use the right URL from KEY URLS above for the action you are recommending. Never invent URLs.
+- ONLY link to these public paths on our site: /, /locations, /borrow, /apply, /rules, /status, /contact, /operator/login. NEVER link to internal, admin, API, or webhook paths — anything containing "api", "webhook", "twilio", "stripe", or "paypal" is forbidden and must never appear in a reply.
+- Write each URL as a single uninterrupted token (e.g. ${SITE_URL}/apply). Never split a URL across a line break or insert spaces inside it.
 - When the context block lists MATCHED LOCATION facts (deposit amount, operator, etc.), USE THOSE REAL FACTS instead of any generic playbook value.
 - When the context block lists PAST APPROVED REPLIES, treat them as authoritative few-shot examples for tone, structure, and recurring phrasing — adapt, don't copy verbatim.
 - When the context block lists PRIOR MESSAGES in the thread, do NOT repeat information already shared, and acknowledge what was previously discussed.
@@ -950,8 +1023,14 @@ ${emailBody}`;
     ? (parsed.citedSourceIds as unknown[]).map(s => String(s)).slice(0, 12)
     : [];
 
+  // Task #324: deterministic guard against fabricated internal/webhook links.
+  // The model occasionally invents URLs like `${SITE_URL}/api/webhooks/twilio/apply`
+  // (sometimes with a newline spliced into the path). Rewrite any non-allowlisted
+  // site link to the correct public route before the draft can reach a recipient.
+  const safeDraft = sanitizeDraftUrls(String(parsed.draft || ''), SITE_URL);
+
   return {
-    draft: String(parsed.draft || ''),
+    draft: safeDraft,
     classification: (parsed.classification as Classification) || 'other',
     needsHumanReview: needsReview,
     reviewReason,
