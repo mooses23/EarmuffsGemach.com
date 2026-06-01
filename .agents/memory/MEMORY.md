@@ -1,1 +1,1 @@
-- [AI draft URL guard](ai-draft-url-guard.md) — sanitize same-site links with contiguous-token matching + boundaries; never rejoin newline-split URLs (corrupts paragraphs).
+- [AI draft URL guard](ai-draft-url-guard.md) — sanitize same-site links to an allowlist; rejoin whitespace-split URLs ONLY when an incomplete prefix completes a known segment, else prose gets swallowed.

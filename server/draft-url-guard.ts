@@ -13,9 +13,15 @@
  * fabricates these occasionally, so we enforce it deterministically here.
  *
  * The guard:
- *   1. Captures every contiguous reference to our own site (any whitespace
- *      terminates the URL, so legitimate prose and paragraph breaks are never
- *      swallowed). Percent-encoded newlines (%0A) stay part of the token.
+ *   0. Repairs a same-site link that was split by literal whitespace/newlines
+ *      (e.g. a line-wrapped "https://earmuffsgemach.com/ap\nply"). The rejoin
+ *      is deliberately BOUNDED: it only closes a single-line gap when the
+ *      trailing partial segment is an INCOMPLETE prefix that the following
+ *      token completes into a known segment ("ap" + "ply" → "apply"). A
+ *      paragraph break, or a gap after an already-complete segment
+ *      ("/rules\n\nABOUT…"), is never rejoined, so prose is never swallowed.
+ *   1. Captures every (now contiguous) reference to our own site and remaps it.
+ *      Percent-encoded newlines (%0A) stay part of the token.
  *   2. Validates every link that points at our own site against an allowlist
  *      of public, user-facing routes.
  *   3. Rewrites a non-allowlisted path to the correct public route when the
@@ -79,8 +85,74 @@ export const PUBLIC_PATHS: readonly string[] = [
 // Whitespace is deliberately excluded — we strip it during repair.
 const PATH_CHAR = "A-Za-z0-9\\-._~:/?#\\[\\]@!$&'()*+,;=%";
 
+// Every segment the guard recognizes as a real, complete path segment. Used by
+// the split-URL repair to decide whether a partial-segment + continuation pair
+// reconstructs a genuine broken link (vs. coincidental prose after a URL).
+const KNOWN_SEGMENTS: ReadonlySet<string> = new Set<string>([
+  ...Array.from(PUBLIC_ROUTE_SEGMENTS),
+  ...INTERNAL_PREFIX_SEGMENTS.map((s) => s.toLowerCase()),
+]);
+
+const PATH_CHAR_RE = new RegExp(`[${PATH_CHAR}]`);
+
 function escapeRegExp(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Repair same-site links split by literal whitespace/newlines BEFORE the main
+ * (contiguous-token) sanitizer runs. Bounded on purpose: a single-line gap is
+ * closed only when the trailing partial segment is an INCOMPLETE prefix that
+ * the following token completes into a KNOWN segment. This rejoins a wrapped
+ * "https://host/ap\nply" → ".../apply" while never touching a complete segment
+ * followed by prose ("/rules\n\nABOUT…") or a coincidental word ("/apply now").
+ */
+function rejoinSplitSiteUrls(text: string, host: string): string {
+  const hostEsc = escapeRegExp(host);
+  // Anchor on an optional scheme/www + our host + optional port + the leading
+  // path slash. The lookbehind keeps us out of emails / superstring domains.
+  const anchor = new RegExp(
+    `(?<![\\w@./-])(?:https?:\\/\\/)?(?:www\\.)?${hostEsc}(?::\\d+)?\\/`,
+    'gi',
+  );
+  let out = '';
+  let cursor = 0;
+  let m: RegExpExecArray | null;
+  while ((m = anchor.exec(text)) !== null) {
+    out += text.slice(cursor, m.index);
+    const prefix = m[0]; // scheme + host + leading '/'
+    let i = m.index + prefix.length;
+    let pathBuf = '';
+    for (;;) {
+      const segStart = i;
+      while (i < text.length && PATH_CHAR_RE.test(text[i]!)) i++;
+      pathBuf += text.slice(segStart, i);
+
+      // Inspect a candidate gap: inline whitespace with at most one newline.
+      const rest = text.slice(i);
+      const gapStr = (rest.match(/^[ \t]*\n?[ \t]*/) || [''])[0];
+      if (!gapStr) break;
+      if ((gapStr.match(/\n/g) || []).length > 1) break; // blank line → stop
+      const afterGap = rest.slice(gapStr.length);
+      const contHead = (afterGap.match(/^[A-Za-z0-9]+/) || [''])[0].toLowerCase();
+      if (!contHead) break;
+
+      // Trailing partial segment of what we've built so far.
+      const partial = pathBuf.slice(pathBuf.lastIndexOf('/') + 1).toLowerCase();
+      if (!partial) break; // gap right after a slash → not a mid-segment split
+      // Only rejoin when the partial is INCOMPLETE and the continuation
+      // completes it into a known segment.
+      if (KNOWN_SEGMENTS.has(partial) || !KNOWN_SEGMENTS.has(partial + contHead)) {
+        break;
+      }
+      i += gapStr.length; // drop the whitespace; loop consumes the continuation
+    }
+    out += prefix + pathBuf;
+    cursor = i;
+    anchor.lastIndex = i;
+  }
+  out += text.slice(cursor);
+  return out;
 }
 
 function siteHost(siteUrl: string): string {
@@ -147,14 +219,19 @@ export function sanitizeDraftUrls(text: string, siteUrl: string): string {
   const base = siteUrl.replace(/\/+$/, '');
   const hostEsc = escapeRegExp(host);
 
+  // Step 0: repair same-site links that were split by literal whitespace /
+  // newlines (a line-wrapped "https://host/ap\nply"). Bounded so it never
+  // swallows prose — see rejoinSplitSiteUrls. After this, every same-site URL
+  // is a contiguous token the main pass can match.
+  text = rejoinSplitSiteUrls(text, host);
+
   // Match an optional scheme + optional www + our host, an optional port, and
   // an optional path. A URL is a single contiguous run of non-whitespace
   // characters — ANY whitespace (space, tab, or newline) terminates it, exactly
-  // as in normal text. This deliberately does NOT try to rejoin a URL that was
-  // split across a line break: doing so would swallow legitimate prose and
-  // paragraph breaks. The reported corruption ("%0A spliced into the path")
-  // arrives as percent-encoded, non-whitespace text, so it is still captured
-  // and remapped here.
+  // as in normal text. Whitespace-split URLs were already rejoined in step 0;
+  // any residual whitespace here is genuine prose, not an intra-URL break. The
+  // reported corruption ("%0A spliced into the path") arrives as percent-
+  // encoded, non-whitespace text, so it is captured and remapped here too.
   //
   // Boundaries guard against false positives:
   //   - The leading lookbehind `(?<![\w@./-])` stops the host from matching

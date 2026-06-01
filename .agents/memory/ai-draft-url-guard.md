@@ -1,27 +1,31 @@
 ---
 name: AI draft URL guard
-description: Why same-site link sanitization must use contiguous-token matching with boundaries, not newline-rejoining.
+description: How to sanitize AI-generated same-site links to an allowlist, including the bounded rule for rejoining whitespace-split URLs without swallowing prose.
 ---
 
 # Sanitizing AI-generated same-site URLs
 
 The admin-inbox AI sometimes fabricates internal/webhook links pointing at our
 own domain (e.g. an `/api/webhooks/...` path, occasionally with a `%0A`). A
-deterministic guard (`server/draft-url-guard.ts`) rewrites these before they
-leave the building, and a startup scrub cleans the same poison out of the
-knowledge base so RAG context can't reinforce it.
+deterministic guard rewrites these before they leave the building, and a
+startup scrub cleans the same poison out of the knowledge base so RAG context
+can't reinforce it.
 
-**Rule: match a same-site URL as a single contiguous run of non-whitespace,
-with explicit boundaries. Do NOT try to rejoin a URL split across a newline.**
+**Rule: rejoin a whitespace/newline-split same-site URL ONLY when the trailing
+partial segment is an INCOMPLETE prefix that the next token completes into a
+known segment (e.g. `ap`+`ply`→`apply`). Never rejoin across a paragraph break,
+and never rejoin after an already-complete segment.**
 
-**Why:** An early version tried to repair newline-split paths by joining
-vertical whitespace when followed by a path char. But *every* word starts with
-a path char, so it swallowed legitimate paragraph breaks — a seed doc
-`.../rules\n\nABOUT THE DEPOSIT` became `.../rules THE DEPOSIT`. Because
-`seedKnowledgeDocs` re-seeds canonical bodies each boot, the scrub then
-"rewrote 1 record" on *every* boot in a silent corruption loop. The reported
-`%0A` corruption is percent-encoded (non-whitespace), so contiguous matching
-still catches it without any rejoin heuristic.
+**Why:** A naive "join vertical whitespace when followed by a path char"
+heuristic swallows prose, because *every* word starts with a path char — a seed
+doc `.../rules\n\nABOUT THE DEPOSIT` became `.../rules THE DEPOSIT`, and since
+canonical bodies re-seed each boot the scrub "rewrote 1 record" on *every* boot
+in a silent corruption loop. But refusing to rejoin at all leaves a genuine
+line-wrapped link broken (`.../ap\nply` → `.../com\nply`). The completes-a-
+known-segment test threads both: a complete segment like `rules` or `apply` is
+never extended (so prose/next-word survives), while a true mid-word break is
+repaired. The `%0A` corruption is percent-encoded (non-whitespace) so the main
+contiguous-token pass catches it regardless.
 
 **How to apply:**
 - `PUBLIC_ROUTE_SEGMENTS` is intentionally the APPROVED key-URL set only

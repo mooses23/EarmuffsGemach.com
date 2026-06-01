@@ -180,6 +180,44 @@ test('does not match a bare internal prefix split by _ or - boundary', () => {
   assertEq(sanitizeDraftUrls(draft, SITE), draft);
 });
 
+// ---- split-URL repair (whitespace / newline inside a same-site link) ----
+test('repairs a same-site link split by a newline mid-segment', () => {
+  const draft = 'Apply here: https://earmuffsgemach.com/ap\nply now.';
+  assertEq(
+    sanitizeDraftUrls(draft, SITE),
+    'Apply here: https://earmuffsgemach.com/apply now.',
+  );
+});
+
+test('repairs a same-site link split by a space mid-segment', () => {
+  const draft = 'Apply: https://earmuffsgemach.com/ap ply';
+  assertEq(sanitizeDraftUrls(draft, SITE), 'Apply: https://earmuffsgemach.com/apply');
+});
+
+test('repairs an internal webhook link split across lines → /apply', () => {
+  const draft = 'Link: https://earmuffsgemach.com/api/web\nhooks/twilio/apply done';
+  assertEq(
+    sanitizeDraftUrls(draft, SITE),
+    'Link: https://earmuffsgemach.com/apply done',
+  );
+});
+
+test('does NOT rejoin a complete segment followed by a paragraph break', () => {
+  const draft =
+    'Read the rules: https://earmuffsgemach.com/rules\n\nABOUT THE PROGRAM\nWe lend earmuffs.';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
+test('does NOT rejoin a complete segment followed by a single-newline sentence', () => {
+  const draft = 'See https://earmuffsgemach.com/rules\nThank you for reaching out.';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
+test('does NOT swallow the next word after a complete-segment link', () => {
+  const draft = 'Go to https://earmuffsgemach.com/apply now to start.';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
 test('handles multiple links in one draft', () => {
   const draft = 'Find: https://earmuffsgemach.com/locations and apply: https://earmuffsgemach.com/api/webhooks/twilio/apply';
   assertEq(
