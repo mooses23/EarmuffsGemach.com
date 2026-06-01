@@ -2432,25 +2432,18 @@ export default function AdminLocations() {
               when other filters become active. */}
           {missingCoordsCount > 0 && coordsFilter !== "missing" && (
             <div
-              className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2"
+              className="flex items-center gap-1.5 text-xs text-muted-foreground"
               data-testid="banner-missing-coords"
             >
-              <div className="flex items-center gap-2 text-sm text-amber-100">
-                <AlertTriangle className="h-4 w-4 text-amber-400 shrink-0" />
-                <span>
-                  <strong>{missingCoordsCount}</strong>{" "}
-                  {missingCoordsCount === 1 ? t("locationSingular") : t("locations")} {t("missingCoords").toLowerCase()}
-                </span>
-              </div>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-8 border-amber-500/40 bg-amber-500/10 text-amber-100 hover:bg-amber-500/20"
+              <AlertTriangle className="h-3 w-3 text-amber-400/70 shrink-0" />
+              <span>{missingCoordsCount} {t("missingCoords").toLowerCase()} —</span>
+              <button
                 onClick={() => setCoordsFilter("missing")}
+                className="underline underline-offset-2 hover:text-foreground transition-colors"
                 data-testid="btn-show-missing-coords"
               >
                 {t("showOnly")}
-              </Button>
+              </button>
             </div>
           )}
 
