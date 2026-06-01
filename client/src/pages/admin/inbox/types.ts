@@ -30,7 +30,27 @@ export interface EmailsResponse {
   threads?: GmailEmail[];
   emails?: GmailEmail[];
   nextPageToken?: string;
+  resultSizeEstimate?: number;
 }
+
+export type DraftSource = {
+  kind: string;
+  id: number;
+  label?: string;
+  title?: string;
+  snippet?: string;
+  score?: number;
+};
+
+export type DraftMeta = {
+  confidence?: number;
+  sources?: DraftSource[];
+  citedSourceIds?: string[];
+  todayIso?: string;
+  senderHistoryCount?: number;
+  threadHistoryCount?: number;
+  language?: string;
+} | null;
 
 export interface UnifiedItem {
   key: string;
@@ -78,6 +98,13 @@ export interface ThreadResponse {
   threadKey: string;
   messages: ThreadEntry[];
 }
+
+export type BulkKind =
+  | "markRead" | "markUnread"
+  | "archive" | "unarchive"
+  | "trash" | "untrash"
+  | "spam" | "notSpam"
+  | "restore";
 
 export const FILTER_STORAGE_KEY = "admin-inbox-filters-v1";
 

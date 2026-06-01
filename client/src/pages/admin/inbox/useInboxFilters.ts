@@ -47,12 +47,9 @@ export function useInboxFilters() {
   }, []);
 
   const clearAll = useCallback(() => {
-    setFolderState("inbox");
-    setSourceFilter("all");
-    setReadFilter("all");
-    setReplyFilter("all");
+    setFolder("inbox");
     setSearch("");
-  }, []);
+  }, [setFolder]);
 
   // Mirror filter state to localStorage on every change.
   useEffect(() => {

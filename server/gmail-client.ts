@@ -514,6 +514,7 @@ export interface EmailThreadSummary extends EmailMessage {
 export interface ListEmailThreadsResult {
   threads: EmailThreadSummary[];
   nextPageToken?: string;
+  resultSizeEstimate?: number;
 }
 
 export async function listEmailThreads(
@@ -610,6 +611,7 @@ export async function listEmailThreads(
   return {
     threads: summaries,
     nextPageToken: resp.data.nextPageToken || undefined,
+    resultSizeEstimate: resp.data.resultSizeEstimate ?? undefined,
   };
 }
 
