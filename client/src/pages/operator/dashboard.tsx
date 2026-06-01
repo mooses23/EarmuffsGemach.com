@@ -1265,7 +1265,6 @@ function ReturnReminderButton({ tx, locationId }: { tx: Transaction; locationId:
         description: chosenChannel === 'sms' ? t('reminderSentToastSms') : t('reminderSentToastEmail'),
       });
       queryClient.invalidateQueries({ queryKey: ['/api/locations', locationId, 'transactions'] });
-      queryClient.invalidateQueries({ queryKey: [`/api/locations/${locationId}/transactions`] });
       queryClient.invalidateQueries({ queryKey: ['/api/locations', locationId, 'transactions', tx.id, 'return-reminders'] });
       setConfirmOpen(false);
     },

@@ -15,12 +15,12 @@ export function LocationSearch() {
   const [searchQuery, setSearchQuery] = useState("");
 
   const { data: locations = [] } = useQuery({
-    queryKey: ["/api/locations"],
+    queryKey: ["/api/locations", language],
     queryFn: () => getLocations(),
   });
 
   const { data: regions = [] } = useQuery({
-    queryKey: ["/api/regions"],
+    queryKey: ["/api/regions", language],
     queryFn: () => getRegions(),
   });
 
