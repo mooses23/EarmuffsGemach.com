@@ -147,18 +147,23 @@ export class WebhookHandlers {
         });
         console.log(`Updated payment ${payment.id} to refunded`);
 
-        // Sync transaction state and restock inventory.
-        // markPhysicallyReturnedForRefund is CAS-guarded on isReturned=false so
-        // duplicate webhook deliveries cannot double-restock or double-set the flag.
-        const returned = await storage.markPhysicallyReturnedForRefund(payment.transactionId, true);
-        if (returned) {
-          // markPhysicallyReturnedForRefund does not set refundAmount. Use
-          // markTransactionReturned to set it (idempotently re-asserts isReturned=true).
-          await storage.markTransactionReturned(payment.transactionId, refundAmountDollars);
-          console.log(`Synced transaction ${payment.transactionId}: isReturned=true, refundAmount=$${refundAmountDollars}, inventory restocked`);
+        // Sync transaction state.
+        // Step 1 — Restock inventory (CAS-guarded on isReturned=false so duplicate
+        // webhook deliveries or a webhook that fires after a manual return cannot
+        // double-restock). Returns null when already returned → no restock.
+        const restocked = await storage.markPhysicallyReturnedForRefund(payment.transactionId, true);
+        if (restocked) {
+          console.log(`Restocked inventory for transaction ${payment.transactionId}`);
         } else {
-          console.log(`Transaction ${payment.transactionId} was already marked returned (duplicate webhook or prior manual return)`);
+          console.log(`Transaction ${payment.transactionId} already returned — skipping restock`);
         }
+
+        // Step 2 — Always sync refundAmount (and ensure isReturned=true) regardless
+        // of whether the restock happened, so duplicate webhooks or webhooks that
+        // arrive after a manual return still converge transaction state to Stripe's
+        // actual refunded amount.
+        await storage.markTransactionReturned(payment.transactionId, refundAmountDollars);
+        console.log(`Synced transaction ${payment.transactionId}: isReturned=true, refundAmount=$${refundAmountDollars}`);
       }
     } catch (error) {
       console.error('Error handling charge.refunded:', error);
