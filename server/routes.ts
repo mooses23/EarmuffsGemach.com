@@ -1975,7 +1975,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       res.status(201).json(application);
 
       // Fire emails asynchronously so they never block the response.
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = (process.env.APP_URL || process.env.SITE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, '');
       sendApplicationConfirmationEmail({
         firstName: application.firstName,
         lastName: application.lastName,
@@ -2186,7 +2186,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       });
 
       // Auto-fire welcome email asynchronously (no-op if email unconfigured).
-      const baseUrl = `${req.protocol}://${req.get("host")}`;
+      const baseUrl = (process.env.APP_URL || process.env.SITE_URL || `${req.protocol}://${req.get("host")}`).replace(/\/$/, '');
       sendWelcomeForLocation(location.id, {
         channel: "email",
         baseUrl,
