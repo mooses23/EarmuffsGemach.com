@@ -182,7 +182,7 @@ interface TransactionCardProps {
   t: (key: string) => string;
   selectionMode?: boolean;
   isSelected?: boolean;
-  onToggleSelect?: (id: number) => void;
+  onToggleSelect?: (id: number, depositAmount: number | null) => void;
   maxCardAgeDays: number;
 }
 
@@ -231,7 +231,7 @@ function TransactionCard({
           {!transaction.isReturned && (
             <Checkbox
               checked={isSelected}
-              onCheckedChange={() => onToggleSelect?.(transaction.id)}
+              onCheckedChange={() => onToggleSelect?.(transaction.id, transaction.depositAmount ?? null)}
               onClick={(e) => e.stopPropagation()}
               className={`shrink-0 transition-opacity data-[state=checked]:bg-primary data-[state=checked]:border-primary ${
                 selectionMode ? "opacity-100 border-primary/60" : "opacity-30 hover:opacity-80 border-white/40"
@@ -554,10 +554,17 @@ export default function AdminTransactions() {
   const [bulkRefundAmounts, setBulkRefundAmounts] = useState<Record<number, string>>({});
   const [allResultsSelected, setAllResultsSelected] = useState(false);
 
-  const toggleSelect = useCallback((id: number) => {
+  const toggleSelect = useCallback((id: number, depositAmount: number | null) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        if (depositAmount !== null) {
+          setBulkRefundAmounts(prev => prev[id] !== undefined ? prev : { ...prev, [id]: String(depositAmount) });
+        }
+      }
       return next;
     });
   }, []);
@@ -689,12 +696,13 @@ export default function AdminTransactions() {
       const results = await Promise.allSettled(
         ids.map((id) => {
           const customAmount = bulkRefundAmounts[id];
-          // Amounts must always be pre-populated (either from dialog initializer or
-          // from selectAllResults). Defaulting to 0 if somehow missing is safe — it
-          // means no refund rather than a random incorrect charge.
+          // Amounts are populated at selection time (toggleSelect/selectAllOnPage/selectAllResults).
+          // Fall back to the current-page transaction depositAmount as a last resort;
+          // only default to 0 when no deposit data is available at all.
+          const fallbackTx = transactions.find(t => t.id === id);
           const refundAmount = customAmount !== undefined
             ? Math.max(0, parseFloat(customAmount) || 0)
-            : 0;
+            : (fallbackTx?.depositAmount ?? 0);
           return markTransactionReturned(id, { refundAmount });
         })
       );
@@ -929,11 +937,18 @@ export default function AdminTransactions() {
     selectableFilteredIds.length > 0 &&
     selectableFilteredIds.every((id) => selectedIds.has(id));
 
-  // Select all non-returned items visible on the current page
+  // Select all non-returned items visible on the current page (and capture their deposit amounts)
   const selectAllOnPage = useCallback(() => {
     setSelectedIds(new Set(selectableFilteredIds));
     setAllResultsSelected(false);
-  }, [selectableFilteredIds]);
+    setBulkRefundAmounts(prev => {
+      const next = { ...prev };
+      filteredTransactions.filter(tx => !tx.isReturned).forEach(tx => {
+        if (next[tx.id] === undefined) next[tx.id] = String(tx.depositAmount ?? 0);
+      });
+      return next;
+    });
+  }, [selectableFilteredIds, filteredTransactions]);
 
   // Select all non-returned items across all pages (fetches IDs + depositAmounts from server).
   // Only valid when no client-side-only filters are active (region / district / has-card /
