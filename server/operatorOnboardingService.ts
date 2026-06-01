@@ -106,7 +106,7 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     ? { token: loc.claimToken }
     : await storage.ensureLocationClaimToken(loc.id, generateClaimToken);
   const claimUrlPreview = buildClaimUrl(baseUrl, ensured.token);
-  const loginUrlPreview = `${baseUrl.replace(/\/$/, '')}/auth`;
+  const loginUrlPreview = `${baseUrl.replace(/\/$/, '')}/operator/login`;
   const language = detectLanguage(loc);
   const enBody = buildOperatorWelcomeMessageBody({
     locationName: loc.name,
@@ -246,7 +246,7 @@ export async function sendWelcomeForLocation(
       ? applyMessageTemplate(options.messageBody, templateValues)
       : undefined;
 
-  const loginUrl = `${options.baseUrl.replace(/\/$/, '')}/auth`;
+  const loginUrl = `${options.baseUrl.replace(/\/$/, '')}/operator/login`;
 
   const operatorName = language === 'he'
     ? (loc.contactPersonHe || loc.contactPerson || '')
