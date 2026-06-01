@@ -1,9 +1,10 @@
-// Extracted from inbox.tsx — contains the full detail view (conversation +
-// reply box + dialogs), ThreadTranscriptPanel, and SaveToFaqPanel so that
-// inbox.tsx stays at a manageable size.
+// All per-keystroke / detail-view state lives HERE so that typing in the
+// reply field never re-renders AdminInbox or its expensive list pipeline.
+// AdminInbox uses key={selected.key} on this component so React auto-resets
+// all local state when a new thread is opened.
 
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,12 +26,13 @@ import {
   X, Trash2, CheckCircle2, ChevronDown, ChevronUp, Clock, Mail, MessageSquare,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
-import { apiRequest, queryClient as qc } from "@/lib/queryClient";
+import { apiRequest } from "@/lib/queryClient";
+import { useLanguage } from "@/hooks/use-language";
 import { SuggestedDraftCard } from "./SuggestedDraftCard";
-import type { Location } from "@shared/schema";
+import type { Location, Contact } from "@shared/schema";
 import type { TranslationKey } from "@/lib/translations";
-import type { UnifiedItem, Folder, ThreadEntry, ThreadResponse, DraftMeta, BulkKind } from "./types";
-import { formatDate, safeDate, sanitizeHtml, parseEmailAddress } from "./utils";
+import type { UnifiedItem, Folder, ThreadEntry, ThreadResponse, DraftMeta, DraftSource, BulkKind } from "./types";
+import { formatDate, safeDate, sanitizeHtml, parseEmailAddress, extractUrls } from "./utils";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -40,7 +42,32 @@ function parseCitedId(raw: string): { kind: string; id: number } | null {
   return { kind: m[1].toLowerCase(), id: Number(m[2]) };
 }
 
-// ─── Props ───────────────────────────────────────────────────────────────────
+// For email items the saved reply ref key is the Gmail threadId (so all
+// messages on a conversation share replied state); forms key by contact id.
+function replyRefForItem(item: UnifiedItem): string {
+  if (item.source === "email") return String(item.threadId || item.id);
+  return String(item.id);
+}
+
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+type GenerateResponse = {
+  response: string;
+  classification?: string;
+  needsHumanReview?: boolean;
+  reviewReason?: string;
+  matchedLocationId?: number;
+  matchedLocationName?: string;
+  confidence?: number;
+  sources?: DraftSource[];
+  citedSourceIds?: string[];
+  todayIso?: string;
+  senderHistoryCount?: number;
+  threadHistoryCount?: number;
+  language?: string;
+};
+
+// ─── Props (minimal — no per-keystroke state) ────────────────────────────────
 
 export interface InboxDetailViewProps {
   selected: UnifiedItem;
@@ -58,73 +85,12 @@ export interface InboxDetailViewProps {
     undoSuccessMsg?: string,
     undoFailMsg?: string,
   ) => void;
-
   isMarkReadPending: boolean;
   onToggleRead: () => void;
-
-  replyText: string;
-  setReplyText: React.Dispatch<React.SetStateAction<string>>;
-  replySubject: string;
-  setReplySubject: React.Dispatch<React.SetStateAction<string>>;
-  forwardNote: string;
-  setForwardNote: React.Dispatch<React.SetStateAction<string>>;
-  linkCheckPending: boolean;
-  brokenLinkWarning: { links: { url: string; reason?: string }[]; item: UnifiedItem } | null;
-  setBrokenLinkWarning: React.Dispatch<React.SetStateAction<{ links: { url: string; reason?: string }[]; item: UnifiedItem } | null>>;
-  sendReplyPending: boolean;
-  onSendReply: (item: UnifiedItem) => void;
-
-  suggestedDraft: string | null;
-  setSuggestedDraft: React.Dispatch<React.SetStateAction<string | null>>;
-  generatePending: boolean;
-  onGenerate: (item: UnifiedItem) => void;
-  translatePending: boolean;
-  draftMeta: DraftMeta;
-  draftClassification: string | null;
-  reviewWarning: string | null;
-  showWhyPanel: boolean;
-  setShowWhyPanel: React.Dispatch<React.SetStateAction<boolean>>;
-  matchedLocation: { id: number; name: string } | null;
-  forwardPending: boolean;
-  onForward: (vars: { emailId: string; locationId: number }) => void;
-  onTranslateMessage: () => void;
-  onTranslateReply: () => void;
-
-  showSaveFaq: boolean;
-  setShowSaveFaq: React.Dispatch<React.SetStateAction<boolean>>;
-  faqQuestion: string;
-  faqCategory: string;
-
-  onEditOpen: () => void;
-  editOpen: boolean;
-  setEditOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  editSubject: string;
-  setEditSubject: React.Dispatch<React.SetStateAction<string>>;
-  editMessage: string;
-  setEditMessage: React.Dispatch<React.SetStateAction<string>>;
-  editContactPending: boolean;
-  onSaveEdit: (vars: { id: number; subject: string; message: string }) => void;
-
-  confirmDeleteId: number | null;
-  setConfirmDeleteId: React.Dispatch<React.SetStateAction<number | null>>;
   deletePending: boolean;
   onDelete: (id: number) => void;
-
-  pendingMixedTrash: { items: UnifiedItem[]; successTitle: string; failTitle: string } | null;
-  setPendingMixedTrash: (v: { items: UnifiedItem[]; successTitle: string; failTitle: string } | null) => void;
-
-  saveEmailBannerDismissed: boolean;
-  setSaveEmailBannerDismissed: React.Dispatch<React.SetStateAction<boolean>>;
-  saveEmailLocationId: string;
-  setSaveEmailLocationId: React.Dispatch<React.SetStateAction<string>>;
-  saveEmailPending: boolean;
-  setSaveEmailPending: React.Dispatch<React.SetStateAction<boolean>>;
   operatorEmailSet: Set<string>;
   locationsData: Location[] | undefined;
-
-  translatedBody: string | null;
-  uiTarget: "en" | "he";
-
   threadExpandedMap: Record<string, Record<string, boolean>>;
   setThreadExpandedMap: React.Dispatch<React.SetStateAction<Record<string, Record<string, boolean>>>>;
 }
@@ -141,69 +107,267 @@ export function InboxDetailView({
   performThreadAction,
   isMarkReadPending,
   onToggleRead,
-  replyText,
-  setReplyText,
-  replySubject,
-  setReplySubject,
-  forwardNote,
-  setForwardNote,
-  linkCheckPending,
-  brokenLinkWarning,
-  setBrokenLinkWarning,
-  sendReplyPending,
-  onSendReply,
-  suggestedDraft,
-  setSuggestedDraft,
-  generatePending,
-  onGenerate,
-  translatePending,
-  draftMeta,
-  draftClassification,
-  reviewWarning,
-  showWhyPanel,
-  setShowWhyPanel,
-  matchedLocation,
-  forwardPending,
-  onForward,
-  onTranslateMessage,
-  onTranslateReply,
-  showSaveFaq,
-  setShowSaveFaq,
-  faqQuestion,
-  faqCategory,
-  onEditOpen,
-  editOpen,
-  setEditOpen,
-  editSubject,
-  setEditSubject,
-  editMessage,
-  setEditMessage,
-  editContactPending,
-  onSaveEdit,
-  confirmDeleteId,
-  setConfirmDeleteId,
   deletePending,
   onDelete,
-  pendingMixedTrash,
-  setPendingMixedTrash,
-  saveEmailBannerDismissed,
-  setSaveEmailBannerDismissed,
-  saveEmailLocationId,
-  setSaveEmailLocationId,
-  saveEmailPending,
-  setSaveEmailPending,
   operatorEmailSet,
   locationsData,
-  translatedBody,
-  uiTarget,
   threadExpandedMap,
   setThreadExpandedMap,
 }: InboxDetailViewProps) {
   const { toast } = useToast();
+  const qc = useQueryClient();
+  const { language } = useLanguage();
+  const uiTarget: "en" | "he" = language === "he" ? "he" : "en";
 
   const detailThreadRef = selected.source === "email"
     ? String(selected.threadId || selected.id)
     : String(selected.id);
+
+  // ── Per-keystroke reply state ────────────────────────────────────────────
+  const initSubject = selected.subject?.startsWith("Re:")
+    ? selected.subject
+    : `Re: ${selected.subject || ""}`;
+  const [replyText, setReplyText] = useState("");
+  const [replySubject, setReplySubject] = useState(initSubject);
+  const [forwardNote, setForwardNote] = useState("");
+  const [brokenLinkWarning, setBrokenLinkWarning] = useState<{
+    links: { url: string; reason?: string }[];
+    item: UnifiedItem;
+  } | null>(null);
+  const [linkCheckPending, setLinkCheckPending] = useState(false);
+
+  // ── AI draft state ───────────────────────────────────────────────────────
+  const [suggestedDraft, setSuggestedDraft] = useState<string | null>(null);
+  const [aiDraftSnapshot, setAiDraftSnapshot] = useState<string | null>(null);
+  const [draftClassification, setDraftClassification] = useState<string | null>(null);
+  const [draftMeta, setDraftMeta] = useState<DraftMeta>(null);
+  const [showWhyPanel, setShowWhyPanel] = useState(false);
+  const [reviewWarning, setReviewWarning] = useState<string | null>(null);
+  const [matchedLocation, setMatchedLocation] = useState<{ id: number; name: string } | null>(null);
+
+  // ── Save FAQ state ───────────────────────────────────────────────────────
+  const [showSaveFaq, setShowSaveFaq] = useState(false);
+  const [faqQuestion, setFaqQuestion] = useState("");
+  const [faqCategory, setFaqCategory] = useState("general");
+
+  // ── Save-email-to-profile banner ─────────────────────────────────────────
+  const [saveEmailBannerDismissed, setSaveEmailBannerDismissed] = useState(false);
+  const [saveEmailLocationId, setSaveEmailLocationId] = useState("");
+  const [saveEmailPending, setSaveEmailPending] = useState(false);
+
+  // ── Edit contact dialog ──────────────────────────────────────────────────
+  const [editOpen, setEditOpen] = useState(false);
+  const [editSubject, setEditSubject] = useState("");
+  const [editMessage, setEditMessage] = useState("");
+
+  // ── Delete confirm dialog ────────────────────────────────────────────────
+  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
+
+  // ── Per-message body translation ─────────────────────────────────────────
+  const [translations, setTranslations] = useState<Record<string, string>>({});
+  const translationKey = `${selected.source}:${selected.id}`;
+  const translatedBody = translations[translationKey] ?? null;
+
+  // ── Mutations ────────────────────────────────────────────────────────────
+  const translateMutation = useMutation({
+    mutationFn: async ({ text, target }: { text: string; target: "en" | "he" }) => {
+      const res = await apiRequest("POST", `/api/admin/inbox/translate`, { text, target });
+      return (await res.json()).translated as string;
+    },
+  });
+
+  const handleTranslateMessage = async () => {
+    if (translatedBody) {
+      setTranslations((prev) => {
+        const next = { ...prev };
+        delete next[translationKey];
+        return next;
+      });
+      return;
+    }
+    try {
+      const out = await translateMutation.mutateAsync({ text: selected.body, target: uiTarget });
+      setTranslations((prev) => ({ ...prev, [translationKey]: out }));
+    } catch (e) {
+      toast({ title: t("error"), description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const handleTranslateReply = async () => {
+    if (!replyText.trim()) return;
+    try {
+      const out = await translateMutation.mutateAsync({ text: replyText, target: uiTarget });
+      setReplyText(out);
+    } catch (e) {
+      toast({ title: t("error"), description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    }
+  };
+
+  const sendReplyMutation = useMutation({
+    mutationFn: async (item: UnifiedItem) => {
+      const payload: {
+        replyText: string;
+        replySubject: string;
+        aiDraft?: string;
+        classification?: string;
+        matchedLocationId?: number;
+      } = {
+        replyText,
+        replySubject,
+        aiDraft: aiDraftSnapshot ?? undefined,
+        classification: draftClassification ?? undefined,
+        matchedLocationId: matchedLocation?.id ?? undefined,
+      };
+      if (item.source === "email") {
+        await apiRequest("POST", `/api/admin/emails/${item.id}/reply`, payload);
+      } else {
+        await apiRequest("POST", `/api/contact/${item.id}/respond`, payload);
+      }
+    },
+    onSuccess: () => {
+      toast({ title: t("replySent"), description: t("emailSentSuccessfully") });
+      setFaqQuestion(selected.subject || "");
+      const classificationToCategory: Record<string, string> = {
+        new_location: "applications",
+        borrow_request: "borrowing",
+        return_or_deposit: "deposits",
+        application_status: "applications",
+        general_question: "general",
+        complaint: "general",
+        other: "general",
+      };
+      const mapped = draftClassification ? classificationToCategory[draftClassification] : undefined;
+      setFaqCategory(mapped || "general");
+      setShowSaveFaq(true);
+      qc.invalidateQueries({ queryKey: ["/api/contact"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/emails/threads", "infinite"] });
+      qc.invalidateQueries({ queryKey: ["/api/admin/reply-examples/refs"] });
+      qc.invalidateQueries({
+        predicate: (q) => {
+          const key = q.queryKey;
+          return (
+            Array.isArray(key) &&
+            key[0] === "/api/admin/reply-examples/by-ref" &&
+            key[1] === selected.source &&
+            key[2] === replyRefForItem(selected)
+          );
+        },
+      });
+    },
+    onError: (err: unknown) =>
+      toast({
+        title: t("error"),
+        description: err instanceof Error ? err.message : t("failedToSendReply"),
+        variant: "destructive",
+      }),
+  });
+
+  async function handleSendClick(item: UnifiedItem) {
+    const urls = extractUrls(replyText);
+    setLinkCheckPending(true);
+    try {
+      const res = await apiRequest("POST", "/api/admin/check-urls", { urls, rawText: replyText });
+      const data: { results: { url: string; ok: boolean; reason?: string }[] } = await res.json();
+      const broken = (data.results ?? []).filter((r) => !r.ok);
+      if (broken.length > 0) {
+        setBrokenLinkWarning({ links: broken, item });
+      } else {
+        sendReplyMutation.mutate(item);
+      }
+    } catch {
+      sendReplyMutation.mutate(item);
+    } finally {
+      setLinkCheckPending(false);
+    }
+  }
+
+  const generateMutation = useMutation({
+    mutationFn: async (item: UnifiedItem) => {
+      const url =
+        item.source === "email"
+          ? `/api/admin/emails/${item.id}/generate-response`
+          : `/api/contact/${item.id}/generate-response`;
+      const res = await apiRequest("POST", url);
+      return (await res.json()) as GenerateResponse;
+    },
+    onSuccess: (data: GenerateResponse) => {
+      setSuggestedDraft(data.response);
+      setAiDraftSnapshot(data.response);
+      setDraftClassification(data.classification ?? null);
+      setDraftMeta({
+        confidence: data.confidence,
+        sources: data.sources,
+        citedSourceIds: data.citedSourceIds,
+        todayIso: data.todayIso,
+        senderHistoryCount: data.senderHistoryCount,
+        threadHistoryCount: data.threadHistoryCount,
+        language: data.language,
+      });
+      setShowWhyPanel(true);
+      if (data.needsHumanReview) {
+        setReviewWarning(data.reviewReason || t("inboxReviewBeforeSending"));
+      } else {
+        setReviewWarning(null);
+      }
+      if (data.matchedLocationId && data.matchedLocationName) {
+        setMatchedLocation({ id: data.matchedLocationId, name: data.matchedLocationName });
+      } else {
+        setMatchedLocation(null);
+      }
+      toast({ title: t("aiResponseGenerated"), description: t("reviewEditBeforeSending") });
+    },
+    onError: (err: unknown) =>
+      toast({
+        title: t("error"),
+        description: err instanceof Error ? err.message : t("failedToGenerateResponse"),
+        variant: "destructive",
+      }),
+  });
+
+  const forwardMutation = useMutation({
+    mutationFn: async ({ emailId, locationId }: { emailId: string; locationId: number }) => {
+      const res = await apiRequest(
+        "POST",
+        `/api/admin/emails/${emailId}/forward-to-operator`,
+        { locationId, note: forwardNote.trim() || undefined },
+      );
+      return (await res.json()) as { forwardedTo: string; locationName: string };
+    },
+    onSuccess: (data) => {
+      toast({ title: "Forwarded to operator", description: `${data.locationName} (${data.forwardedTo})` });
+      setForwardNote("");
+    },
+    onError: (err: unknown) =>
+      toast({
+        title: t("error"),
+        description: err instanceof Error ? err.message : "Failed to forward",
+        variant: "destructive",
+      }),
+  });
+
+  const editContactMutation = useMutation({
+    mutationFn: async ({ id, subject, message }: { id: number; subject: string; message: string }) => {
+      const res = await apiRequest("PATCH", `/api/contact/${id}`, { subject, message });
+      return res.json();
+    },
+    onSuccess: (updated: Contact) => {
+      qc.invalidateQueries({ queryKey: ["/api/contact"] });
+      toast({ title: t("msgUpdatedSuccess") });
+      setEditOpen(false);
+      setSelected({ ...selected, subject: updated.subject, body: updated.message });
+    },
+    onError: () =>
+      toast({ title: t("error"), description: t("msgUpdateFailed"), variant: "destructive" }),
+  });
+
+  const openEditDialog = () => {
+    if (selected.source !== "form") return;
+    setEditSubject(selected.subject);
+    setEditMessage(selected.body);
+    setEditOpen(true);
+  };
+
+  // ─── JSX ─────────────────────────────────────────────────────────────────
 
   return (
     <div className="py-10">
@@ -297,7 +461,7 @@ export function InboxDetailView({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={onEditOpen}
+                  onClick={openEditDialog}
                   data-testid="button-edit-message"
                 >
                   <Pencil className="h-4 w-4 mr-2" />
@@ -394,8 +558,8 @@ export function InboxDetailView({
           folder={folder}
           t={t}
           translatedBody={translatedBody}
-          onTranslateLatestInbound={onTranslateMessage}
-          isTranslating={translatePending}
+          onTranslateLatestInbound={handleTranslateMessage}
+          isTranslating={translateMutation.isPending}
           uiTarget={uiTarget}
           expanded={threadExpandedMap[detailThreadRef] ?? {}}
           onExpandedChange={(updater) => {
@@ -449,11 +613,11 @@ export function InboxDetailView({
                 <Button
                   size="sm"
                   variant="secondary"
-                  disabled={forwardPending}
-                  onClick={() => onForward({ emailId: String(selected.id), locationId: matchedLocation.id })}
+                  disabled={forwardMutation.isPending}
+                  onClick={() => forwardMutation.mutate({ emailId: String(selected.id), locationId: matchedLocation.id })}
                   data-testid="button-forward-operator"
                 >
-                  {forwardPending ? "Forwarding…" : `Forward to ${matchedLocation.name}`}
+                  {forwardMutation.isPending ? "Forwarding…" : `Forward to ${matchedLocation.name}`}
                 </Button>
               </div>
             )}
@@ -528,7 +692,7 @@ export function InboxDetailView({
                     onClick={() => {
                       const itemToSend = brokenLinkWarning.item;
                       setBrokenLinkWarning(null);
-                      onSendReply(itemToSend);
+                      sendReplyMutation.mutate(itemToSend);
                     }}
                     data-testid="button-broken-link-send-anyway"
                   >
@@ -542,18 +706,18 @@ export function InboxDetailView({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => onGenerate(selected)}
-                  disabled={generatePending}
+                  onClick={() => generateMutation.mutate(selected)}
+                  disabled={generateMutation.isPending}
                   data-testid="button-generate-ai"
                 >
                   <Sparkles className="h-4 w-4 mr-2" />
-                  {generatePending ? t("generating") : t("generateAIResponse")}
+                  {generateMutation.isPending ? t("generating") : t("generateAIResponse")}
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={onTranslateReply}
-                  disabled={!replyText.trim() || translatePending}
+                  onClick={handleTranslateReply}
+                  disabled={!replyText.trim() || translateMutation.isPending}
                   data-testid="button-translate-reply"
                 >
                   <Languages className="h-4 w-4 mr-2" />
@@ -561,12 +725,12 @@ export function InboxDetailView({
                 </Button>
               </div>
               <Button
-                onClick={() => onSendReply(selected)}
-                disabled={!replyText.trim() || sendReplyPending || linkCheckPending}
+                onClick={() => handleSendClick(selected)}
+                disabled={!replyText.trim() || sendReplyMutation.isPending || linkCheckPending}
                 data-testid="button-send-reply"
               >
                 <Send className="h-4 w-4 mr-2" />
-                {sendReplyPending ? t("sending") : linkCheckPending ? "Checking links…" : t("sendReply")}
+                {sendReplyMutation.isPending ? t("sending") : linkCheckPending ? "Checking links…" : t("sendReply")}
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">{t("inboxSentFromGemach")}</p>
@@ -708,16 +872,16 @@ export function InboxDetailView({
               </Button>
               <Button
                 onClick={() =>
-                  onSaveEdit({
+                  editContactMutation.mutate({
                     id: Number(selected.id),
                     subject: editSubject,
                     message: editMessage,
                   })
                 }
-                disabled={editContactPending}
+                disabled={editContactMutation.isPending}
                 data-testid="button-save-edit"
               >
-                {editContactPending ? t("saving") : t("saveChanges")}
+                {editContactMutation.isPending ? t("saving") : t("saveChanges")}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -736,45 +900,6 @@ export function InboxDetailView({
                 onClick={() => confirmDeleteId !== null && onDelete(confirmDeleteId)}
               >
                 {deletePending ? t("deleting") : t("msgDelete")}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
-
-        {/* Mixed-thread trash guard */}
-        <AlertDialog open={pendingMixedTrash !== null} onOpenChange={(o) => !o && setPendingMixedTrash(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <Trash2 className="h-5 w-5 text-destructive" />
-                {t("inboxMixedTrashTitle")}
-              </AlertDialogTitle>
-              <AlertDialogDescription>
-                {t("inboxMixedTrashDesc")}
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel onClick={() => setPendingMixedTrash(null)}>
-                {t("cancel")}
-              </AlertDialogCancel>
-              <AlertDialogAction
-                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                onClick={() => {
-                  if (!pendingMixedTrash) return;
-                  const { items, successTitle, failTitle } = pendingMixedTrash;
-                  setPendingMixedTrash(null);
-                  performThreadAction(
-                    items,
-                    "trash",
-                    successTitle,
-                    failTitle,
-                    items.every((m) => m.source === "email") ? "untrash" : undefined,
-                    t("inboxRestoreSuccess"),
-                    t("inboxRestoreFailed"),
-                  );
-                }}
-              >
-                {t("inboxMixedTrashConfirm")}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

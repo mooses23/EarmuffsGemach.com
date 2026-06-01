@@ -10,10 +10,6 @@ import {
   type EmailsResponse,
   type UnifiedItem,
   type InboxThread,
-  type ThreadEntry,
-  type ThreadResponse,
-  type DraftMeta,
-  type DraftSource,
   type BulkKind,
 } from "./inbox/types";
 import { InboxDetailView } from "./inbox/InboxDetailView";
@@ -21,14 +17,11 @@ import {
   parseEmailAddress,
   formatDate,
   safeDate,
-  sanitizeHtml,
   groupKey,
-  extractUrls,
 } from "./inbox/utils";
 import { useInboxFilters } from "./inbox/useInboxFilters";
 import { useInboxKeyboardShortcuts } from "./inbox/useKeyboardShortcuts";
 import { ShortcutsHelp } from "./inbox/ShortcutsHelp";
-import { SuggestedDraftCard } from "./inbox/SuggestedDraftCard";
 import { SmsInboxView } from "./inbox/SmsInboxView";
 import { Brain } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,8 +55,6 @@ import {
   Inbox as InboxIcon,
   ArrowLeft,
   Send,
-  Sparkles,
-  Languages,
   RefreshCw,
   Search,
   Mail,
@@ -74,7 +65,6 @@ import {
   AlertCircle,
   ChevronDown,
   ChevronUp,
-  Pencil,
   Eye,
   EyeOff,
   Archive,
@@ -162,26 +152,16 @@ export default function AdminInbox() {
     clearAll: clearAllFilters,
   } = filters;
   // Help-overlay (?) and search-input ref (used by "/" keyboard shortcut).
-  const [helpOpen, setHelpOpen] = useState(false);
-  const searchInputRef = useRef<HTMLInputElement | null>(null);
-  // Suggested AI draft — stored separately from the user's reply text so
-  // generating a draft never clobbers in-progress typing.
-  const [suggestedDraft, setSuggestedDraft] = useState<string | null>(null);
-  // Bulk-select mode lets the admin tick multiple rows and apply a single
-  // batch action (Archive / Trash / Report-spam / Mark read) instead of
-  // swiping each row individually.
-  const [selectMode, setSelectMode] = useState(false);
-  const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
-  const [bulkRunning, setBulkRunning] = useState(false);
-  const [replyText, setReplyText] = useState("");
-  const [replySubject, setReplySubject] = useState("");
-  const [translations, setTranslations] = useState<Record<string, string>>({});
-  const [brokenLinkWarning, setBrokenLinkWarning] = useState<{ links: { url: string; reason?: string }[]; item: UnifiedItem } | null>(null);
-  const [linkCheckPending, setLinkCheckPending] = useState(false);
-  const [confirmDeleteId, setConfirmDeleteId] = useState<number | null>(null);
-  const [editOpen, setEditOpen] = useState(false);
-  const [glossaryOpen, setGlossaryOpen] = useState(false);
-  const [editSubject, setEditSubject] = useState("");
+    const [helpOpen, setHelpOpen] = useState(false);
+    const searchInputRef = useRef<HTMLInputElement | null>(null);
+    const [glossaryOpen, setGlossaryOpen] = useState(false);
+    // Bulk-select mode lets the admin tick multiple rows and apply a single
+    // batch action (Archive / Trash / Report-spam / Mark read) instead of
+    // swiping each row individually.
+    const [selectMode, setSelectMode] = useState(false);
+    const [selectedKeys, setSelectedKeys] = useState<Set<string>>(() => new Set());
+    const [bulkRunning, setBulkRunning] = useState(false);
+      const [editSubject, setEditSubject] = useState("");
   const [editMessage, setEditMessage] = useState("");
   // Mixed-thread trash guard (Problem O): when a thread contains form-contact
   // members, trashing hard-deletes them permanently. Pending action is stored
@@ -262,10 +242,6 @@ export default function AdminInbox() {
     return s;
   }, [locationsQuery.data]);
 
-  // State for the "save email to profile" banner shown in thread detail view.
-  const [saveEmailBannerDismissed, setSaveEmailBannerDismissed] = useState(false);
-  const [saveEmailLocationId, setSaveEmailLocationId] = useState<string>("");
-  const [saveEmailPending, setSaveEmailPending] = useState(false);
 
   // Which messages have already been answered (from any saved reply example).
   // Aggregated server-side as one row per (sourceType, sourceRef) so the list
@@ -1118,265 +1094,26 @@ export default function AdminInbox() {
     },
     onError: () => toast({ title: t("error"), description: t("msgDeleteFailed"), variant: "destructive" }),
   });
-  const sendReplyMutation = useMutation({
-    mutationFn: async (item: UnifiedItem) => {
-      const payload: {
-        replyText: string;
-        replySubject: string;
-        aiDraft?: string;
-        classification?: string;
-        matchedLocationId?: number;
-      } = {
-        replyText,
-        replySubject,
-        aiDraft: aiDraftSnapshot ?? undefined,
-        classification: draftClassification ?? undefined,
-        matchedLocationId: matchedLocation?.id ?? undefined,
-      };
-      if (item.source === "email") {
-        await apiRequest("POST", `/api/admin/emails/${item.id}/reply`, payload);
-      } else {
-        await apiRequest("POST", `/api/contact/${item.id}/respond`, payload);
-      }
-    },
-    onSuccess: () => {
-      toast({ title: t("replySent"), description: t("emailSentSuccessfully") });
-      // Offer one-click save-to-FAQ before closing
-      setFaqQuestion(selected?.subject || "");
-      // Map AI classification → FAQ category so the admin doesn't have to retype it.
-      // Keys must match the Classification union in server/openai-client.ts.
-      const classificationToCategory: Record<string, string> = {
-        new_location: "applications",
-        borrow_request: "borrowing",
-        return_or_deposit: "deposits",
-        application_status: "applications",
-        general_question: "general",
-        complaint: "general",
-        other: "general",
-      };
-      const mapped = draftClassification ? classificationToCategory[draftClassification] : undefined;
-      setFaqCategory(mapped || "general");
-      setShowSaveFaq(true);
-      qc.invalidateQueries({ queryKey: ["/api/contact"] });
-      qc.invalidateQueries({ queryKey: ["/api/admin/emails/threads", "infinite"] });
-      // Refresh "Replied" badges everywhere and the per-message thread for
-      // the selected item so the new reply appears immediately. Email items
-      // are keyed by Gmail threadId so the entire conversation gets marked.
-      qc.invalidateQueries({ queryKey: ["/api/admin/reply-examples/refs"] });
-      if (selected) {
-        // Use a prefix-style invalidation (predicate) so any per-message
-        // history query for this conversation is refreshed regardless of
-        // its trailing legacyMessageId cache segment.
-        qc.invalidateQueries({
-          predicate: (q) => {
-            const key = q.queryKey;
-            return Array.isArray(key)
-              && key[0] === "/api/admin/reply-examples/by-ref"
-              && key[1] === selected.source
-              && key[2] === replyRefForItem(selected);
-          },
-        });
-      }
-    },
-    onError: (err: unknown) =>
-      toast({ title: t("error"), description: err instanceof Error ? err.message : t("failedToSendReply"), variant: "destructive" }),
-  });
-
-  async function handleSendClick(item: UnifiedItem) {
-    const urls = extractUrls(replyText);
-    // Always send rawText so the backend can scan for bare-domain blocklist hits
-    // (e.g. "babybanzgemach.com/apply" without an http:// prefix).
-    if (urls.length === 0) {
-      // Still check raw text for blocklisted bare domains even if no http:// URLs present.
-      setLinkCheckPending(true);
-      try {
-        const res = await apiRequest("POST", "/api/admin/check-urls", { urls: [], rawText: replyText });
-        const data: { results: { url: string; ok: boolean; reason?: string }[] } = await res.json();
-        const broken = (data.results ?? []).filter((r) => !r.ok);
-        if (broken.length > 0) {
-          setBrokenLinkWarning({ links: broken, item });
-        } else {
-          sendReplyMutation.mutate(item);
-        }
-      } catch {
-        sendReplyMutation.mutate(item);
-      } finally {
-        setLinkCheckPending(false);
-      }
-      return;
-    }
-    setLinkCheckPending(true);
-    try {
-      const res = await apiRequest("POST", "/api/admin/check-urls", { urls, rawText: replyText });
-      const data: { results: { url: string; ok: boolean; reason?: string }[] } = await res.json();
-      const broken = (data.results ?? []).filter((r) => !r.ok);
-      if (broken.length > 0) {
-        setBrokenLinkWarning({ links: broken, item });
-      } else {
-        sendReplyMutation.mutate(item);
-      }
-    } catch {
-      sendReplyMutation.mutate(item);
-    } finally {
-      setLinkCheckPending(false);
-    }
-  }
-
-  const [reviewWarning, setReviewWarning] = useState<string | null>(null);
-  const [matchedLocation, setMatchedLocation] = useState<{ id: number; name: string } | null>(null);
-  const [forwardNote, setForwardNote] = useState("");
-  const [aiDraftSnapshot, setAiDraftSnapshot] = useState<string | null>(null);
-  const [draftClassification, setDraftClassification] = useState<string | null>(null);
-  type GenerateResponse = {
-    response: string;
-    classification?: string;
-    needsHumanReview?: boolean;
-    reviewReason?: string;
-    matchedLocationId?: number;
-    matchedLocationName?: string;
-    confidence?: number;
-    sources?: DraftSource[];
-    citedSourceIds?: string[];
-    todayIso?: string;
-    senderHistoryCount?: number;
-    threadHistoryCount?: number;
-    language?: string;
-  };
-  const [draftMeta, setDraftMeta] = useState<DraftMeta>(null);
-  const [showWhyPanel, setShowWhyPanel] = useState(false);
-  const [showSaveFaq, setShowSaveFaq] = useState(false);
-  const [faqQuestion, setFaqQuestion] = useState("");
-  const [faqCategory, setFaqCategory] = useState("general");
-  const generateMutation = useMutation({
-    mutationFn: async (item: UnifiedItem) => {
-      const url = item.source === "email"
-        ? `/api/admin/emails/${item.id}/generate-response`
-        : `/api/contact/${item.id}/generate-response`;
-      const res = await apiRequest("POST", url);
-      return (await res.json()) as GenerateResponse;
-    },
-    onSuccess: (data: GenerateResponse) => {
-      // Render the AI draft as a "Suggested draft" card instead of
-      // overwriting whatever the admin has already typed in the reply
-      // textarea. The admin chooses to Use, Append, or Discard it.
-      setSuggestedDraft(data.response);
-      setAiDraftSnapshot(data.response);
-      setDraftClassification(data.classification ?? null);
-      setDraftMeta({
-        confidence: data.confidence,
-        sources: data.sources,
-        citedSourceIds: data.citedSourceIds,
-        todayIso: data.todayIso,
-        senderHistoryCount: data.senderHistoryCount,
-        threadHistoryCount: data.threadHistoryCount,
-        language: data.language,
-      });
-      setShowWhyPanel(true);
-      if (data.needsHumanReview) {
-        setReviewWarning(data.reviewReason || t("inboxReviewBeforeSending"));
-      } else {
-        setReviewWarning(null);
-      }
-      if (data.matchedLocationId && data.matchedLocationName) {
-        setMatchedLocation({ id: data.matchedLocationId, name: data.matchedLocationName });
-      } else {
-        setMatchedLocation(null);
-      }
-      toast({ title: t("aiResponseGenerated"), description: t("reviewEditBeforeSending") });
-    },
-    onError: (err: unknown) =>
-      toast({ title: t("error"), description: err instanceof Error ? err.message : t("failedToGenerateResponse"), variant: "destructive" }),
-  });
-  const translateMutation = useMutation({
-    mutationFn: async ({ text, target }: { text: string; target: "en" | "he" }) => {
-      const res = await apiRequest("POST", `/api/admin/inbox/translate`, { text, target });
-      return (await res.json()).translated as string;
-    },
-  });
-  const forwardMutation = useMutation({
-    mutationFn: async ({ emailId, locationId }: { emailId: string; locationId: number }) => {
-      const res = await apiRequest("POST", `/api/admin/emails/${emailId}/forward-to-operator`, {
-        locationId, note: forwardNote.trim() || undefined,
-      });
-      return (await res.json()) as { forwardedTo: string; locationName: string };
-    },
-    onSuccess: (data) => {
-      toast({ title: "Forwarded to operator", description: `${data.locationName} (${data.forwardedTo})` });
-      setForwardNote("");
-    },
-    onError: (err: unknown) =>
-      toast({ title: t("error"), description: err instanceof Error ? err.message : "Failed to forward", variant: "destructive" }),
-  });
-
   const openItem = (item: UnifiedItem) => {
-    // Remember which row the admin opened so we can restore focus to it
-    // when the detail pane closes (a11y: keyboard nav continues smoothly).
-    lastOpenedRowKeyRef.current = item.key;
-    // Optimistically flip isRead before the request resolves so the detail
-    // header / row state updates instantly. The mutation invalidates the
-    // list query on success, reconciling the optimistic state with the
-    // server snapshot. On failure the next refetch reverts the row.
-    const optimistic = item.isRead ? item : { ...item, isRead: true };
-    setSelected(optimistic);
-    setReplyText("");
-    setReviewWarning(null);
-    setMatchedLocation(null);
-    setForwardNote("");
-    setAiDraftSnapshot(null);
-    setSuggestedDraft(null);
-    setDraftClassification(null);
-    setDraftMeta(null);
-    setShowWhyPanel(false);
-    setShowSaveFaq(false);
-    setFaqQuestion("");
-    setFaqCategory("general");
-    setSaveEmailBannerDismissed(false);
-    setSaveEmailLocationId("");
-    const subj = item.subject?.startsWith("Re:") ? item.subject : `Re: ${item.subject || ""}`;
-    setReplySubject(subj);
-    if (!item.isRead) {
-      if (item.source === "email") {
-        markEmailRead.mutate(String(item.id), {
-          onSuccess: () => invalidateEmailLists(),
-        });
-      } else {
-        markContactRead.mutate({ id: Number(item.id), isRead: true });
+      // Remember which row the admin opened so we can restore focus to it
+      // when the detail pane closes (a11y: keyboard nav continues smoothly).
+      lastOpenedRowKeyRef.current = item.key;
+      // Optimistically flip isRead before the request resolves so the detail
+      // header / row state updates instantly. The mutation invalidates the
+      // list query on success, reconciling the optimistic state with the
+      // server snapshot. On failure the next refetch reverts the row.
+      const optimistic = item.isRead ? item : { ...item, isRead: true };
+      setSelected(optimistic);
+      if (!item.isRead) {
+        if (item.source === "email") {
+          markEmailRead.mutate(String(item.id), {
+            onSuccess: () => invalidateEmailLists(),
+          });
+        } else {
+          markContactRead.mutate({ id: Number(item.id), isRead: true });
+        }
       }
-    }
-  };
-
-  // Translation always targets the current admin UI language.
-  const uiTarget: "en" | "he" = language === "he" ? "he" : "en";
-  const translationKey = selected ? `${selected.source}:${selected.id}` : "";
-  const translatedBody = translationKey ? translations[translationKey] ?? null : null;
-
-  const handleTranslateMessage = async () => {
-    if (!selected) return;
-    if (translatedBody) {
-      setTranslations((prev) => {
-        const next = { ...prev };
-        delete next[translationKey];
-        return next;
-      });
-      return;
-    }
-    try {
-      const out = await translateMutation.mutateAsync({ text: selected.body, target: uiTarget });
-      setTranslations((prev) => ({ ...prev, [translationKey]: out }));
-    } catch (e) {
-      toast({ title: t("error"), description: e instanceof Error ? e.message : String(e), variant: "destructive" });
-    }
-  };
-
-  const handleTranslateReply = async () => {
-    if (!replyText.trim()) return;
-    try {
-      const out = await translateMutation.mutateAsync({ text: replyText, target: uiTarget });
-      setReplyText(out);
-    } catch (e) {
-      toast({ title: t("error"), description: e instanceof Error ? e.message : String(e), variant: "destructive" });
-    }
-  };
+    };;
 
   // Toggle read state for the whole conversation.
   const toggleReadStatus = (item: UnifiedItem) => {
@@ -1400,30 +1137,7 @@ export default function AdminInbox() {
     });
   };
 
-  const openEditDialog = () => {
-    if (!selected || selected.source !== "form") return;
-    setEditSubject(selected.subject);
-    setEditMessage(selected.body);
-    setEditOpen(true);
-  };
-
-  const editContactMutation = useMutation({
-    mutationFn: async ({ id, subject, message }: { id: number; subject: string; message: string }) => {
-      const res = await apiRequest("PATCH", `/api/contact/${id}`, { subject, message });
-      return res.json();
-    },
-    onSuccess: (updated: Contact) => {
-      qc.invalidateQueries({ queryKey: ["/api/contact"] });
-      toast({ title: t("msgUpdatedSuccess") });
-      setEditOpen(false);
-      if (selected) {
-        setSelected({ ...selected, subject: updated.subject, body: updated.message });
-      }
-    },
-    onError: () => toast({ title: t("error"), description: t("msgUpdateFailed"), variant: "destructive" }),
-  });
-
-  // ===== List virtualization =====
+    // ===== List virtualization =====
   // useWindowVirtualizer mounts only the rows currently in the viewport (plus
   // a small overscan). On a typical inbox with hundreds of threads this keeps
   // scroll smooth and prevents every row from re-rendering on cache updates.
@@ -1528,82 +1242,35 @@ export default function AdminInbox() {
   });
 
   // ============ DETAIL VIEW ============
-  const currentItems: UnifiedItem[] = groupMembersFor(selected);
+    // key={selected.key} causes React to unmount + remount InboxDetailView
+    // whenever the selected item changes, which auto-resets all per-keystroke
+    // state owned by InboxDetailView — no manual state resets needed here.
+    const currentItems: UnifiedItem[] = groupMembersFor(selected);
 
-  if (selected) {
-    return (
-      <InboxDetailView
-        selected={selected}
-        setSelected={setSelected}
-        folder={folder}
-        t={t}
-        backButtonRef={backButtonRef}
-        currentItems={currentItems}
-        performThreadAction={performThreadAction}
-        isMarkReadPending={markEmailRead.isPending || markContactRead.isPending}
-        onToggleRead={() => toggleReadStatus(selected)}
-        replyText={replyText}
-        setReplyText={setReplyText}
-        replySubject={replySubject}
-        setReplySubject={setReplySubject}
-        forwardNote={forwardNote}
-        setForwardNote={setForwardNote}
-        linkCheckPending={linkCheckPending}
-        brokenLinkWarning={brokenLinkWarning}
-        setBrokenLinkWarning={setBrokenLinkWarning}
-        sendReplyPending={sendReplyMutation.isPending}
-        onSendReply={handleSendClick}
-        suggestedDraft={suggestedDraft}
-        setSuggestedDraft={setSuggestedDraft}
-        generatePending={generateMutation.isPending}
-        onGenerate={(item) => generateMutation.mutate(item)}
-        translatePending={translateMutation.isPending}
-        draftMeta={draftMeta}
-        draftClassification={draftClassification}
-        reviewWarning={reviewWarning}
-        showWhyPanel={showWhyPanel}
-        setShowWhyPanel={setShowWhyPanel}
-        matchedLocation={matchedLocation}
-        forwardPending={forwardMutation.isPending}
-        onForward={(vars) => forwardMutation.mutate(vars)}
-        onTranslateMessage={handleTranslateMessage}
-        onTranslateReply={handleTranslateReply}
-        showSaveFaq={showSaveFaq}
-        setShowSaveFaq={setShowSaveFaq}
-        faqQuestion={faqQuestion}
-        faqCategory={faqCategory}
-        onEditOpen={openEditDialog}
-        editOpen={editOpen}
-        setEditOpen={setEditOpen}
-        editSubject={editSubject}
-        setEditSubject={setEditSubject}
-        editMessage={editMessage}
-        setEditMessage={setEditMessage}
-        editContactPending={editContactMutation.isPending}
-        onSaveEdit={(vars) => editContactMutation.mutate(vars)}
-        confirmDeleteId={confirmDeleteId}
-        setConfirmDeleteId={setConfirmDeleteId}
-        deletePending={deleteContact.isPending}
-        onDelete={(id) => deleteContact.mutate(id)}
-        pendingMixedTrash={pendingMixedTrash}
-        setPendingMixedTrash={setPendingMixedTrash}
-        saveEmailBannerDismissed={saveEmailBannerDismissed}
-        setSaveEmailBannerDismissed={setSaveEmailBannerDismissed}
-        saveEmailLocationId={saveEmailLocationId}
-        setSaveEmailLocationId={setSaveEmailLocationId}
-        saveEmailPending={saveEmailPending}
-        setSaveEmailPending={setSaveEmailPending}
-        operatorEmailSet={operatorEmailSet}
-        locationsData={locationsQuery.data}
-        translatedBody={translatedBody}
-        uiTarget={uiTarget}
-        threadExpandedMap={threadExpandedMap}
-        setThreadExpandedMap={setThreadExpandedMap}
-      />
-    );
-  }
+    if (selected) {
+      return (
+        <InboxDetailView
+          key={selected.key}
+          selected={selected}
+          setSelected={setSelected}
+          folder={folder}
+          t={t}
+          backButtonRef={backButtonRef}
+          currentItems={currentItems}
+          performThreadAction={performThreadAction}
+          isMarkReadPending={markEmailRead.isPending || markContactRead.isPending}
+          onToggleRead={() => toggleReadStatus(selected)}
+          deletePending={deleteContact.isPending}
+          onDelete={(id) => deleteContact.mutate(id)}
+          operatorEmailSet={operatorEmailSet}
+          locationsData={locationsQuery.data}
+          threadExpandedMap={threadExpandedMap}
+          setThreadExpandedMap={setThreadExpandedMap}
+        />
+      );
+    }
 
-  // ============ LIST VIEW ============
+    // ============ LIST VIEW ============
   const isLoading = contactsQuery.isLoading || emailQueries.isLoading;
   const emailErrorRaw = emailQueries.error;
   const emailError = emailQueries.isError
@@ -2370,7 +2037,48 @@ export default function AdminInbox() {
             </div>
           </>
         )}
-        </>)}
+
+          {/* Mixed-thread trash guard — rendered at parent level so it persists
+              even after setSelected(null) closes the detail view (e.g. keyboard
+              shortcut 't' while viewing a thread). */}
+          <AlertDialog open={pendingMixedTrash !== null} onOpenChange={(o) => !o && setPendingMixedTrash(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <Trash2 className="h-5 w-5 text-destructive" />
+                  {t("inboxMixedTrashTitle")}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("inboxMixedTrashDesc")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setPendingMixedTrash(null)}>
+                  {t("cancel")}
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    if (!pendingMixedTrash) return;
+                    const { items, successTitle, failTitle } = pendingMixedTrash;
+                    setPendingMixedTrash(null);
+                    performThreadAction(
+                      items,
+                      "trash",
+                      successTitle,
+                      failTitle,
+                      items.every((m) => m.source === "email") ? "untrash" : undefined,
+                      t("inboxRestoreSuccess"),
+                      t("inboxRestoreFailed"),
+                    );
+                  }}
+                >
+                  {t("inboxMixedTrashConfirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          </>)}
     </>
   );
 }
