@@ -141,6 +141,14 @@ export interface IStorage {
 
   // Transaction operations
   getAllTransactions(): Promise<Transaction[]>;
+  getTransactionsPaginated(opts: {
+    page: number;
+    pageSize: number;
+    sort?: string;
+    status?: string;
+    search?: string;
+    locationId?: number;
+  }): Promise<{ data: Transaction[]; total: number }>;
   getTransaction(id: number): Promise<Transaction | undefined>;
   getTransactionsByLocation(locationId: number): Promise<Transaction[]>;
   getTransactionByPhone(locationId: number, phone: string): Promise<Transaction[]>;
@@ -2813,6 +2821,46 @@ export class MemStorage implements IStorage {
   // Transaction methods
   async getAllTransactions(): Promise<Transaction[]> {
     return Array.from(this.transactions.values());
+  }
+
+  async getTransactionsPaginated(opts: {
+    page: number;
+    pageSize: number;
+    sort?: string;
+    status?: string;
+    search?: string;
+    locationId?: number;
+  }): Promise<{ data: Transaction[]; total: number }> {
+    let data = Array.from(this.transactions.values());
+
+    if (opts.status === 'active') data = data.filter(tx => !tx.isReturned);
+    else if (opts.status === 'returned') data = data.filter(tx => tx.isReturned);
+
+    if (opts.search && opts.search.trim()) {
+      const s = opts.search.trim().toLowerCase();
+      data = data.filter(tx =>
+        tx.borrowerName.toLowerCase().includes(s) ||
+        (tx.borrowerEmail && tx.borrowerEmail.toLowerCase().includes(s)) ||
+        (tx.borrowerPhone && tx.borrowerPhone.toLowerCase().includes(s))
+      );
+    }
+
+    if (opts.locationId) data = data.filter(tx => tx.locationId === opts.locationId);
+
+    data.sort((a, b) => {
+      switch (opts.sort) {
+        case 'date-asc': return new Date(a.borrowDate).getTime() - new Date(b.borrowDate).getTime();
+        case 'status-active': return (a.isReturned ? 1 : 0) - (b.isReturned ? 1 : 0);
+        case 'status-returned': return (b.isReturned ? 1 : 0) - (a.isReturned ? 1 : 0);
+        case 'deposit-desc': return (b.depositAmount ?? 0) - (a.depositAmount ?? 0);
+        case 'deposit-asc': return (a.depositAmount ?? 0) - (b.depositAmount ?? 0);
+        default: return new Date(b.borrowDate).getTime() - new Date(a.borrowDate).getTime();
+      }
+    });
+
+    const total = data.length;
+    const offset = (opts.page - 1) * opts.pageSize;
+    return { data: data.slice(offset, offset + opts.pageSize), total };
   }
 
   async getTransaction(id: number): Promise<Transaction | undefined> {

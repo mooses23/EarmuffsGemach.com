@@ -2206,8 +2206,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // TRANSACTIONS ROUTES
+  // GET /api/admin/transactions/ids — returns all IDs matching current filter for
+  // "Select all results across pages" in the admin transactions UI (admin-only).
+  app.get("/api/admin/transactions/ids", async (req, res) => {
+    try {
+      if (!req.isAuthenticated() || !req.user.isAdmin) {
+        return res.status(403).json({ message: "Admin access required" });
+      }
+      const status = (req.query.status as string) || 'all';
+      const search = (req.query.search as string) || '';
+      const result = await storage.getTransactionsPaginated({
+        page: 1,
+        pageSize: 100000,
+        sort: 'date-desc',
+        status,
+        search,
+      });
+      const ids = result.data.filter(tx => !tx.isReturned).map(tx => tx.id);
+      res.json({ ids, total: ids.length });
+    } catch (error) {
+      console.error("Error fetching transaction IDs:", error);
+      res.status(500).json({ message: "Failed to fetch transaction IDs" });
+    }
+  });
+
   app.get("/api/transactions", async (req, res) => {
     try {
+      const pageParam = req.query.page;
+      if (pageParam !== undefined) {
+        const page = Math.max(1, parseInt(pageParam as string, 10) || 1);
+        const pageSize = Math.min(200, Math.max(1, parseInt(req.query.pageSize as string, 10) || 20));
+        const sort = (req.query.sort as string) || 'date-desc';
+        const status = (req.query.status as string) || 'all';
+        const search = (req.query.search as string) || '';
+        const result = await storage.getTransactionsPaginated({ page, pageSize, sort, status, search });
+        return res.json(result);
+      }
       const transactions = await storage.getAllTransactions();
       res.json(transactions);
     } catch (error) {

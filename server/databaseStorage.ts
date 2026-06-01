@@ -1,4 +1,4 @@
-import { eq, and, sql, ilike, isNull, or, inArray, desc, lt, type SQL } from 'drizzle-orm';
+import { eq, and, sql, ilike, isNull, or, inArray, desc, asc, lt, type SQL } from 'drizzle-orm';
 import { db } from './db.js';
 import {
   users, type User, type InsertUser,
@@ -638,6 +638,54 @@ export class DatabaseStorage implements IStorage {
   // Transaction operations
   async getAllTransactions(): Promise<Transaction[]> {
     return db.select().from(transactions);
+  }
+
+  async getTransactionsPaginated(opts: {
+    page: number;
+    pageSize: number;
+    sort?: string;
+    status?: string;
+    search?: string;
+    locationId?: number;
+  }): Promise<{ data: Transaction[]; total: number }> {
+    const conditions: SQL[] = [];
+
+    if (opts.status === 'active') conditions.push(eq(transactions.isReturned, false));
+    else if (opts.status === 'returned') conditions.push(eq(transactions.isReturned, true));
+
+    if (opts.search && opts.search.trim()) {
+      const term = `%${opts.search.trim()}%`;
+      conditions.push(
+        or(
+          ilike(transactions.borrowerName, term),
+          ilike(transactions.borrowerEmail, term),
+          sql`${transactions.borrowerPhone} ILIKE ${term}`
+        )!
+      );
+    }
+
+    if (opts.locationId) conditions.push(eq(transactions.locationId, opts.locationId));
+
+    const where = conditions.length > 0 ? and(...conditions) : undefined;
+
+    let orderByClause;
+    switch (opts.sort) {
+      case 'date-asc': orderByClause = asc(transactions.borrowDate); break;
+      case 'status-active': orderByClause = asc(transactions.isReturned); break;
+      case 'status-returned': orderByClause = desc(transactions.isReturned); break;
+      case 'deposit-desc': orderByClause = desc(transactions.depositAmount); break;
+      case 'deposit-asc': orderByClause = asc(transactions.depositAmount); break;
+      default: orderByClause = desc(transactions.borrowDate);
+    }
+
+    const offset = (opts.page - 1) * opts.pageSize;
+
+    const [data, countResult] = await Promise.all([
+      db.select().from(transactions).where(where).orderBy(orderByClause).limit(opts.pageSize).offset(offset),
+      db.select({ total: sql<number>`count(*)::int` }).from(transactions).where(where),
+    ]);
+
+    return { data, total: countResult[0]?.total ?? 0 };
   }
 
   async getTransaction(id: number): Promise<Transaction | undefined> {

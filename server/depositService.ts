@@ -42,16 +42,20 @@ export class DepositService {
 
     const depositAmount = location.depositAmount || 20;
 
-    const transaction = await storage.createTransaction({
+    const transactionData = {
       locationId: request.locationId,
       borrowerName: request.borrowerName,
       borrowerEmail: request.borrowerEmail,
       borrowerPhone: request.borrowerPhone || '',
       headbandColor: request.headbandColor,
       depositAmount,
-      depositPaymentMethod: 'pending',
+      depositPaymentMethod: 'pending' as const,
       notes: request.notes,
-    });
+    };
+
+    const transaction = request.headbandColor
+      ? await storage.createTransactionWithInventory(transactionData, request.headbandColor)
+      : await storage.createTransaction(transactionData);
 
     return transaction;
   }

@@ -4,6 +4,7 @@
  */
 
 import { DEFAULT_ADMIN_EMAIL } from './config-defaults.js';
+import { sendNewEmail } from './gmail-client.js';
 
 export class EmailNotificationService {
   /**
@@ -61,31 +62,33 @@ export class EmailNotificationService {
   }
 
   /**
-   * Sends refund notification email
+   * Sends refund notification email to the borrower.
    */
   static async notifyRefundProcessed(refundAmount: number, transaction: any): Promise<void> {
+    if (!transaction?.borrowerEmail) return;
     try {
-      const emailData = {
-        to: transaction.borrowerEmail,
-        subject: `Refund Processed - Baby Banz Earmuffs Gemach`,
-        html: `
-          <h2>Deposit Refund Processed</h2>
-          <p>Dear ${transaction.borrowerName},</p>
-          <p>Your deposit refund of $${refundAmount} has been processed.</p>
-          <p><strong>Transaction ID:</strong> ${transaction.id}</p>
-          <p><strong>Return Date:</strong> ${transaction.actualReturnDate}</p>
-          <p>Thank you for returning the earmuffs in good condition!</p>
-        `
-      };
+      const firstName = (transaction.borrowerName || '').trim().split(/\s+/)[0] || transaction.borrowerName || 'there';
+      const returnDate = transaction.actualReturnDate
+        ? new Date(transaction.actualReturnDate).toLocaleDateString()
+        : 'today';
+      const subject = `Your deposit refund has been processed — Baby Banz Gemach`;
+      const body = `Hi ${firstName},
 
-      console.log('Refund email queued:', emailData);
+Your Baby Banz Earmuffs have been returned and your deposit refund of $${Number(refundAmount).toFixed(2)} has been processed.
+
+Transaction: #${transaction.id}
+Return date: ${returnDate}
+
+Thank you for using the Baby Banz Gemach!
+
+— Baby Banz Gemach
+`;
+      await sendNewEmail(transaction.borrowerEmail, subject, body);
     } catch (error) {
       console.error('Refund email error:', error);
     }
   }
 }
-
-import { sendNewEmail } from './gmail-client.js';
 
 export interface OperatorWelcomeContext {
   locationName: string;

@@ -70,7 +70,6 @@ import {
   Clock,
   Activity,
   ArrowUpDown,
-  ChevronsUpDown,
   X,
   ListChecks,
   CreditCard,
@@ -519,7 +518,8 @@ export default function AdminTransactions() {
   const initialParams = readUrlParams();
   const [filterStatus, setFilterStatus] = useState<"all" | "active" | "returned" | "has-card" | "expiring-soon">(initialParams.status);
   const [sortKey, setSortKey] = useState<SortKey>(initialParams.sort);
-  const [visibleCount, setVisibleCount] = useState(initialParams.page * PAGE_SIZE);
+  const [currentPage, setCurrentPage] = useState(initialParams.page);
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [isRefundDialogOpen, setIsRefundDialogOpen] = useState(false);
   const [refundTransaction, setRefundTransaction] = useState<Transaction | null>(null);
@@ -542,7 +542,8 @@ export default function AdminTransactions() {
   // ── Bulk selection state ─────────────────────────────────────────────
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [isBulkConfirmOpen, setIsBulkConfirmOpen] = useState(false);
-  const [bulkRefundAll, setBulkRefundAll] = useState(true);
+  const [bulkRefundAmounts, setBulkRefundAmounts] = useState<Record<number, string>>({});
+  const [allResultsSelected, setAllResultsSelected] = useState(false);
 
   const toggleSelect = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -552,7 +553,11 @@ export default function AdminTransactions() {
     });
   }, []);
 
-  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set());
+    setAllResultsSelected(false);
+    setBulkRefundAmounts({});
+  }, []);
 
   const selectionMode = selectedIds.size > 0;
 
@@ -561,26 +566,35 @@ export default function AdminTransactions() {
     const sp = new URLSearchParams(window.location.search);
     if (filterStatus === "all") sp.delete("status"); else sp.set("status", filterStatus);
     if (sortKey === "date-desc") sp.delete("sort"); else sp.set("sort", sortKey);
-    const pageNum = Math.ceil(visibleCount / PAGE_SIZE);
-    if (pageNum <= 1) sp.delete("page"); else sp.set("page", String(pageNum));
+    if (currentPage <= 1) sp.delete("page"); else sp.set("page", String(currentPage));
     const newSearch = sp.toString();
     const newUrl = newSearch ? `${window.location.pathname}?${newSearch}` : window.location.pathname;
     if (window.location.search !== (newSearch ? `?${newSearch}` : "")) {
       window.history.replaceState(null, "", newUrl);
     }
-  }, [filterStatus, sortKey, visibleCount]);
+  }, [filterStatus, sortKey, currentPage]);
 
-  // Reset pagination when filter/sort/search changes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchTerm);
+      setCurrentPage(1);
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
+  // Reset pagination when filter/sort changes
   const handleSetFilterStatus = useCallback((s: "all" | "active" | "returned" | "has-card" | "expiring-soon") => {
     setFilterStatus(s);
-    setVisibleCount(PAGE_SIZE);
+    setCurrentPage(1);
     setSelectedIds(new Set());
+    setAllResultsSelected(false);
   }, []);
 
   const handleSetSortKey = useCallback((s: SortKey) => {
     setSortKey(s);
-    setVisibleCount(PAGE_SIZE);
+    setCurrentPage(1);
     setSelectedIds(new Set());
+    setAllResultsSelected(false);
   }, []);
 
   const [filterRegionId, setFilterRegionId] = useState<number | null>(null);
@@ -598,8 +612,36 @@ export default function AdminTransactions() {
     queryKey: ["/api/city-categories"],
   });
 
-  const { data: transactions = [], isLoading: txLoading } = useQuery<Transaction[]>({
+  // Determine the server-side status filter; has-card / expiring-soon need
+  // further client-side filtering so we request all active records from the server.
+  const serverStatus = (filterStatus === "has-card" || filterStatus === "expiring-soon") ? "active" : filterStatus;
+
+  // Paginated list query — fetches one page of sorted/filtered results from the server
+  const { data: paginatedResult, isLoading: txLoading } = useQuery<{ data: Transaction[]; total: number }>({
+    queryKey: ["/api/transactions", currentPage, PAGE_SIZE, sortKey, serverStatus, debouncedSearch],
+    queryFn: async () => {
+      const params = new URLSearchParams({
+        page: String(currentPage),
+        pageSize: String(PAGE_SIZE),
+        sort: sortKey,
+        status: serverStatus,
+        search: debouncedSearch,
+      });
+      const res = await fetch(`/api/transactions?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to fetch transactions");
+      return res.json();
+    },
+  });
+  const transactions = paginatedResult?.data ?? [];
+  const totalCount = paginatedResult?.total ?? 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+
+  // Full dataset for analytics charts, counts, and expiring-cards banner.
+  // Loaded on demand when the analytics section is expanded.
+  const { data: allTransactions = [] } = useQuery<Transaction[]>({
     queryKey: ["/api/transactions"],
+    enabled: analyticsOpen,
+    staleTime: 2 * 60 * 1000,
   });
 
   // Fetch the max card age so we can compute card expiry warnings client-side
@@ -622,12 +664,18 @@ export default function AdminTransactions() {
   });
 
   const bulkMarkReturnedMutation = useMutation({
-    mutationFn: async ({ ids, refundAll }: { ids: number[]; refundAll: boolean }) => {
+    mutationFn: async ({ ids }: { ids: number[] }) => {
       const selectedTxns = transactions.filter((tx) => ids.includes(tx.id));
       const results = await Promise.allSettled(
         ids.map((id) => {
-          const tx = selectedTxns.find((t) => t.id === id);
-          const refundAmount = refundAll ? (tx?.depositAmount ?? 20) : 0;
+          const customAmount = bulkRefundAmounts[id];
+          let refundAmount: number;
+          if (customAmount !== undefined) {
+            refundAmount = Math.max(0, parseFloat(customAmount) || 0);
+          } else {
+            const tx = selectedTxns.find((t) => t.id === id);
+            refundAmount = tx?.depositAmount ?? 20;
+          }
           return markTransactionReturned(id, { refundAmount });
         })
       );
@@ -799,21 +847,24 @@ export default function AdminTransactions() {
     return regions.filter(r => regionIdSet.has(r.id));
   }, [regions, locations]);
 
-  // Districts present in Israel transactions (only used when Israel filter is active)
+  // Districts available in Israel — computed from all locations so the dropdown
+  // is never page-limited when server-side pagination is active.
   const availableIsraelDistricts = useMemo(() => {
     if (!israelRegion || filterRegionId !== israelRegion.id) return [];
     const found = new Set<string>();
-    for (const tx of transactions) {
-      const dc = locationDistrictMap.get(tx.locationId);
+    for (const loc of locations) {
+      if (loc.regionId !== israelRegion.id) continue;
+      const dc = locationDistrictMap.get(loc.id);
       if (dc) found.add(dc);
     }
     return IL_DISTRICT_ORDER.filter(d => found.has(d));
-  }, [transactions, locationDistrictMap, israelRegion, filterRegionId]);
+  }, [locations, locationDistrictMap, israelRegion, filterRegionId]);
 
+  // Only client-side-only filters here (status/search/sort are handled server-side).
+  // has-card and expiring-soon require Stripe card data, region/district require
+  // location data — both are applied client-side on the already-paginated page data.
   const filteredTransactions = useMemo(() => {
-    const filtered = transactions.filter((transaction) => {
-      if (filterStatus === "active" && transaction.isReturned) return false;
-      if (filterStatus === "returned" && !transaction.isReturned) return false;
+    return transactions.filter((transaction) => {
       if (filterStatus === "has-card") {
         if (transaction.isReturned) return false;
         if (!hasActiveCard(transaction)) return false;
@@ -832,82 +883,65 @@ export default function AdminTransactions() {
         const dc = locationDistrictMap.get(transaction.locationId);
         if (dc !== filterDistrict) return false;
       }
-      if (!searchTerm) return true;
-      const searchLower = searchTerm.toLowerCase();
-      return (
-        transaction.borrowerName.toLowerCase().includes(searchLower) ||
-        (transaction.borrowerEmail && transaction.borrowerEmail.toLowerCase().includes(searchLower)) ||
-        (transaction.borrowerPhone && transaction.borrowerPhone.toLowerCase().includes(searchLower)) ||
-        getLocationNameById(transaction.locationId).toLowerCase().includes(searchLower)
-      );
+      return true;
     });
+  }, [transactions, filterStatus, filterRegionId, filterDistrict, maxCardAgeDays, locations, locationDistrictMap]);
 
-    filtered.sort((a, b) => {
-      switch (sortKey) {
-        case "date-asc":
-          return new Date(a.borrowDate).getTime() - new Date(b.borrowDate).getTime();
-        case "date-desc":
-          return new Date(b.borrowDate).getTime() - new Date(a.borrowDate).getTime();
-        case "status-active":
-          if (a.isReturned === b.isReturned) return 0;
-          return a.isReturned ? 1 : -1;
-        case "status-returned":
-          if (a.isReturned === b.isReturned) return 0;
-          return a.isReturned ? -1 : 1;
-        case "deposit-desc":
-          return (b.depositAmount ?? 0) - (a.depositAmount ?? 0);
-        case "deposit-asc":
-          return (a.depositAmount ?? 0) - (b.depositAmount ?? 0);
-        default:
-          return 0;
-      }
-    });
-
-    return filtered;
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [transactions, filterStatus, filterRegionId, filterDistrict, searchTerm, sortKey, locations, cityCategories, language, maxCardAgeDays, locationDistrictMap]);
-
-  const visibleTransactions = filteredTransactions.slice(0, visibleCount);
-  const hasMore = visibleCount < filteredTransactions.length;
+  const visibleTransactions = filteredTransactions;
+  const hasMore = currentPage < totalPages;
 
   // ── Select-all helpers ────────────────────────────────────────────────
-  // Operates on the full filtered list (not just the paginated slice) so an
-  // admin can bulk-process every matching borrow regardless of load-more state.
   const selectableFilteredIds = useMemo(
     () => filteredTransactions.filter((tx) => !tx.isReturned).map((tx) => tx.id),
     [filteredTransactions]
   );
 
-  const allFilteredSelected =
+  const allPageSelected =
     selectableFilteredIds.length > 0 &&
     selectableFilteredIds.every((id) => selectedIds.has(id));
 
-  const selectAll = useCallback(() => {
+  // Select all non-returned items visible on the current page
+  const selectAllOnPage = useCallback(() => {
     setSelectedIds(new Set(selectableFilteredIds));
+    setAllResultsSelected(false);
   }, [selectableFilteredIds]);
 
-  // ── Cards expiring soon (banner) ─────────────────────────────────────
+  // Select all non-returned items across all pages (fetches IDs from server)
+  const selectAllResults = useCallback(async () => {
+    try {
+      const params = new URLSearchParams({ status: serverStatus, search: debouncedSearch });
+      const res = await fetch(`/api/admin/transactions/ids?${params}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed");
+      const { ids } = await res.json();
+      setSelectedIds(new Set(ids));
+      setAllResultsSelected(true);
+    } catch {
+      toast({ title: t("error"), description: "Failed to select all results", variant: "destructive" });
+    }
+  }, [serverStatus, debouncedSearch, toast, t]);
+
+  // ── Cards expiring soon (banner) — from full dataset when analytics loaded ──
   const expiringCards = useMemo(() =>
-    transactions.filter((tx) => {
+    allTransactions.filter((tx) => {
       if (tx.isReturned || !hasActiveCard(tx)) return false;
       const days = cardDaysUntilExpiry(tx, maxCardAgeDays);
       return days !== null && days >= 0 && days <= CARD_EXPIRY_WARN_DAYS;
     }),
-    [transactions, maxCardAgeDays]
+    [allTransactions, maxCardAgeDays]
   );
 
-  // ── Filter button counts ──────────────────────────────────────────────
+  // ── Filter button counts (from full dataset when analytics is loaded) ─────
   const cardOnFileCount = useMemo(
-    () => transactions.filter((tx) => !tx.isReturned && hasActiveCard(tx)).length,
-    [transactions]
+    () => allTransactions.filter((tx) => !tx.isReturned && hasActiveCard(tx)).length,
+    [allTransactions]
   );
   const expiringSoonCount = expiringCards.length;
 
-  // ── Analytics computations ────────────────────────────────────────────
-  const returnedCount = useMemo(() => transactions.filter((t) => t.isReturned).length, [transactions]);
-  const activeBorrows = transactions.length - returnedCount;
-  const returnRate = transactions.length > 0 ? Math.round((returnedCount / transactions.length) * 100) : 0;
-  const totalDeposits = useMemo(() => transactions.reduce((sum, t) => sum + (t.depositAmount ?? 0), 0), [transactions]);
+  // ── Analytics computations (use full dataset for accurate totals) ─────────
+  const returnedCount = useMemo(() => allTransactions.filter((t) => t.isReturned).length, [allTransactions]);
+  const activeBorrows = allTransactions.length - returnedCount;
+  const returnRate = allTransactions.length > 0 ? Math.round((returnedCount / allTransactions.length) * 100) : 0;
+  const totalDeposits = useMemo(() => allTransactions.reduce((sum, t) => sum + (t.depositAmount ?? 0), 0), [allTransactions]);
 
   const locationMap = useMemo(() => {
     const m = new Map<number, string>();
@@ -925,7 +959,7 @@ export default function AdminTransactions() {
     const borrowCounts: Record<string, number> = {};
     const returnCounts: Record<string, number> = {};
     months.forEach((m) => { borrowCounts[m] = 0; returnCounts[m] = 0; });
-    transactions.forEach((tx) => {
+    allTransactions.forEach((tx) => {
       const bKey = getMonthKey(new Date(tx.borrowDate));
       if (borrowCounts[bKey] !== undefined) borrowCounts[bKey]++;
       if (tx.actualReturnDate) {
@@ -934,7 +968,7 @@ export default function AdminTransactions() {
       }
     });
     return months.map((m) => ({ month: formatMonth(m), Borrows: borrowCounts[m], Returns: returnCounts[m] }));
-  }, [transactions]);
+  }, [allTransactions]);
 
   const statusPieData = useMemo(() => [
     { name: "Active", value: activeBorrows },
@@ -943,16 +977,16 @@ export default function AdminTransactions() {
 
   const locationBarData = useMemo(() => {
     const counts: Record<number, number> = {};
-    transactions.forEach((tx) => { counts[tx.locationId] = (counts[tx.locationId] ?? 0) + 1; });
+    allTransactions.forEach((tx) => { counts[tx.locationId] = (counts[tx.locationId] ?? 0) + 1; });
     return Object.entries(counts)
       .map(([id, count]) => ({ name: locationMap.get(Number(id)) ?? `Location ${id}`, Borrows: count }))
       .sort((a, b) => b.Borrows - a.Borrows)
       .slice(0, 8);
-  }, [transactions, locationMap]);
+  }, [allTransactions, locationMap]);
 
   const paymentMethodData = useMemo(() => {
     const counts: Record<string, number> = {};
-    transactions.forEach((tx) => {
+    allTransactions.forEach((tx) => {
       const method = tx.depositPaymentMethod ?? "cash";
       counts[method] = (counts[method] ?? 0) + 1;
     });
@@ -960,7 +994,7 @@ export default function AdminTransactions() {
       name: name.charAt(0).toUpperCase() + name.slice(1),
       value,
     }));
-  }, [transactions]);
+  }, [allTransactions]);
 
   return (
     <>
@@ -1082,7 +1116,7 @@ export default function AdminTransactions() {
             variant={filterRegionId === null ? "default" : "outline"}
             size="sm"
             className="whitespace-nowrap rounded-full"
-            onClick={() => { setFilterRegionId(null); setFilterDistrict(null); setVisibleCount(PAGE_SIZE); setSelectedIds(new Set()); }}
+            onClick={() => { setFilterRegionId(null); setFilterDistrict(null); setCurrentPage(1); setSelectedIds(new Set()); }}
           >
             {t("allTransactions")}
           </Button>
@@ -1095,7 +1129,7 @@ export default function AdminTransactions() {
               onClick={() => {
                 setFilterRegionId(region.id);
                 setFilterDistrict(null);
-                setVisibleCount(PAGE_SIZE);
+                setCurrentPage(1);
                 setSelectedIds(new Set());
               }}
             >
@@ -1113,7 +1147,7 @@ export default function AdminTransactions() {
             placeholder={t("search")}
             className="ps-10"
             value={searchTerm}
-            onChange={(e) => { setSearchTerm(e.target.value); setVisibleCount(PAGE_SIZE); setSelectedIds(new Set()); }}
+            onChange={(e) => { setSearchTerm(e.target.value); setSelectedIds(new Set()); }}
           />
         </div>
         <div className="flex gap-2 items-center flex-wrap">
@@ -1241,7 +1275,7 @@ export default function AdminTransactions() {
                 <DropdownMenuLabel>{t("districts") || "Districts"}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem
-                  onClick={() => { setFilterDistrict(null); setVisibleCount(PAGE_SIZE); setSelectedIds(new Set()); }}
+                  onClick={() => { setFilterDistrict(null); setCurrentPage(1); setSelectedIds(new Set()); }}
                   className={!filterDistrict ? "bg-accent" : ""}
                 >
                   {t("allDistricts") || "All Districts"}
@@ -1249,7 +1283,7 @@ export default function AdminTransactions() {
                 {availableIsraelDistricts.map((dc) => (
                   <DropdownMenuItem
                     key={dc}
-                    onClick={() => { setFilterDistrict(dc); setVisibleCount(PAGE_SIZE); setSelectedIds(new Set()); }}
+                    onClick={() => { setFilterDistrict(dc); setCurrentPage(1); setSelectedIds(new Set()); }}
                     className={filterDistrict === dc ? "bg-accent" : ""}
                   >
                     {localizeIsraelDistrict(language as "en" | "he", dc)}
@@ -1279,22 +1313,32 @@ export default function AdminTransactions() {
           <div className="flex items-center gap-2 text-sm font-medium text-white">
             <ListChecks className="h-4 w-4 text-primary" />
             {selectedIds.size} {selectedIds.size === 1 ? (t("transactionLabel") || "transaction") : (t("transactionsLabel") || "transactions")} selected
-            {/* Select all / Deselect all toggle */}
-            {!allFilteredSelected ? (
+            {/* Select all on page / all results / deselect */}
+            {!allPageSelected && (
               <button
                 type="button"
-                onClick={selectAll}
+                onClick={selectAllOnPage}
                 className="text-xs text-primary/80 hover:text-primary underline underline-offset-2 ml-1"
               >
-                Select all {selectableFilteredIds.length}
+                Select page ({selectableFilteredIds.length})
               </button>
-            ) : (
+            )}
+            {allPageSelected && totalPages > 1 && !allResultsSelected && (
+              <button
+                type="button"
+                onClick={selectAllResults}
+                className="text-xs text-primary/80 hover:text-primary underline underline-offset-2 ml-1"
+              >
+                · Select all {totalCount}
+              </button>
+            )}
+            {(allPageSelected || allResultsSelected) && (
               <button
                 type="button"
                 onClick={clearSelection}
                 className="text-xs text-slate-400 hover:text-slate-200 underline underline-offset-2 ml-1"
               >
-                Deselect all
+                · Deselect all
               </button>
             )}
           </div>
@@ -1302,7 +1346,14 @@ export default function AdminTransactions() {
             <Button
               size="sm"
               className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
-              onClick={() => { setBulkRefundAll(true); setIsBulkConfirmOpen(true); }}
+              onClick={() => {
+              const amounts: Record<number, string> = {};
+              transactions.filter(tx => selectedIds.has(tx.id)).forEach(tx => {
+                amounts[tx.id] = String(tx.depositAmount ?? 20);
+              });
+              setBulkRefundAmounts(amounts);
+              setIsBulkConfirmOpen(true);
+            }}
             >
               <RotateCw className="h-3.5 w-3.5" />
               Mark {selectedIds.size} as Returned
@@ -1321,11 +1372,12 @@ export default function AdminTransactions() {
       )}
 
       {/* ── Transaction card grid ────────────────────────────────────────── */}
-      {!txLoading && filteredTransactions.length > 0 && (
+      {!txLoading && (filteredTransactions.length > 0 || totalCount > 0) && (
         <p className="text-xs text-slate-400 mb-3">
-          {t("showingResults") || "Showing"} {visibleTransactions.length}{" "}
-          {t("ofLabel") || "of"} {filteredTransactions.length}{" "}
+          {t("showingResults") || "Showing"} {filteredTransactions.length}{" "}
+          {t("ofLabel") || "of"} {totalCount}{" "}
           {t("transactionsLabel") || "transactions"}
+          {totalPages > 1 && ` — page ${currentPage} of ${totalPages}`}
         </p>
       )}
 
@@ -1368,18 +1420,26 @@ export default function AdminTransactions() {
               />
             ))}
           </div>
-          {hasMore && (
-            <div className="mt-4 flex justify-center">
+          {totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-center gap-3">
               <Button
                 variant="outline"
-                className="gap-2"
-                onClick={() => setVisibleCount((c) => c + PAGE_SIZE)}
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage <= 1 || txLoading}
               >
-                <ChevronsUpDown className="h-4 w-4" />
-                {t("loadMore") || "Load more"}{" "}
-                <span className="text-muted-foreground text-xs">
-                  ({filteredTransactions.length - visibleCount} {t("remaining") || "remaining"})
-                </span>
+                ← Previous
+              </Button>
+              <span className="text-xs text-slate-400">
+                Page {currentPage} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage >= totalPages || txLoading}
+              >
+                Next →
               </Button>
             </div>
           )}
@@ -1565,18 +1625,18 @@ export default function AdminTransactions() {
 
       {/* ── Bulk confirm dialog ──────────────────────────────────────────── */}
       <Dialog open={isBulkConfirmOpen} onOpenChange={(open) => { if (!open) setIsBulkConfirmOpen(false); }}>
-        <DialogContent className="sm:max-w-[480px] max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-[520px] max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               <ListChecks className="h-5 w-5" />
               Mark {selectedIds.size} as Returned
             </DialogTitle>
             <DialogDescription>
-              Review the borrows below and choose whether to refund deposits at the same time.
+              Adjust each refund amount below. Defaults to the full deposit — set to 0 to keep the deposit.
             </DialogDescription>
           </DialogHeader>
 
-          <div className="py-2 space-y-2 max-h-56 overflow-y-auto">
+          <div className="py-2 space-y-2 max-h-64 overflow-y-auto">
             {transactions
               .filter((tx) => selectedIds.has(tx.id))
               .map((tx) => (
@@ -1585,49 +1645,49 @@ export default function AdminTransactions() {
                     <User className="h-3.5 w-3.5 text-slate-400 shrink-0" />
                     <span className="font-medium text-white truncate">{tx.borrowerName}</span>
                   </div>
-                  <div className="flex items-center gap-3 shrink-0 text-xs text-slate-400">
-                    <div className="flex items-center gap-1">
+                  <div className="flex items-center gap-3 shrink-0">
+                    <div className="flex items-center gap-1 text-xs text-slate-400">
                       <MapPin className="h-3 w-3" />
                       <span>{getLocationNameById(tx.locationId)}</span>
                     </div>
-                    <div className="flex items-center gap-1 text-emerald-400 font-medium">
-                      <DollarSign className="h-3 w-3" />
-                      <span>{((tx.depositAmount ?? 20)).toFixed(2)}</span>
+                    <div className="flex items-center gap-1">
+                      <DollarSign className="h-3.5 w-3.5 text-slate-400" />
+                      <input
+                        type="number"
+                        min="0"
+                        max={tx.depositAmount ?? 20}
+                        step="0.01"
+                        value={bulkRefundAmounts[tx.id] ?? String(tx.depositAmount ?? 20)}
+                        onChange={(e) => setBulkRefundAmounts(prev => ({ ...prev, [tx.id]: e.target.value }))}
+                        className="w-16 rounded border border-white/20 bg-white/5 px-2 py-0.5 text-xs text-white text-right focus:outline-none focus:ring-1 focus:ring-primary"
+                        disabled={bulkMarkReturnedMutation.isPending}
+                      />
                     </div>
                   </div>
                 </div>
               ))}
-          </div>
-
-          {/* Refund toggle */}
-          <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3 space-y-3">
-            <div className="flex items-center justify-between gap-3">
-              <div className="space-y-0.5">
-                <Label className="text-sm font-medium text-white">Refund all deposits</Label>
-                <p className="text-xs text-slate-400">Issue a full refund for each borrow in this batch.</p>
-              </div>
-              <Switch
-                checked={bulkRefundAll}
-                onCheckedChange={setBulkRefundAll}
-                disabled={bulkMarkReturnedMutation.isPending}
-              />
-            </div>
-            {bulkRefundAll && (
-              <div className="flex items-center justify-between pt-1 border-t border-white/10">
-                <span className="text-xs text-slate-400">Total to be refunded</span>
-                <span className="text-sm font-semibold text-emerald-400">
-                  ${transactions
-                    .filter((tx) => selectedIds.has(tx.id))
-                    .reduce((sum, tx) => sum + (tx.depositAmount ?? 20), 0)
-                    .toFixed(2)}
-                </span>
-              </div>
-            )}
-            {!bulkRefundAll && (
-              <p className="text-xs text-amber-400 pt-1 border-t border-white/10">
-                No refunds will be processed — you can handle them individually afterwards.
+            {allResultsSelected && selectedIds.size > transactions.filter(tx => selectedIds.has(tx.id)).length && (
+              <p className="text-xs text-slate-400 px-1 pt-1">
+                + {selectedIds.size - transactions.filter(tx => selectedIds.has(tx.id)).length} more from other pages — full deposit will be refunded
               </p>
             )}
+          </div>
+
+          <div className="rounded-lg border border-white/10 bg-white/5 px-4 py-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs text-slate-400">Total to be refunded</span>
+              <span className="text-sm font-semibold text-emerald-400">
+                ${transactions
+                  .filter((tx) => selectedIds.has(tx.id))
+                  .reduce((sum, tx) => {
+                    const amt = bulkRefundAmounts[tx.id] !== undefined
+                      ? parseFloat(bulkRefundAmounts[tx.id]) || 0
+                      : (tx.depositAmount ?? 20);
+                    return sum + amt;
+                  }, 0)
+                  .toFixed(2)}
+              </span>
+            </div>
           </div>
 
           <DialogFooter className="gap-2">
@@ -1636,15 +1696,13 @@ export default function AdminTransactions() {
             </Button>
             <Button
               className="bg-green-600 hover:bg-green-700 text-white gap-1.5"
-              onClick={() => bulkMarkReturnedMutation.mutate({ ids: Array.from(selectedIds), refundAll: bulkRefundAll })}
+              onClick={() => bulkMarkReturnedMutation.mutate({ ids: Array.from(selectedIds) })}
               disabled={bulkMarkReturnedMutation.isPending}
             >
               <RotateCw className="h-4 w-4" />
               {bulkMarkReturnedMutation.isPending
                 ? "Processing…"
-                : bulkRefundAll
-                  ? `Confirm — Return & Refund ${selectedIds.size}`
-                  : `Confirm — Mark ${selectedIds.size} Returned`}
+                : `Confirm — Return & Refund ${selectedIds.size}`}
             </Button>
           </DialogFooter>
         </DialogContent>
