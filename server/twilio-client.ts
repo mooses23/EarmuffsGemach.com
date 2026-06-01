@@ -213,10 +213,10 @@ export function buildOperatorWelcomeMessageBody(ctx: OperatorWelcomeMessageConte
   const greeting = (ctx.operatorName || '').trim();
   if (ctx.language === 'he') {
     const hi = greeting ? `שלום ${greeting}, ` : '';
-    return `${hi}תודה שאתה מנהל את ${ctx.locationName}${numberTag}! קוד הכניסה שלך: ${pin}. התחבר כאן:\n${loginUrl}\n— ${signOff}`;
+    return `${hi}תודה שאתה מנהל את ${ctx.locationName}${numberTag} עבורנו. קוד הכניסה שלך: ${pin}. התחבר כאן:\n${loginUrl}\nהתחבר כדי לחדש מלאי, לעדכן את הפרופיל שלך ולקבל פיקדונות בכרטיס אשראי.\n— ${signOff}`;
   }
   const hi = greeting ? `Hi ${greeting}, ` : '';
-  return `${hi}thank you for running ${ctx.locationName}${numberTag}! Your PIN is ${pin}. Log in at:\n${loginUrl}\n— ${signOff}`;
+  return `${hi}thanks for running ${ctx.locationName}${numberTag} for us. Your PIN is ${pin}. Sign in here:\n${loginUrl}\nLOG IN TO RESTOCK HEADBANDS, UPDATE YOUR PROFILE, AND ACCEPT CREDIT-CARD DEPOSITS.\n— ${signOff}`;
 }
 
 // WhatsApp welcome body — more conversational, uses line breaks for readability.
@@ -225,9 +225,9 @@ export function buildOperatorWelcomeWhatsAppBody(ctx: OperatorWelcomeMessageCont
   const signOff = (ctx.signOff || '').trim() || 'The Earmuffs Gemach Team';
   const pin = (ctx.defaultPin || '1234').trim();
   if (ctx.language === 'he') {
-    return `שלום ${ctx.locationName}! 👋\n\nהוזמנת לנהל את דשבורד גמ"ח האוזניות שלך (${ctx.locationCode}).\n\nכדי להתחיל:\n1. לחץ על הקישור: ${ctx.claimUrl}\n2. הכנס את קוד הגמ"ח שלך: *${ctx.locationCode}*\n3. הכנס את קוד הכניסה הזמני: *${pin}*\n\nתוכל לשנות את הקוד מיד לאחר הכניסה.\n\n— ${signOff}`;
+    return `שלום ${ctx.locationName}! 👋\n\nהוזמנת לנהל את דשבורד גמ"ח האוזניות שלך (${ctx.locationCode}).\n\nכדי להתחיל:\n1. לחץ על הקישור: ${ctx.claimUrl}\n2. הכנס את קוד הגמ"ח שלך: *${ctx.locationCode}*\n3. הכנס את קוד הכניסה הזמני: *${pin}*\n\nתוכל לשנות את הקוד מיד לאחר הכניסה.\n\n*התחבר כדי לחדש מלאי, לעדכן את הפרופיל שלך ולקבל פיקדונות בכרטיס אשראי.*\n\n— ${signOff}`;
   }
-  return `Hi ${ctx.locationName}! 👋\n\nYou've been set up to manage the ${ctx.locationCode} Baby Banz Earmuffs Gemach dashboard.\n\nTo get started:\n1. Open your dashboard: ${ctx.claimUrl}\n2. Enter your location code: *${ctx.locationCode}*\n3. Use this temporary PIN: *${pin}*\n\nYou'll be prompted to set a private PIN right after you log in.\n\nReply to this message if you need any help!\n\n— ${signOff}`;
+  return `Hi ${ctx.locationName}! 👋\n\nYou've been set up to manage the ${ctx.locationCode} Baby Banz Earmuffs Gemach dashboard.\n\nTo get started:\n1. Open your dashboard: ${ctx.claimUrl}\n2. Enter your location code: *${ctx.locationCode}*\n3. Use this temporary PIN: *${pin}*\n\nYou'll be prompted to set a private PIN right after you log in.\n\nLOG IN TO RESTOCK HEADBANDS, UPDATE YOUR PROFILE, AND ACCEPT CREDIT-CARD DEPOSITS.\n\nReply to this message if you need any help!\n\n— ${signOff}`;
 }
 
 // WhatsApp return reminder — slightly more personal than the brief SMS version.

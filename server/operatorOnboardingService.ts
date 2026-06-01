@@ -137,6 +137,7 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     operatorEmail: loc.email || '',
     dashboardUrl: claimUrlPreview,
     defaultPin: loc.operatorPin || '1234',
+    language: 'en',
   });
   const heEmailBody = buildWelcomeEmailBody({
     locationName: loc.nameHe || loc.name,
@@ -145,6 +146,7 @@ export async function buildWelcomePreview(loc: Location, baseUrl: string, signOf
     operatorEmail: loc.email || '',
     dashboardUrl: claimUrlPreview,
     defaultPin: loc.operatorPin || '1234',
+    language: 'he',
   });
   return {
     location: { id: loc.id, name: loc.name, locationCode: loc.locationCode },
@@ -371,6 +373,7 @@ export async function sendWelcomeForLocation(
         operatorEmail: loc.email,
         dashboardUrl: claimUrl,
         defaultPin: loc.operatorPin || '1234',
+        language,
         customBody: resolvedCustomBody,
       });
       emailResult = { ok: true };

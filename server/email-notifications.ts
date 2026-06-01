@@ -94,6 +94,8 @@ export interface OperatorWelcomeContext {
   operatorEmail: string;
   dashboardUrl: string;
   defaultPin: string;
+  /** Message language. Defaults to English when omitted. */
+  language?: 'en' | 'he';
   /** Optional personalized opening line; if omitted, a neutral one is used. */
   opener?: string;
   /** Optional fully-custom body (admin-edited). Overrides template when set. */
@@ -101,6 +103,31 @@ export interface OperatorWelcomeContext {
 }
 
 export function buildWelcomeEmailBody(ctx: Omit<OperatorWelcomeContext, 'customBody' | 'opener'>): string {
+  if (ctx.language === 'he') {
+    return `ברוכים הבאים לדשבורד מנהלי גמ"ח בייבי בנז, ${ctx.locationName}!
+
+המיקום שלך פעיל ומוכן לניהול. כך מתחילים ב-4 שלבים מהירים:
+
+שלב 1 — פתח את הדשבורד
+  ${ctx.dashboardUrl}
+
+שלב 2 — התחבר עם פרטי המיקום שלך
+  קוד מיקום:  ${ctx.locationCode}
+  קוד כניסה זמני:  ${ctx.defaultPin}
+
+שלב 3 — שנה את קוד הכניסה
+  לאחר ההתחברות, עבור להגדרות ← שינוי קוד כניסה והגדר קוד פרטי שרק אתה מכיר.
+
+שלב 4 — השלם את הפרופיל שלך
+  הוסף מספר טלפון, שעות פתיחה והערות למשאילים כדי שמשפחות יוכלו ליצור איתך קשר בקלות.
+
+זהו — הכל מוכן! השב למייל הזה בכל עת שתצטרך עזרה.
+
+התחבר כדי לחדש מלאי, לעדכן את הפרופיל שלך ולקבל פיקדונות בכרטיס אשראי.
+
+— גמ"ח בייבי בנז
+`;
+  }
   return `Welcome to the Baby Banz Gemach operator dashboard, ${ctx.locationName}!
 
 Your location is now live and ready to manage. Here's how to get started in 4 quick steps:
@@ -119,6 +146,8 @@ Step 4 — Complete your profile
   Add your phone number, opening hours, and any notes for borrowers so families can reach you easily.
 
 That's it — you're all set! Reply to this email any time you need help.
+
+LOG IN TO RESTOCK HEADBANDS, UPDATE YOUR PROFILE, AND ACCEPT CREDIT-CARD DEPOSITS.
 
 — Baby Banz Gemach
 `;
