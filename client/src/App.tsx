@@ -135,7 +135,7 @@ function LayoutRouter() {
         <Route path="/admin/payment-confirmations">{() => <Redirect to="/admin/transactions" />}</Route>
 
         {/* Operator Routes */}
-        <Route path="/operator/login" component={OperatorLogin} />
+        <Route path="/operator/login">{() => <Redirect to="/auth" />}</Route>
         <Route path="/operator" component={OperatorDashboard} />
         <Route path="/operator/dashboard" component={OperatorDashboard} />
         <Route path="/operator/deposits" component={OperatorDepositDashboard} />
