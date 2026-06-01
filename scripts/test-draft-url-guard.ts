@@ -1,6 +1,6 @@
 #!/usr/bin/env tsx
 /**
- * Task #324 regression tests for the draft URL guard.
+ * Regression tests for the draft URL guard.
  *
  * Run with: npx tsx scripts/test-draft-url-guard.ts
  *
@@ -57,16 +57,24 @@ test('mapToAllowedPath strips trailing punctuation and query', () => {
   assertEq(mapToAllowedPath('/locations/'), '/locations');
 });
 
-test('mapToAllowedPath preserves legitimate public routes not in canonical set', () => {
-  assertEq(mapToAllowedPath('/privacy-policy'), '/privacy-policy');
-  assertEq(mapToAllowedPath('/terms'), '/terms');
-  assertEq(mapToAllowedPath('/sms-policy'), '/sms-policy');
-  assertEq(mapToAllowedPath('/self-deposit'), '/self-deposit');
+test('mapToAllowedPath corrects non-KEY-URL pages to homepage', () => {
+  // Real routes exist, but the AI is only allowed to link the KEY URLs, so
+  // anything else is corrected/removed.
+  assertEq(mapToAllowedPath('/privacy-policy'), '/');
+  assertEq(mapToAllowedPath('/terms'), '/');
+  assertEq(mapToAllowedPath('/sms-policy'), '/');
+  assertEq(mapToAllowedPath('/welcome/abc-token'), '/');
 });
 
-test('mapToAllowedPath preserves sub-paths and tokens under public routes', () => {
+test('mapToAllowedPath preserves the /status transaction sub-path/token', () => {
+  assertEq(mapToAllowedPath('/status'), '/status');
   assertEq(mapToAllowedPath('/status/12345'), '/status/12345');
-  assertEq(mapToAllowedPath('/welcome/abc-token'), '/welcome/abc-token');
+});
+
+test('mapToAllowedPath collapses any operator path to /operator/login', () => {
+  assertEq(mapToAllowedPath('/operator/login'), '/operator/login');
+  assertEq(mapToAllowedPath('/operator/dashboard'), '/operator/login');
+  assertEq(mapToAllowedPath('/operator'), '/operator/login');
 });
 
 // ---- sanitizeDraftUrls ----
@@ -139,6 +147,36 @@ test('rewrites unknown internal path to homepage', () => {
 
 test('leaves other domains (manufacturer) untouched', () => {
   const draft = 'Brand info: https://babybanz.com/products';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
+test('rewrites a host-less bare internal path to the correct public route', () => {
+  const draft = 'Please use /api/webhooks/twilio/apply here.';
+  assertEq(sanitizeDraftUrls(draft, SITE), 'Please use /apply here.');
+});
+
+test('drops a host-less bare webhook path to homepage', () => {
+  const draft = 'Webhook lives at /n/twilio/inbound now.';
+  assertEq(sanitizeDraftUrls(draft, SITE), 'Webhook lives at / now.');
+});
+
+test('leaves a legitimate bare public path in prose untouched', () => {
+  const draft = 'Just go to /apply and fill the form.';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
+test('does not touch incidental slashes (dates, and/or, words like /news)', () => {
+  const draft = 'Meeting 12/25 and/or later; read the /news section.';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
+test('does not match a bare internal prefix inside a larger word path', () => {
+  const draft = 'See /administrator-guide and /apixyz pages.';
+  assertEq(sanitizeDraftUrls(draft, SITE), draft);
+});
+
+test('does not match a bare internal prefix split by _ or - boundary', () => {
+  const draft = 'Endpoints /api_v2 and /api-v2 are separate.';
   assertEq(sanitizeDraftUrls(draft, SITE), draft);
 });
 

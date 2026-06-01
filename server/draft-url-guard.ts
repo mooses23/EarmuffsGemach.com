@@ -1,5 +1,5 @@
 /**
- * server/draft-url-guard.ts — Task #324
+ * server/draft-url-guard.ts — AI draft URL guard
  *
  * Defensive guard that runs over any AI-generated email draft (and over
  * stored knowledge-base text) before it can reach a recipient. The admin
@@ -27,13 +27,15 @@
  * isolation — the caller passes the site URL in.
  */
 
-// First path segments that correspond to real, user-facing routes on our own
-// site (see client/src/App.tsx). A link whose first segment is one of these is
-// considered legitimate and is preserved verbatim — including any sub-path or
-// token (e.g. /status/<txnId>, /welcome/<token>, /operator/login). Anything
-// else pointing at our domain (api, webhooks, admin internals, fabricated
-// paths) is rewritten by the guard. Keep this in lockstep with App.tsx so the
-// guard never clobbers a valid public page.
+// First path segments of the APPROVED public KEY URLs the AI is allowed to link
+// to in an outgoing reply. This mirrors the KEY URLS block in the
+// openai-client playbook (`/`, `/locations`, `/borrow`, `/apply`, `/rules`,
+// `/status`, `/contact`, `/operator/login`). A link whose first segment is one
+// of these resolves to that public route; anything else pointing at our domain
+// (api, webhooks, admin internals, or other real-but-not-approved pages like
+// /privacy-policy) is corrected or dropped. Keeping the set tight is
+// intentional: the AI is told to use only these links, so the guard rewrites
+// everything else rather than letting an unexpected path through.
 export const PUBLIC_ROUTE_SEGMENTS: ReadonlySet<string> = new Set([
   'locations',
   'borrow',
@@ -41,14 +43,23 @@ export const PUBLIC_ROUTE_SEGMENTS: ReadonlySet<string> = new Set([
   'contact',
   'rules',
   'status',
-  'auth',
-  'self-deposit',
-  'privacy-policy',
-  'terms',
-  'sms-policy',
   'operator',
-  'welcome',
 ]);
+
+// First path segments that unmistakably belong to internal plumbing (API,
+// webhooks, admin) and must never appear in an outgoing message — even when the
+// model emits them as a bare path with no host (e.g. "/api/webhooks/...").
+const INTERNAL_PREFIX_SEGMENTS: readonly string[] = [
+  'api',
+  'webhook',
+  'webhooks',
+  'hooks',
+  'admin',
+  'internal',
+  'graphql',
+  'rpc',
+  'n', // short Twilio webhook prefix seen in the wild ("/n/twilio/inbound")
+];
 
 // The canonical public links the AI is encouraged to use (mirrors the KEY URLS
 // block in the openai-client playbook). Used as remap targets when an
@@ -101,8 +112,16 @@ export function mapToAllowedPath(rawPath: string): string {
   const normalized = ('/' + p.replace(/^\/+/, '')).replace(/\/+$/, '');
   const firstSegment = normalized.split('/')[1]!.toLowerCase();
 
-  // Legitimate public route → keep the path (and any sub-path/token) as-is.
-  if (PUBLIC_ROUTE_SEGMENTS.has(firstSegment)) return normalized;
+  // Approved public KEY URL → resolve to that route.
+  if (PUBLIC_ROUTE_SEGMENTS.has(firstSegment)) {
+    // The only public operator entry point is the login page; collapse any
+    // deeper operator path (dashboard, deposits, …) onto it.
+    if (firstSegment === 'operator') return '/operator/login';
+    // /status needs its transaction-id sub-path/token to stay useful.
+    if (firstSegment === 'status') return normalized;
+    // The rest are single-segment public routes — drop any fabricated sub-path.
+    return '/' + firstSegment;
+  }
 
   // Off-allowlist (internal/fabricated) path → infer intent, most specific first.
   const lower = normalized.toLowerCase();
@@ -150,7 +169,7 @@ export function sanitizeDraftUrls(text: string, siteUrl: string): string {
     'gi',
   );
 
-  return text.replace(pattern, (_match, _scheme, _www, rawPath) => {
+  let result = text.replace(pattern, (_match, _scheme, _www, rawPath) => {
     const cleanPath = String(rawPath || '').replace(/\s+/g, '');
     if (!cleanPath) {
       // Bare host mention (no path) → normalize to a clean absolute URL.
@@ -164,6 +183,31 @@ export function sanitizeDraftUrls(text: string, siteUrl: string): string {
     const suffix = mapped === '/' ? '' : mapped;
     return `${base}${suffix}${trail}`;
   });
+
+  // Second pass: bare internal paths emitted WITHOUT our host (the model
+  // sometimes writes "/api/webhooks/twilio/apply" or "/n/twilio/inbound" on
+  // their own). We ONLY touch paths whose first segment is a known internal
+  // prefix (see INTERNAL_PREFIX_SEGMENTS), so legitimate bare public paths in
+  // prose (/apply, /locations) and incidental slashes (dates like 12/25,
+  // "and/or") are left alone. The leading lookbehind keeps us from matching a
+  // path that is already part of a URL or another domain (e.g. ".com/api/...").
+  // `(?![A-Za-z0-9_-])` after the segment is a word boundary so "/news" does
+  // not match the "n" prefix, "/administrator" does not match "admin", and
+  // "/api_v2"/"/api-v2" are treated as their own (untouched) words.
+  const internalAlt = INTERNAL_PREFIX_SEGMENTS.map(escapeRegExp).join('|');
+  const barePattern = new RegExp(
+    `(?<![\\w@./])\\/(?:${internalAlt})(?![A-Za-z0-9_-])(?:\\/[${PATH_CHAR}]*)?`,
+    'gi',
+  );
+  result = result.replace(barePattern, (match) => {
+    const cleanPath = match.replace(/\s+/g, '');
+    const trailMatch = cleanPath.match(/[.,;:!?)\]]+$/);
+    const trail = trailMatch ? trailMatch[0] : '';
+    const mapped = mapToAllowedPath(cleanPath);
+    return `${mapped}${trail}`;
+  });
+
+  return result;
 }
 
 /**
