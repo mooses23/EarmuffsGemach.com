@@ -49,7 +49,7 @@ export const PUBLIC_ROUTE_SEGMENTS: ReadonlySet<string> = new Set([
   'contact',
   'rules',
   'status',
-  'operator',
+  'auth',
 ]);
 
 // First path segments that unmistakably belong to internal plumbing (API,
@@ -78,7 +78,7 @@ export const PUBLIC_PATHS: readonly string[] = [
   '/rules',
   '/status',
   '/contact',
-  '/operator/login',
+  '/auth',
 ];
 
 // Characters that may legitimately appear inside a URL path/query/fragment.
@@ -186,9 +186,9 @@ export function mapToAllowedPath(rawPath: string): string {
 
   // Approved public KEY URL → resolve to that route.
   if (PUBLIC_ROUTE_SEGMENTS.has(firstSegment)) {
-    // The only public operator entry point is the login page; collapse any
-    // deeper operator path (dashboard, deposits, …) onto it.
-    if (firstSegment === 'operator') return '/operator/login';
+    // The only public operator entry point is the auth/login page; collapse any
+    // deeper auth path onto it.
+    if (firstSegment === 'auth') return '/auth';
     // /status needs its transaction-id sub-path/token to stay useful.
     if (firstSegment === 'status') return normalized;
     // The rest are single-segment public routes — drop any fabricated sub-path.
@@ -197,7 +197,7 @@ export function mapToAllowedPath(rawPath: string): string {
 
   // Off-allowlist (internal/fabricated) path → infer intent, most specific first.
   const lower = normalized.toLowerCase();
-  if (/operator|login|dashboard/.test(lower)) return '/operator/login';
+  if (/operator|login|dashboard|auth/.test(lower)) return '/auth';
   if (/appl/.test(lower)) return '/apply'; // apply / application
   if (/location|gemach|near/.test(lower)) return '/locations';
   if (/borrow|lend|loan/.test(lower)) return '/borrow';

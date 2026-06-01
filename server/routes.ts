@@ -1167,7 +1167,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!location.locationCode) return res.status(400).json({ message: "Location has no location code" });
 
       const baseUrl = process.env.APP_URL || process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
-      const dashboardUrl = `${baseUrl.replace(/\/$/, '')}/operator/login`;
+      const dashboardUrl = `${baseUrl.replace(/\/$/, '')}/auth`;
       const opener = await generateWelcomeOpener({
         locationName: location.name,
         operatorName: location.contactPerson || '',
@@ -1197,7 +1197,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
       const locations = await storage.getAllLocations();
       const baseUrl = process.env.APP_URL || process.env.SITE_URL || `${req.protocol}://${req.get('host')}`;
-      const dashboardUrl = `${baseUrl.replace(/\/$/, '')}/operator/login`;
+      const dashboardUrl = `${baseUrl.replace(/\/$/, '')}/auth`;
       const results: { id: number; name: string; status: 'sent' | 'skipped' | 'failed'; reason?: string }[] = [];
       for (const loc of locations) {
         if ((loc as any).isActive === false) {

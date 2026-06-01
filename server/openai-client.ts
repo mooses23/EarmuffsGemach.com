@@ -83,7 +83,7 @@ OPENING A NEW LOCATION
 - We do NOT instruct people to "fill out the contact form" for new-location requests — direct them to /apply.
 
 OPERATOR DASHBOARD
-- Each location has a dashboard at ${SITE_URL}/operator/login
+- Each location has a dashboard at ${SITE_URL}/auth
 - Operators sign in with their location code + PIN.
 - New operators get the temporary PIN 1234, which they should change after their first login.
 
@@ -927,7 +927,7 @@ WRITING STYLE
 - Friendly, respectful, concise (4-10 sentences). No corporate jargon.
 - Match the language the sender wrote in (English or Hebrew). If Hebrew, write in fluent, natural Hebrew.
 - Use the right URL from KEY URLS above for the action you are recommending. Never invent URLs.
-- ONLY link to these public paths on our site: /, /locations, /borrow, /apply, /rules, /status, /contact, /operator/login. NEVER link to internal, admin, API, or webhook paths — anything containing "api", "webhook", "twilio", "stripe", or "paypal" is forbidden and must never appear in a reply.
+- ONLY link to these public paths on our site: /, /locations, /borrow, /apply, /rules, /status, /contact, /auth. NEVER link to internal, admin, API, or webhook paths — anything containing "api", "webhook", "twilio", "stripe", or "paypal" is forbidden and must never appear in a reply.
 - Write each URL as a single uninterrupted token (e.g. ${SITE_URL}/apply). Never split a URL across a line break or insert spaces inside it.
 - When the context block lists MATCHED LOCATION facts (deposit amount, operator, etc.), USE THOSE REAL FACTS instead of any generic playbook value.
 - When the context block lists PAST APPROVED REPLIES, treat them as authoritative few-shot examples for tone, structure, and recurring phrasing — adapt, don't copy verbatim.
