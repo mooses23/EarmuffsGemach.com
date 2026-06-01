@@ -15,6 +15,7 @@
 import { readFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   dumpSchema,
   normalizeDump,
@@ -23,6 +24,12 @@ import {
 } from '../scripts/schema-snapshot.mjs';
 import { sendNewEmail } from './gmail-client.js';
 import { DEFAULT_ADMIN_EMAIL } from './config-defaults.js';
+
+// global_settings key under which we remember the fingerprint of the last
+// drift we actually emailed about. Used to suppress duplicate reports so a
+// single recurring difference can't flood the admin mailbox on every
+// weekly/startup/manual run (Task #325).
+const DRIFT_FINGERPRINT_KEY = 'schema_snapshot.last_drift_fingerprint';
 
 // Inlined from server/vite.ts on purpose: importing from './vite.js' here
 // pulls vite.config into the Vercel serverless bundle, which fails to
@@ -119,11 +126,111 @@ function resolveAdminEmail(): string {
 }
 
 /**
+ * Stable fingerprint of a drift result, used to detect whether the drift we
+ * are about to report is the same one we already reported last time. We hash
+ * the full diff so any change in the actual schema delta yields a new
+ * fingerprint (and therefore a fresh email), while an identical recurring
+ * drift hashes to the same value and is suppressed.
+ */
+function driftFingerprint(result: SchemaSnapshotCheckResult): string {
+  return createHash('sha256').update(result.diff, 'utf8').digest('hex');
+}
+
+/**
+ * Read the fingerprint of the last drift we emailed about. Returns null when
+ * none is stored (first drift) or if the storage layer is unavailable — in
+ * the latter case we fail open (treat as "no previous report") so a real
+ * drift is never silently swallowed.
+ */
+async function readLastDriftFingerprint(): Promise<string | null> {
+  try {
+    const { storage } = await import('./storage.js');
+    const setting = await storage.getGlobalSetting(DRIFT_FINGERPRINT_KEY);
+    return setting?.value ?? null;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[schema-snapshot] could not read last drift fingerprint: ${msg}`);
+    return null;
+  }
+}
+
+/** Persist the fingerprint of the drift we just emailed about. */
+async function writeLastDriftFingerprint(fingerprint: string): Promise<void> {
+  try {
+    const { storage } = await import('./storage.js');
+    await storage.setGlobalSetting(DRIFT_FINGERPRINT_KEY, fingerprint);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[schema-snapshot] could not persist drift fingerprint: ${msg}`);
+  }
+}
+
+/** Forget the last drift fingerprint (called once the schema matches again). */
+async function clearLastDriftFingerprint(): Promise<void> {
+  try {
+    const { storage } = await import('./storage.js');
+    await storage.deleteGlobalSetting(DRIFT_FINGERPRINT_KEY);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[schema-snapshot] could not clear drift fingerprint: ${msg}`);
+  }
+}
+
+/**
+ * Decide whether to email a drift report and, if so, send exactly one.
+ *
+ * De-duplication (Task #325): a recurring identical drift must not re-flood
+ * the mailbox on every weekly/startup/manual run. We fingerprint the drift
+ * and only email when it is new or has changed since the last report. The
+ * fingerprint is persisted in global_settings so dedup survives process
+ * restarts and Vercel serverless cold starts.
+ *
+ * Behaviour by case:
+ *   - schema OK: clear the stored fingerprint (so the same drift re-emails if
+ *     it ever comes back) and send nothing.
+ *   - baseline missing: always email (unchanged behaviour) — this is a setup
+ *     problem, not the recurring-drift flood we are guarding against.
+ *   - drift: email only if the fingerprint differs from the last one we sent.
+ *
+ * @returns true iff an email was actually sent.
+ */
+export async function maybeEmailSchemaDriftReport(
+  result: SchemaSnapshotCheckResult,
+): Promise<boolean> {
+  if (result.ok && !result.baselineMissing) {
+    await clearLastDriftFingerprint();
+    return false;
+  }
+  if (result.baselineMissing) {
+    return emailSchemaDriftReport(result);
+  }
+  const fingerprint = driftFingerprint(result);
+  const last = await readLastDriftFingerprint();
+  if (last === fingerprint) {
+    log(
+      `schema-snapshot: drift unchanged since last report ` +
+        `(${result.changedLineCount} line(s)); skipping duplicate email.`,
+    );
+    return false;
+  }
+  const sent = await emailSchemaDriftReport(result);
+  // Only record the fingerprint once the email actually went out, so a
+  // transient gmail failure retries on the next run instead of being
+  // permanently suppressed.
+  if (sent) await writeLastDriftFingerprint(fingerprint);
+  return sent;
+}
+
+/**
  * Send the drift report to the admin email. Caps the embedded diff so we
  * don't post a 500 KB email when someone drops every table at once.
+ *
+ * @returns true iff the email was sent successfully. Never throws — a send
+ * failure is logged and reported as `false` so the caller can decide whether
+ * to retry next run.
  */
-export async function emailSchemaDriftReport(result: SchemaSnapshotCheckResult): Promise<void> {
-  if (result.ok && !result.baselineMissing) return;
+export async function emailSchemaDriftReport(result: SchemaSnapshotCheckResult): Promise<boolean> {
+  if (result.ok && !result.baselineMissing) return false;
   const adminEmail = resolveAdminEmail();
   const subject = result.baselineMissing
     ? 'Schema snapshot baseline missing'
@@ -160,10 +267,12 @@ export async function emailSchemaDriftReport(result: SchemaSnapshotCheckResult):
   try {
     await sendNewEmail(adminEmail, subject, body);
     log(`schema-snapshot: drift report emailed to ${adminEmail}.`);
+    return true;
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     // Never throw from the cron — log and move on.
     console.error(`[schema-snapshot] failed to email drift report to ${adminEmail}: ${msg}`);
+    return false;
   }
 }
 
@@ -210,16 +319,17 @@ async function runAndReport(trigger: 'startup' | 'weekly' | 'manual'): Promise<v
     const result = await runSchemaSnapshotCheck();
     if (result.ok) {
       log(`schema-snapshot: ${trigger} check OK — live DB matches committed snapshot.`);
+      await maybeEmailSchemaDriftReport(result);
       return;
     }
     if (result.baselineMissing) {
       log(`schema-snapshot: ${trigger} check — baseline snapshot missing; emailing admin.`);
     } else {
       log(
-        `schema-snapshot: ${trigger} check — DRIFT (${result.changedLineCount} changed line(s)); emailing admin.`,
+        `schema-snapshot: ${trigger} check — DRIFT (${result.changedLineCount} changed line(s)).`,
       );
     }
-    await emailSchemaDriftReport(result);
+    await maybeEmailSchemaDriftReport(result);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[schema-snapshot] ${trigger} check failed: ${msg}`);
@@ -227,13 +337,15 @@ async function runAndReport(trigger: 'startup' | 'weekly' | 'manual'): Promise<v
 }
 
 /**
- * Manually trigger a check + email. Exposed for the admin route so an
- * operator can force a drift report on demand.
+ * Manually trigger a check + (deduplicated) email. Exposed for the admin
+ * route so an operator can force a drift report on demand. The returned
+ * `emailed` flag reflects whether an email was actually sent (false when the
+ * schema matches or when the same drift was already reported).
  */
-export async function triggerSchemaSnapshotCheck(): Promise<SchemaSnapshotCheckResult> {
+export async function triggerSchemaSnapshotCheck(): Promise<
+  SchemaSnapshotCheckResult & { emailed: boolean }
+> {
   const result = await runSchemaSnapshotCheck();
-  if (!result.ok) {
-    await emailSchemaDriftReport(result);
-  }
-  return result;
+  const emailed = await maybeEmailSchemaDriftReport(result);
+  return { ...result, emailed };
 }

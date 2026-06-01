@@ -1,1 +1,2 @@
 - [AI draft URL guard](ai-draft-url-guard.md) — sanitize same-site links to an allowlist; rejoin whitespace-split URLs ONLY when an incomplete prefix completes a known segment, else prose gets swallowed.
+- [schema-drift snapshot dedup](schema-drift-snapshot.md) — regenerate drizzle/schema-snapshot.sql when shared/schema.ts changes; drift emails are deduped via a global_settings fingerprint.

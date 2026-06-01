@@ -79,7 +79,8 @@ CREATE TABLE public.city_categories (
     description text,
     state_code text,
     name_he text,
-    description_he text
+    description_he text,
+    district_code text
 );
 
 -- Name: city_categories_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -199,7 +200,10 @@ CREATE TABLE public.gemach_applications (
     message text,
     status text DEFAULT 'pending'::text NOT NULL,
     submitted_at timestamp without time zone DEFAULT now() NOT NULL,
-    confirmation_email_sent_at timestamp without time zone
+    confirmation_email_sent_at timestamp without time zone,
+    submitted_lang text,
+    suggested_region_id integer,
+    suggested_city_category_id integer
 );
 
 -- Name: gemach_applications_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -343,8 +347,6 @@ CREATE SEQUENCE public.knowledge_docs_id_seq
 
 ALTER SEQUENCE public.knowledge_docs_id_seq OWNED BY public.knowledge_docs.id;
 
-
-
 -- Name: locations; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE public.locations (
@@ -419,7 +421,10 @@ CREATE TABLE public.message_send_logs (
     error text,
     sent_at timestamp without time zone DEFAULT now() NOT NULL,
     sent_by_user_id integer,
-    batch_id text
+    batch_id text,
+    twilio_sid text,
+    delivery_status text,
+    delivery_error text
 );
 
 -- Name: message_send_logs_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -435,8 +440,6 @@ CREATE SEQUENCE public.message_send_logs_id_seq
 -- Name: message_send_logs_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 
 ALTER SEQUENCE public.message_send_logs_id_seq OWNED BY public.message_send_logs.id;
-
-
 
 -- Name: payments; Type: TABLE; Schema: public; Owner: -
 
@@ -501,7 +504,9 @@ CREATE TABLE public.regions (
     name text NOT NULL,
     slug text NOT NULL,
     display_order integer DEFAULT 0 NOT NULL,
-    name_he text
+    name_he text,
+    description text,
+    description_he text
 );
 
 -- Name: regions_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -550,6 +555,59 @@ CREATE SEQUENCE public.reply_examples_id_seq
 
 ALTER SEQUENCE public.reply_examples_id_seq OWNED BY public.reply_examples.id;
 
+-- Name: restock_code_requests; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE public.restock_code_requests (
+    id integer NOT NULL,
+    location_id integer NOT NULL,
+    requested_at timestamp without time zone DEFAULT now() NOT NULL,
+    claimed_email_id text,
+    resolved_at timestamp without time zone,
+    expires_at timestamp without time zone NOT NULL
+);
+
+-- Name: restock_code_requests_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+
+CREATE SEQUENCE public.restock_code_requests_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+-- Name: restock_code_requests_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+
+ALTER SEQUENCE public.restock_code_requests_id_seq OWNED BY public.restock_code_requests.id;
+
+-- Name: restock_shipments; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE public.restock_shipments (
+    id integer NOT NULL,
+    location_id integer NOT NULL,
+    ordered_at timestamp without time zone NOT NULL,
+    detected_at timestamp without time zone,
+    tracking_number text,
+    carrier text,
+    estimated_delivery text,
+    raw_email_snippet text,
+    dismissed boolean DEFAULT false NOT NULL
+);
+
+-- Name: restock_shipments_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+
+CREATE SEQUENCE public.restock_shipments_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+-- Name: restock_shipments_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+
+ALTER SEQUENCE public.restock_shipments_id_seq OWNED BY public.restock_shipments.id;
+
 -- Name: return_reminder_events; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE public.return_reminder_events (
@@ -578,6 +636,65 @@ CREATE SEQUENCE public.return_reminder_events_id_seq
 -- Name: return_reminder_events_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
 
 ALTER SEQUENCE public.return_reminder_events_id_seq OWNED BY public.return_reminder_events.id;
+
+-- Name: sms_conversations; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE public.sms_conversations (
+    id integer NOT NULL,
+    phone text NOT NULL,
+    channel text NOT NULL,
+    location_id integer,
+    display_name text,
+    last_message_at timestamp without time zone DEFAULT now() NOT NULL,
+    last_message_preview text,
+    last_direction text,
+    unread_count integer DEFAULT 0 NOT NULL,
+    is_archived boolean DEFAULT false NOT NULL,
+    is_opted_out boolean DEFAULT false NOT NULL,
+    created_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+-- Name: sms_conversations_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+
+CREATE SEQUENCE public.sms_conversations_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+-- Name: sms_conversations_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+
+ALTER SEQUENCE public.sms_conversations_id_seq OWNED BY public.sms_conversations.id;
+
+-- Name: sms_messages; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE public.sms_messages (
+    id integer NOT NULL,
+    conversation_id integer NOT NULL,
+    direction text NOT NULL,
+    body text NOT NULL,
+    twilio_sid text,
+    sent_at timestamp without time zone DEFAULT now() NOT NULL,
+    delivery_status text,
+    error_message text,
+    sent_by_user_id integer
+);
+
+-- Name: sms_messages_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+
+CREATE SEQUENCE public.sms_messages_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+-- Name: sms_messages_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+
+ALTER SEQUENCE public.sms_messages_id_seq OWNED BY public.sms_messages.id;
 
 -- Name: transactions; Type: TABLE; Schema: public; Owner: -
 
@@ -635,6 +752,32 @@ CREATE SEQUENCE public.transactions_id_seq
 
 ALTER SEQUENCE public.transactions_id_seq OWNED BY public.transactions.id;
 
+-- Name: translation_cache; Type: TABLE; Schema: public; Owner: -
+
+CREATE TABLE public.translation_cache (
+    id integer NOT NULL,
+    source_text text NOT NULL,
+    source_lang text NOT NULL,
+    target_lang text NOT NULL,
+    translated_text text NOT NULL,
+    is_admin_corrected boolean DEFAULT false NOT NULL,
+    updated_at timestamp without time zone DEFAULT now() NOT NULL
+);
+
+-- Name: translation_cache_id_seq; Type: SEQUENCE; Schema: public; Owner: -
+
+CREATE SEQUENCE public.translation_cache_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+-- Name: translation_cache_id_seq; Type: SEQUENCE OWNED BY; Schema: public; Owner: -
+
+ALTER SEQUENCE public.translation_cache_id_seq OWNED BY public.translation_cache.id;
+
 -- Name: user_sessions; Type: TABLE; Schema: public; Owner: -
 
 CREATE TABLE public.user_sessions (
@@ -654,7 +797,10 @@ CREATE TABLE public.users (
     last_name text NOT NULL,
     role text DEFAULT 'operator'::text NOT NULL,
     is_admin boolean DEFAULT false,
-    location_id integer
+    location_id integer,
+    first_name_he text,
+    last_name_he text,
+    phone text
 );
 
 -- Name: users_id_seq; Type: SEQUENCE; Schema: public; Owner: -
@@ -766,13 +912,33 @@ ALTER TABLE ONLY public.regions ALTER COLUMN id SET DEFAULT nextval('public.regi
 
 ALTER TABLE ONLY public.reply_examples ALTER COLUMN id SET DEFAULT nextval('public.reply_examples_id_seq'::regclass);
 
+-- Name: restock_code_requests id; Type: DEFAULT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.restock_code_requests ALTER COLUMN id SET DEFAULT nextval('public.restock_code_requests_id_seq'::regclass);
+
+-- Name: restock_shipments id; Type: DEFAULT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.restock_shipments ALTER COLUMN id SET DEFAULT nextval('public.restock_shipments_id_seq'::regclass);
+
 -- Name: return_reminder_events id; Type: DEFAULT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.return_reminder_events ALTER COLUMN id SET DEFAULT nextval('public.return_reminder_events_id_seq'::regclass);
 
+-- Name: sms_conversations id; Type: DEFAULT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.sms_conversations ALTER COLUMN id SET DEFAULT nextval('public.sms_conversations_id_seq'::regclass);
+
+-- Name: sms_messages id; Type: DEFAULT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.sms_messages ALTER COLUMN id SET DEFAULT nextval('public.sms_messages_id_seq'::regclass);
+
 -- Name: transactions id; Type: DEFAULT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.transactions ALTER COLUMN id SET DEFAULT nextval('public.transactions_id_seq'::regclass);
+
+-- Name: translation_cache id; Type: DEFAULT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.translation_cache ALTER COLUMN id SET DEFAULT nextval('public.translation_cache_id_seq'::regclass);
 
 -- Name: users id; Type: DEFAULT; Schema: public; Owner: -
 
@@ -902,6 +1068,21 @@ ALTER TABLE ONLY public.regions
 ALTER TABLE ONLY public.reply_examples
     ADD CONSTRAINT reply_examples_pkey PRIMARY KEY (id);
 
+-- Name: restock_code_requests restock_code_requests_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.restock_code_requests
+    ADD CONSTRAINT restock_code_requests_pkey PRIMARY KEY (id);
+
+-- Name: restock_shipments restock_shipments_location_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.restock_shipments
+    ADD CONSTRAINT restock_shipments_location_id_key UNIQUE (location_id);
+
+-- Name: restock_shipments restock_shipments_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.restock_shipments
+    ADD CONSTRAINT restock_shipments_pkey PRIMARY KEY (id);
+
 -- Name: return_reminder_events return_reminder_events_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.return_reminder_events
@@ -912,10 +1093,25 @@ ALTER TABLE ONLY public.return_reminder_events
 ALTER TABLE ONLY public.user_sessions
     ADD CONSTRAINT session_pkey PRIMARY KEY (sid);
 
+-- Name: sms_conversations sms_conversations_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.sms_conversations
+    ADD CONSTRAINT sms_conversations_pkey PRIMARY KEY (id);
+
+-- Name: sms_messages sms_messages_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.sms_messages
+    ADD CONSTRAINT sms_messages_pkey PRIMARY KEY (id);
+
 -- Name: transactions transactions_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
 ALTER TABLE ONLY public.transactions
     ADD CONSTRAINT transactions_pkey PRIMARY KEY (id);
+
+-- Name: translation_cache translation_cache_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+
+ALTER TABLE ONLY public.translation_cache
+    ADD CONSTRAINT translation_cache_pkey PRIMARY KEY (id);
 
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 
@@ -965,12 +1161,44 @@ CREATE INDEX locations_welcome_sms_sid_idx ON public.locations USING btree (welc
 
 CREATE INDEX locations_welcome_whatsapp_sid_idx ON public.locations USING btree (welcome_whatsapp_sid);
 
+-- Name: message_send_logs_twilio_sid_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX message_send_logs_twilio_sid_idx ON public.message_send_logs USING btree (twilio_sid) WHERE (twilio_sid IS NOT NULL);
+
+-- Name: restock_code_requests_claimed_email_uq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX restock_code_requests_claimed_email_uq ON public.restock_code_requests USING btree (claimed_email_id) WHERE (claimed_email_id IS NOT NULL);
+
+-- Name: restock_code_requests_location_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX restock_code_requests_location_idx ON public.restock_code_requests USING btree (location_id, requested_at DESC);
+
 -- Name: return_reminder_events_tx_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX return_reminder_events_tx_idx ON public.return_reminder_events USING btree (transaction_id, sent_at DESC);
 
+-- Name: sms_conversations_last_message_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX sms_conversations_last_message_idx ON public.sms_conversations USING btree (last_message_at DESC);
+
+-- Name: sms_conversations_phone_channel_uq; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX sms_conversations_phone_channel_uq ON public.sms_conversations USING btree (phone, channel);
+
+-- Name: sms_messages_conversation_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX sms_messages_conversation_idx ON public.sms_messages USING btree (conversation_id, sent_at);
+
+-- Name: sms_messages_twilio_sid_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE INDEX sms_messages_twilio_sid_idx ON public.sms_messages USING btree (twilio_sid) WHERE (twilio_sid IS NOT NULL);
+
 -- Name: transactions_charged_at_idx; Type: INDEX; Schema: public; Owner: -
 
 CREATE INDEX transactions_charged_at_idx ON public.transactions USING btree (charged_at) WHERE (charged_at IS NOT NULL);
+
+-- Name: translation_cache_lookup_idx; Type: INDEX; Schema: public; Owner: -
+
+CREATE UNIQUE INDEX translation_cache_lookup_idx ON public.translation_cache USING btree (source_text, source_lang, target_lang);
 
 -- PostgreSQL database dump complete

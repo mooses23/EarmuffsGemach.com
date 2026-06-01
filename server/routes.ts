@@ -3014,7 +3014,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         changedLineCount: result.changedLineCount,
         compactDiff,
         compactDiffTruncated: truncated,
-        emailSentToAdmin: !result.ok,
+        emailSentToAdmin: result.emailed,
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
