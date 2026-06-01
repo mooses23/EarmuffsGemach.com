@@ -179,6 +179,14 @@ export default function AdminInbox() {
   const [glossaryOpen, setGlossaryOpen] = useState(false);
   const [editSubject, setEditSubject] = useState("");
   const [editMessage, setEditMessage] = useState("");
+  // Mixed-thread trash guard (Problem O): when a thread contains form-contact
+  // members, trashing hard-deletes them permanently. Pending action is stored
+  // here so the confirmation dialog can re-run it after the user confirms.
+  const [pendingMixedTrash, setPendingMixedTrash] = useState<{
+    items: UnifiedItem[];
+    successTitle: string;
+    failTitle: string;
+  } | null>(null);
 
   // Gmail config status
   const gmailStatusQuery = useQuery<{ configured: boolean; environment: string; message: string }>({
@@ -276,6 +284,12 @@ export default function AdminInbox() {
     return String(item.id);
   };
   const lookupReplied = (item: UnifiedItem): string | null => {
+    // Gmail SENT label — thread already has an outbound reply even if the
+    // admin sent it directly in Gmail rather than through this UI, meaning
+    // no reply_example row exists for it. Treat the presence of the SENT
+    // label as "replied, date unknown" so the Unreplied filter never shows
+    // a thread the admin has already handled.
+    if (item.source === "email" && item.labels?.includes("SENT")) return "";
     // Primary lookup uses the current key (threadId for email). Falls back
     // to the legacy message-id key so historical reply_example rows captured
     // before threadId became the standard still mark messages as replied.
@@ -391,31 +405,31 @@ export default function AdminInbox() {
     }
     // Primary sort: newest first. For NaN dates (should never happen after
     // safeDate) treat as epoch=0 so they sink to the bottom rather than
-    // distorting the order. Stable tiebreaker: higher numeric ID = newer
-    // auto-increment contact, so two contacts with the same date stay in
-    // insertion order (newest first).
+    // distorting the order. Stable tiebreaker: when dates are equal (common
+    // when two sources land at the same second), compare IDs as strings with
+    // localeCompare so Gmail string IDs ("18fda…") and numeric contact IDs
+    // both produce a stable, deterministic order instead of both mapping to 0.
     return list.sort((a, b) => {
       const ta = new Date(a.date).getTime();
       const tb = new Date(b.date).getTime();
       const da = isNaN(ta) ? 0 : ta;
       const db = isNaN(tb) ? 0 : tb;
       if (db !== da) return db - da;
-      // Stable tiebreaker for form contacts (numeric auto-increment IDs).
-      const idA = typeof a.id === "number" ? a.id : 0;
-      const idB = typeof b.id === "number" ? b.id : 0;
-      return idB - idA;
+      // Cross-source: put form contacts before emails when dates are equal so
+      // the list is deterministic even when mixing sources. Within same source,
+      // lexicographic descending ID comparison keeps high IDs (= newer) first.
+      if (a.source !== b.source) return a.source === "form" ? -1 : 1;
+      return String(b.id).localeCompare(String(a.id));
     });
   }, [contactsQuery.data, allEmails]);
 
   // Folder filter for form contacts. Gmail messages already arrive pre-filtered
   // by the server based on the `mode` query param, so we don't filter them here.
   //
-  // Inbox rule for form contacts: every non-archived submission is visible in
-  // the inbox regardless of its isSpam flag. Spam-tagged contacts also appear
-  // in the Spam folder (as a dedicated review queue) but are NOT hidden from
-  // the main inbox so the admin never misses a submission that the heuristic
-  // may have incorrectly scored. Archiving (trash) is the admin-intentional
-  // action that removes a row from the inbox.
+  // Inbox rule for form contacts: only non-archived, non-spam submissions appear
+  // in the inbox. Spam-tagged contacts live exclusively in the Spam folder so
+  // the admin's mental model matches Gmail and other inbox clients. Archiving
+  // (trash / isArchived=true) is the intentional action that moves a row to Trash.
   //
   // Defensive: isArchived and isSpam are stored as booleans (notNull default
   // false) but the unified builder already normalises them with === true so
@@ -424,8 +438,10 @@ export default function AdminInbox() {
     if (it.source === "form") {
       // Form submissions have no "Sent" equivalent — exclude them entirely.
       if (folder === "sent") return false;
-      // Inbox: all submissions that have not been explicitly archived/trashed.
-      if (folder === "inbox") return it.isArchived !== true;
+      // Inbox: non-archived, non-spam submissions only. Spam-flagged contacts
+      // belong exclusively in the Spam folder (not a dual-display) so the inbox
+      // stays clean and the admin's mental model matches every other inbox client.
+      if (folder === "inbox") return it.isArchived !== true && it.isSpam !== true;
       // Spam: dedicated review queue — spam-tagged, not yet trashed.
       if (folder === "spam") return it.isSpam === true && it.isArchived !== true;
       // Trash: only explicitly archived rows.
@@ -832,9 +848,10 @@ export default function AdminInbox() {
       apiRequest("PATCH", `/api/contact/${id}`, flags),
     onMutate: async (vars) => {
       // Archive (isArchived=true) removes the contact from inbox immediately.
-      // Spam (isSpam=true) does NOT remove it — spam-tagged contacts remain
-      // visible in inbox under the additive spam model; only the isSpam flag
-      // is updated in-place so the row stays and the Spam chip also counts it.
+      // Spam (isSpam=true) keeps the contact in cache (updates its isSpam flag)
+      // so it still appears in the Spam folder. The inbox folderFiltered already
+      // excludes spam-flagged contacts (isSpam !== true), so the row disappears
+      // from the inbox list on next render without a separate cache removal.
       const removes = vars.isArchived === true;
       const prev = await patchContactCache(vars.id, (c) => {
         if (removes) return null;
@@ -2063,6 +2080,47 @@ export default function AdminInbox() {
             </AlertDialogContent>
           </AlertDialog>
 
+          {/* Mixed-thread trash guard: form-contact members hard-delete permanently,
+              so surface a warning before proceeding when a thread contains both
+              Gmail messages and form-contact submissions. */}
+          <AlertDialog open={pendingMixedTrash !== null} onOpenChange={(o) => !o && setPendingMixedTrash(null)}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle className="flex items-center gap-2">
+                  <Trash2 className="h-5 w-5 text-destructive" />
+                  {t("inboxMixedTrashTitle")}
+                </AlertDialogTitle>
+                <AlertDialogDescription>
+                  {t("inboxMixedTrashDesc")}
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setPendingMixedTrash(null)}>
+                  {t("cancel")}
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  onClick={() => {
+                    if (!pendingMixedTrash) return;
+                    const { items, successTitle, failTitle } = pendingMixedTrash;
+                    setPendingMixedTrash(null);
+                    performThreadAction(
+                      items,
+                      "trash",
+                      successTitle,
+                      failTitle,
+                      items.every((m) => m.source === "email") ? "untrash" : undefined,
+                      t("inboxRestoreSuccess"),
+                      t("inboxRestoreFailed"),
+                    );
+                  }}
+                >
+                  {t("inboxMixedTrashConfirm")}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
         </div>
       </div>
     );
@@ -2433,6 +2491,12 @@ export default function AdminInbox() {
                   const isSentRow = folder === "sent" || !!(it.labels?.includes("SENT"));
                   // Use canonical (unfiltered) members so hidden siblings move with the row.
                   const canonicalMembers = groupMembersFor(it);
+                  // Swipe direction conventions (matches Gmail / iOS Mail):
+                  //   Right swipe (short) → Archive  (primary, reversible)
+                  //   Right swipe (trash folder) → Restore
+                  //   Left swipe (short)  → Trash (destructive)
+                  //   Left swipe (long)   → Mark Unread
+                  // Sent folder gets no swipe actions (no archive / trash from Sent).
                   const rightAction =
                     folder === "trash"
                       ? {
@@ -2447,25 +2511,11 @@ export default function AdminInbox() {
                               t("inboxRestoreFailed"),
                             ),
                         }
-                      : {
-                          label: t("inboxSwipeMarkUnread"),
-                          icon: EyeOff,
-                          color: "bg-blue-500",
-                          onCommit: () =>
-                            performThreadAction(
-                              canonicalMembers,
-                              "markUnread",
-                              t("inboxUnreadSuccess"),
-                              t("inboxUnreadFailed"),
-                            ),
-                        };
-                  const leftAction =
-                    folder === "inbox"
+                      : folder === "inbox" || folder === "spam"
                       ? {
                           label: t("inboxSwipeArchive"),
                           icon: Archive,
                           color: "bg-gray-500",
-                          // Archive's inverse is `unarchive` (not `restore`/untrash).
                           onCommit: () =>
                             performThreadAction(
                               canonicalMembers,
@@ -2478,23 +2528,53 @@ export default function AdminInbox() {
                             ),
                         }
                       : undefined;
-                  const leftLongAction =
-                    folder === "trash"
+                  // Left (short): Trash — shown in all folders except Trash and Sent.
+                  // Guard: threads with form-contact members hard-delete permanently,
+                  // so route them through the mixed-thread confirmation dialog.
+                  const leftAction =
+                    folder === "trash" || folder === "sent"
                       ? undefined
                       : {
                           label: t("inboxSwipeDelete"),
                           icon: Trash2,
                           color: "bg-red-600",
-                          onCommit: () =>
+                          onCommit: () => {
+                            const hasFormMember = canonicalMembers.some((m) => m.source === "form");
+                            const hasEmailMember = canonicalMembers.some((m) => m.source === "email");
+                            if (hasFormMember && hasEmailMember) {
+                              // Mixed thread — warn before hard-deleting form contacts.
+                              setPendingMixedTrash({
+                                items: canonicalMembers,
+                                successTitle: t("inboxTrashSuccess"),
+                                failTitle: t("inboxTrashFailed"),
+                              });
+                              return;
+                            }
                             performThreadAction(
                               canonicalMembers,
                               "trash",
                               t("inboxTrashSuccess"),
                               t("inboxTrashFailed"),
-                              // Only emails support untrash; contacts are hard-deleted. Use explicit `untrash` so undo is unambiguous regardless of folder.
                               canonicalMembers.every((m) => m.source === "email") ? "untrash" : undefined,
                               t("inboxRestoreSuccess"),
                               t("inboxRestoreFailed"),
+                            );
+                          },
+                        };
+                  // Left (long): Mark Unread — secondary, available everywhere except Trash.
+                  const leftLongAction =
+                    folder === "trash"
+                      ? undefined
+                      : {
+                          label: t("inboxSwipeMarkUnread"),
+                          icon: EyeOff,
+                          color: "bg-blue-500",
+                          onCommit: () =>
+                            performThreadAction(
+                              canonicalMembers,
+                              "markUnread",
+                              t("inboxUnreadSuccess"),
+                              t("inboxUnreadFailed"),
                             ),
                         };
                   const isChecked = selectedKeys.has(it.key);
@@ -2679,11 +2759,26 @@ export default function AdminInbox() {
         </Card>
 
         {emailQueries.hasNextPage && (
-          <div className="flex justify-center mt-4">
+          <div className="flex flex-col items-center gap-1 mt-4">
             <Button variant="outline" onClick={handleLoadMore} disabled={emailQueries.isFetchingNextPage} data-testid="button-load-more">
-              <ChevronDown className="h-4 w-4 mr-2" />
+              {emailQueries.isFetchingNextPage
+                ? <span className="h-4 w-4 mr-2 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                : <ChevronDown className="h-4 w-4 mr-2" />}
               {t("inboxLoadMore")}
             </Button>
+            {/* Page indicator: show how many threads are currently loaded
+                compared to total known threads (if the server reports a count).
+                Helps the admin gauge how far down the list they've scrolled. */}
+            {(() => {
+              const loaded = allEmails.length;
+              return loaded > 0
+                ? (
+                    <p className="text-xs text-muted-foreground" data-testid="text-load-more-count">
+                      {loaded} loaded · more available
+                    </p>
+                  )
+                : null;
+            })()}
           </div>
         )}
 
@@ -2900,6 +2995,9 @@ function ThreadTranscriptPanel({
   // Per-entry translations for older inbound messages (latest uses parent state).
   const [entryTranslations, setEntryTranslations] = useState<Record<string, string>>({});
   const [translatingId, setTranslatingId] = useState<string | null>(null);
+  // Scroll container ref + "jump to latest" visibility.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [showJump, setShowJump] = useState(false);
   const translateEntryMutation = useMutation({
     mutationFn: async ({ text, target }: { text: string; target: "en" | "he" }) => {
       const res = await apiRequest("POST", `/api/admin/inbox/translate`, { text, target });
@@ -2979,6 +3077,33 @@ function ThreadTranscriptPanel({
   const toggle = (id: string, current: boolean) =>
     setExpanded((p) => ({ ...p, [id]: !current }));
 
+  // Scroll to the latest message when the transcript first loads (or when a
+  // new page of the conversation arrives). Use "instant" so there's no jarring
+  // scroll animation on open; the user can then scroll up to read earlier
+  // messages, at which point we surface the "Jump to latest" button.
+  const jumpToLatest = () => {
+    const el = scrollRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+      setShowJump(false);
+    }
+  };
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+    setShowJump(false);
+  }, [messages.length]);
+
+  // Reveal "Jump to latest" when the user has scrolled up enough that the
+  // bottom of the list is not visible.
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    setShowJump(distanceFromBottom > 80);
+  }, []);
+
   // Latest outbound date, if any (drives the "Replied {date}" badge).
   const repliedAt = useMemo(() => {
     const outbound = messages.filter((m) => m.direction === "outbound");
@@ -2995,7 +3120,7 @@ function ThreadTranscriptPanel({
               <CardTitle className="text-xl truncate" data-testid="text-thread-subject">
                 {selected.subject || t("noSubject")}
               </CardTitle>
-              <div className="text-sm text-muted-foreground mt-1 flex items-center gap-2">
+              <div className="text-sm text-muted-foreground mt-1 flex items-center gap-2 flex-wrap">
                 <Badge variant="outline" className="text-[10px] py-0 h-5 font-medium tabular-nums" data-testid="badge-thread-message-count">
                   {messages.length === 1
                     ? t("inboxThreadCountSingle")
@@ -3007,8 +3132,19 @@ function ThreadTranscriptPanel({
                   </span>
                 )}
                 {query.isError && (
-                  <span className="text-xs text-amber-700 dark:text-amber-300" data-testid="text-thread-error">
-                    {t("inboxThreadLoadFailed")}
+                  <span className="flex items-center gap-2" data-testid="text-thread-error">
+                    <span className="text-xs text-amber-700 dark:text-amber-300">
+                      {t("inboxThreadLoadFailed")}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 text-xs px-2"
+                      onClick={() => query.refetch()}
+                      data-testid="button-thread-retry"
+                    >
+                      {t("inboxRetry")}
+                    </Button>
                   </span>
                 )}
               </div>
@@ -3038,6 +3174,16 @@ function ThreadTranscriptPanel({
         </div>
       </CardHeader>
       <CardContent className="space-y-3">
+        {/* Scroll container caps the transcript to 480 px so very long
+            conversations don't push the reply form off-screen. The user
+            can scroll within this region; the "Jump to latest" button
+            re-anchors to the newest message. */}
+        <div
+          ref={scrollRef}
+          onScroll={handleScroll}
+          className="relative max-h-[480px] overflow-y-auto space-y-3 pr-1"
+          data-testid="thread-scroll-container"
+        >
         {messages.length === 1 && !query.isLoading && (
           <div className="text-xs text-muted-foreground italic" data-testid="text-thread-only-message">
             {t("inboxThreadOnlyMessage")}
@@ -3155,6 +3301,24 @@ function ThreadTranscriptPanel({
             </div>
           );
         })}
+        </div>
+        {/* Jump-to-latest: floats at the bottom of the scroll container when
+            the user has scrolled up far enough that the newest message is
+            out of view. A click re-anchors smoothly to the bottom. */}
+        {showJump && (
+          <div className="flex justify-center mt-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={jumpToLatest}
+              className="gap-1.5 text-xs"
+              data-testid="button-jump-to-latest"
+            >
+              <ChevronDown className="h-3.5 w-3.5" />
+              {t("inboxJumpToLatest")}
+            </Button>
+          </div>
+        )}
       </CardContent>
     </Card>
   );
