@@ -1386,6 +1386,16 @@ const dict: Record<RestTranslationKey, string> = {
     nameEn: "שם (אנגלית)",
     nameHe: "שם (עברית)",
 
+    // Location code lookup dialog (operator login)
+    lookupCantFindCode: "לא מוצא את הקוד שלך?",
+    lookupDialogTitle: "מצא את קוד המיקום שלך",
+    lookupDialogDescription: "הקלד את מספר הטלפון, העיר, או שם הגמ\"ח כדי לחפש את הקוד שלך.",
+    lookupSearchPlaceholder: "לדוגמה: ברוקלין, 555 718+1, גמ\"ח שירה",
+    lookupSearching: "מחפש…",
+    lookupNoResults: "לא נמצאו מיקומים. נסה שם אחר, עיר, או מספר טלפון.",
+    lookupUseThisCode: "השתמש בקוד זה",
+    lookupStartTyping: "התחל להקליד כדי לחפש…",
+
 };
 
 export default dict;

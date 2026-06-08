@@ -1387,6 +1387,16 @@ const enRest = {
     nameEn: "Name (English)",
     nameHe: "Name (Hebrew)",
 
+    // Location code lookup dialog (operator login)
+    lookupCantFindCode: "Can't find your code?",
+    lookupDialogTitle: "Find your location code",
+    lookupDialogDescription: "Type your phone number, city, or gemach name to look up your code.",
+    lookupSearchPlaceholder: "e.g. Brooklyn, +1 718 555…, Shira's Gemach",
+    lookupSearching: "Searching…",
+    lookupNoResults: "No locations found. Try a different name, city, or phone number.",
+    lookupUseThisCode: "Use this code",
+    lookupStartTyping: "Start typing to search…",
+
 } as const;
 
 export default enRest;
