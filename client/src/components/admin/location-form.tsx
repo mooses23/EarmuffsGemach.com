@@ -454,6 +454,25 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
   const watchedRegionId = form.watch("regionId");
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
   const [showPin, setShowPin] = useState(false);
+  const [newPin, setNewPin] = useState("");
+
+  const updatePinMutation = useMutation({
+    mutationFn: async (pin: string) => {
+      const res = await apiRequest("PATCH", `/api/admin/locations/${location!.id}/pin`, {
+        newPin: pin,
+        confirmPin: pin,
+      });
+      return res.json();
+    },
+    onSuccess: () => {
+      toast({ title: "PIN updated", description: "The operator PIN has been changed." });
+      setNewPin("");
+      queryClient.invalidateQueries({ queryKey: ["/api/locations"] });
+    },
+    onError: (err: Error) => {
+      toast({ title: "Failed to update PIN", description: err.message, variant: "destructive" });
+    },
+  });
   const watchedCityCategoryId = form.watch("cityCategoryId");
   const [communityQuickFind, setCommunityQuickFind] = useState("");
 
@@ -1172,37 +1191,70 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
         {location && (
           <div className="space-y-3">
             <SectionHeading icon={Lock} label="Operator access" />
-            <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
-              <p className="text-xs text-muted-foreground">
-                Current login PIN for this location. Reveal it to help a coordinator who forgot theirs.
-              </p>
-              <div className="flex items-center gap-2">
-                <div className="flex-1 relative">
-                  <input
-                    readOnly
-                    type={showPin ? "text" : "password"}
-                    value={location.operatorPin ?? "1234"}
-                    className="w-full h-10 rounded-md border border-border/70 bg-background px-3 font-mono text-sm tracking-widest text-foreground focus:outline-none"
-                  />
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-4">
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Current PIN</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      readOnly
+                      type={showPin ? "text" : "password"}
+                      value={location.operatorPin ?? "1234"}
+                      className="w-full h-10 rounded-md border border-border/70 bg-background px-3 font-mono text-sm tracking-widest text-foreground focus:outline-none"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="shrink-0"
+                    onClick={() => setShowPin((v) => !v)}
+                    aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                  >
+                    {showPin ? (
+                      <><EyeOff className="h-3.5 w-3.5 mr-1.5" />Hide</>
+                    ) : (
+                      <><Eye className="h-3.5 w-3.5 mr-1.5" />Reveal</>
+                    )}
+                  </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={() => setShowPin((v) => !v)}
-                  aria-label={showPin ? "Hide PIN" : "Show PIN"}
-                >
-                  {showPin ? (
-                    <><EyeOff className="h-3.5 w-3.5 mr-1.5" />Hide</>
-                  ) : (
-                    <><Eye className="h-3.5 w-3.5 mr-1.5" />Reveal</>
-                  )}
-                </Button>
               </div>
-              <p className="text-[11px] text-muted-foreground">
-                To change the PIN, the coordinator can update it from their dashboard settings.
-              </p>
+              <div className="space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Set new PIN</p>
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      pattern="\d{4,6}"
+                      maxLength={6}
+                      placeholder="4–6 digit PIN"
+                      value={newPin}
+                      onChange={(e) => setNewPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                      className="w-full h-10 rounded-md border border-border/70 bg-background px-3 font-mono text-sm tracking-widest text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+                      data-testid="input-new-pin"
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    size="sm"
+                    className="shrink-0"
+                    disabled={newPin.length < 4 || updatePinMutation.isPending}
+                    onClick={() => updatePinMutation.mutate(newPin)}
+                    data-testid="btn-update-pin"
+                  >
+                    {updatePinMutation.isPending ? (
+                      <><LoaderCircle className="h-3.5 w-3.5 mr-1.5 animate-spin" />Saving…</>
+                    ) : (
+                      <><Lock className="h-3.5 w-3.5 mr-1.5" />Update PIN</>
+                    )}
+                  </Button>
+                </div>
+                <p className="text-[11px] text-muted-foreground">
+                  Enter 4–6 digits. This replaces the current PIN immediately.
+                </p>
+              </div>
             </div>
           </div>
         )}

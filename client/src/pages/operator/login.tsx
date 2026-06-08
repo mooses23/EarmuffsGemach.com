@@ -179,14 +179,18 @@ export default function OperatorLogin() {
       </Card>
 
       <Dialog open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) { setLookupQuery(""); setLookupResults([]); } }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>Find your location code</DialogTitle>
-            <DialogDescription>
-              Type your phone number, city, or gemach name to look up your code.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 pt-1">
+        <DialogContent className="sm:max-w-md flex flex-col max-h-[85dvh] p-0 gap-0">
+          <div className="px-6 pt-6 pb-4 shrink-0">
+            <DialogHeader>
+              <DialogTitle>Find your location code</DialogTitle>
+              <DialogDescription>
+                Type your phone number, city, or gemach name to look up your code.
+              </DialogDescription>
+            </DialogHeader>
+          </div>
+
+          {/* Sticky search bar — stays visible when keyboard opens on mobile */}
+          <div className="sticky top-0 z-10 bg-background px-6 pb-3 shrink-0">
             <div className="relative">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -197,7 +201,10 @@ export default function OperatorLogin() {
                 className="pl-9"
               />
             </div>
+          </div>
 
+          {/* Scrollable results */}
+          <div className="overflow-y-auto flex-1 px-6 pb-6 space-y-2">
             {lookupLoading && (
               <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -212,7 +219,7 @@ export default function OperatorLogin() {
             )}
 
             {lookupResults.length > 0 && (
-              <div className="space-y-2">
+              <>
                 {lookupResults.map((loc) => (
                   <div
                     key={loc.id}
@@ -229,7 +236,7 @@ export default function OperatorLogin() {
                 <p className="text-xs text-muted-foreground text-center pt-1">
                   Enter your code above, then close this dialog.
                 </p>
-              </div>
+              </>
             )}
 
             {!lookupQuery.trim() && (
