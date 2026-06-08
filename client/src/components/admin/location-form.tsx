@@ -30,7 +30,7 @@ import { Input } from "@/components/ui/input";
 import { SuggestiveInput } from "@/components/ui/suggestive-input";
 import type { CanonicalEntry } from "@/lib/name-suggest";
 import { Button } from "@/components/ui/button";
-import { LoaderCircle, Phone, Mail, DollarSign, MapPin, User, Globe, AlertTriangle, Crosshair, Save, MessageCircle, Percent } from "lucide-react";
+import { LoaderCircle, Phone, Mail, DollarSign, MapPin, User, Globe, AlertTriangle, Crosshair, Save, MessageCircle, Percent, Eye, EyeOff, Lock } from "lucide-react";
 import { apiRequest } from "@/lib/queryClient";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -453,6 +453,7 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
 
   const watchedRegionId = form.watch("regionId");
   const [communityDialogOpen, setCommunityDialogOpen] = useState(false);
+  const [showPin, setShowPin] = useState(false);
   const watchedCityCategoryId = form.watch("cityCategoryId");
   const [communityQuickFind, setCommunityQuickFind] = useState("");
 
@@ -1167,6 +1168,44 @@ export function LocationForm({ location, regions, onSuccess, focusPhone }: Locat
             )}
           />
         </div>
+
+        {location && (
+          <div className="space-y-3">
+            <SectionHeading icon={Lock} label="Operator access" />
+            <div className="rounded-xl border border-border/60 bg-muted/20 p-4 space-y-2">
+              <p className="text-xs text-muted-foreground">
+                Current login PIN for this location. Reveal it to help a coordinator who forgot theirs.
+              </p>
+              <div className="flex items-center gap-2">
+                <div className="flex-1 relative">
+                  <input
+                    readOnly
+                    type={showPin ? "text" : "password"}
+                    value={location.operatorPin ?? "1234"}
+                    className="w-full h-10 rounded-md border border-border/70 bg-background px-3 font-mono text-sm tracking-widest text-foreground focus:outline-none"
+                  />
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => setShowPin((v) => !v)}
+                  aria-label={showPin ? "Hide PIN" : "Show PIN"}
+                >
+                  {showPin ? (
+                    <><EyeOff className="h-3.5 w-3.5 mr-1.5" />Hide</>
+                  ) : (
+                    <><Eye className="h-3.5 w-3.5 mr-1.5" />Reveal</>
+                  )}
+                </Button>
+              </div>
+              <p className="text-[11px] text-muted-foreground">
+                To change the PIN, the coordinator can update it from their dashboard settings.
+              </p>
+            </div>
+          </div>
+        )}
 
         <div className="sticky bottom-0 -mx-6 -mb-6 px-6 py-4 border-t border-border/60 bg-background z-10">
           <Button type="submit" className="w-full h-11 text-sm font-medium" disabled={isPending}>

@@ -6,8 +6,15 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
 import { useLanguage } from "@/hooks/use-language";
-import { Loader2, MapPin, Lock } from "lucide-react";
+import { Loader2, MapPin, Lock, HelpCircle, Search } from "lucide-react";
 import { Link } from "wouter";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "@/components/ui/dialog";
 
 export default function OperatorLogin() {
   const [, setLocation] = useLocation();
@@ -16,6 +23,28 @@ export default function OperatorLogin() {
   const [locationCode, setLocationCode] = useState("");
   const [pin, setPin] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [lookupOpen, setLookupOpen] = useState(false);
+  const [lookupQuery, setLookupQuery] = useState("");
+  const [lookupResults, setLookupResults] = useState<Array<{ id: number; name: string; nameHe?: string | null; locationCode: string }>>([]);
+  const [lookupLoading, setLookupLoading] = useState(false);
+
+  const handleLookupSearch = async (q: string) => {
+    setLookupQuery(q);
+    if (q.trim().length < 2) {
+      setLookupResults([]);
+      return;
+    }
+    setLookupLoading(true);
+    try {
+      const res = await fetch(`/api/locations/lookup?q=${encodeURIComponent(q.trim())}`, { credentials: "include" });
+      const data = await res.json();
+      setLookupResults(Array.isArray(data) ? data : []);
+    } catch {
+      setLookupResults([]);
+    } finally {
+      setLookupLoading(false);
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -78,7 +107,17 @@ export default function OperatorLogin() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="locationCode">{t("locationCode")}</Label>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="locationCode">{t("locationCode")}</Label>
+                <button
+                  type="button"
+                  onClick={() => { setLookupOpen(true); setLookupQuery(""); setLookupResults([]); }}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
+                >
+                  <HelpCircle className="h-3.5 w-3.5" />
+                  Can't find your code?
+                </button>
+              </div>
               <div className="relative">
                 <MapPin className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                 <Input
@@ -138,6 +177,69 @@ export default function OperatorLogin() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) { setLookupQuery(""); setLookupResults([]); } }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Find your location code</DialogTitle>
+            <DialogDescription>
+              Type your phone number, city, or gemach name to look up your code.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                autoFocus
+                placeholder="e.g. Brooklyn, +1 718 555…, Shira's Gemach"
+                value={lookupQuery}
+                onChange={(e) => handleLookupSearch(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+
+            {lookupLoading && (
+              <div className="flex items-center justify-center py-6 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                Searching…
+              </div>
+            )}
+
+            {!lookupLoading && lookupQuery.trim().length >= 2 && lookupResults.length === 0 && (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                No locations found. Try a different name, city, or phone number.
+              </p>
+            )}
+
+            {lookupResults.length > 0 && (
+              <div className="space-y-2">
+                {lookupResults.map((loc) => (
+                  <div
+                    key={loc.id}
+                    className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3"
+                  >
+                    <div>
+                      <p className="text-sm font-medium">{language === "he" && loc.nameHe ? loc.nameHe : loc.name}</p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm font-semibold text-primary">{loc.locationCode}</span>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-muted-foreground text-center pt-1">
+                  Enter your code above, then close this dialog.
+                </p>
+              </div>
+            )}
+
+            {!lookupQuery.trim() && (
+              <p className="text-sm text-muted-foreground text-center py-2">
+                Start typing to search…
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

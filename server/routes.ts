@@ -524,6 +524,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Public location lookup — lets coordinators find their location code by
+  // searching their phone number, location name, or city/address. Returns only
+  // non-sensitive fields (id, name, locationCode) so no auth is required.
+  app.get("/api/locations/lookup", async (req, res) => {
+    try {
+      const q = typeof req.query.q === "string" ? req.query.q.trim().toLowerCase() : "";
+      if (!q || q.length < 2) {
+        return res.json([]);
+      }
+      const allLocations = await storage.getAllLocations();
+      const results = allLocations
+        .filter((l) => l.isActive)
+        .filter((l) => {
+          return (
+            (l.name || "").toLowerCase().includes(q) ||
+            (l.nameHe || "").toLowerCase().includes(q) ||
+            (l.phone || "").replace(/\D/g, "").includes(q.replace(/\D/g, "")) ||
+            (l.address || "").toLowerCase().includes(q) ||
+            (l.locationCode || "").toLowerCase().includes(q)
+          );
+        })
+        .slice(0, 8)
+        .map((l) => ({ id: l.id, name: l.name, nameHe: l.nameHe, locationCode: l.locationCode }));
+      res.json(results);
+    } catch (error) {
+      console.error("Error in location lookup:", error);
+      res.status(500).json({ message: "Lookup failed" });
+    }
+  });
+
   app.get("/api/locations/:id", async (req, res) => {
     try {
       const id = parseInt(req.params.id, 10);
