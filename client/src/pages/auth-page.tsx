@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { LoginForm } from "@/components/auth/login-form";
@@ -27,24 +27,69 @@ function OperatorLoginForm() {
   const [lookupQuery, setLookupQuery] = useState("");
   const [lookupResults, setLookupResults] = useState<Array<{ id: number; name: string; nameHe?: string | null; locationCode: string }>>([]);
   const [lookupLoading, setLookupLoading] = useState(false);
+  const lookupDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lookupSeqRef = useRef(0);
+  const lookupAbortRef = useRef<AbortController | null>(null);
 
-  const handleLookupSearch = async (q: string) => {
-    setLookupQuery(q);
-    if (q.trim().length < 2) {
-      setLookupResults([]);
-      return;
-    }
+  const runLookup = async (q: string, seq: number) => {
+    const controller = new AbortController();
+    lookupAbortRef.current?.abort();
+    lookupAbortRef.current = controller;
     setLookupLoading(true);
     try {
-      const res = await fetch(`/api/locations/lookup?q=${encodeURIComponent(q.trim())}`, { credentials: "include" });
+      const res = await fetch(`/api/locations/lookup?q=${encodeURIComponent(q)}`, {
+        credentials: "include",
+        signal: controller.signal,
+      });
       const data = await res.json();
+      // Ignore responses for anything but the most recent query.
+      if (seq !== lookupSeqRef.current) return;
       setLookupResults(Array.isArray(data) ? data : []);
-    } catch {
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      if (seq !== lookupSeqRef.current) return;
       setLookupResults([]);
     } finally {
-      setLookupLoading(false);
+      if (seq === lookupSeqRef.current) setLookupLoading(false);
     }
   };
+
+  const handleLookupSearch = (q: string) => {
+    setLookupQuery(q);
+    const trimmed = q.trim();
+    // Each call bumps the sequence so any earlier in-flight/queued request is
+    // ignored once it resolves — keeps results in sync with the latest text.
+    const seq = ++lookupSeqRef.current;
+    if (lookupDebounceRef.current) clearTimeout(lookupDebounceRef.current);
+
+    if (trimmed.length < 2) {
+      lookupAbortRef.current?.abort();
+      setLookupResults([]);
+      setLookupLoading(false);
+      return;
+    }
+
+    setLookupLoading(true);
+    lookupDebounceRef.current = setTimeout(() => {
+      void runLookup(trimmed, seq);
+    }, 300);
+  };
+
+  const resetLookup = () => {
+    lookupSeqRef.current++;
+    if (lookupDebounceRef.current) clearTimeout(lookupDebounceRef.current);
+    lookupAbortRef.current?.abort();
+    setLookupQuery("");
+    setLookupResults([]);
+    setLookupLoading(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (lookupDebounceRef.current) clearTimeout(lookupDebounceRef.current);
+      lookupAbortRef.current?.abort();
+    };
+  }, []);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -108,7 +153,7 @@ function OperatorLoginForm() {
             <Label htmlFor="locationCode">{t("locationCode")}</Label>
             <button
               type="button"
-              onClick={() => { setLookupOpen(true); setLookupQuery(""); setLookupResults([]); }}
+              onClick={() => { setLookupOpen(true); resetLookup(); }}
               className="flex items-center gap-1 text-xs text-muted-foreground hover:text-primary transition-colors"
             >
               <HelpCircle className="h-3.5 w-3.5" />
@@ -158,7 +203,7 @@ function OperatorLoginForm() {
         </Button>
       </form>
 
-      <Dialog open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) { setLookupQuery(""); setLookupResults([]); } }}>
+      <Dialog open={lookupOpen} onOpenChange={(open) => { setLookupOpen(open); if (!open) { resetLookup(); } }}>
         <DialogContent className="sm:max-w-md" dir={language === "he" ? "rtl" : "ltr"}>
           <DialogHeader>
             <DialogTitle>{t("lookupDialogTitle")}</DialogTitle>
@@ -209,8 +254,7 @@ function OperatorLoginForm() {
                         onClick={() => {
                           setLocationCode(loc.locationCode);
                           setLookupOpen(false);
-                          setLookupQuery("");
-                          setLookupResults([]);
+                          resetLookup();
                         }}
                       >
                         {t("lookupUseThisCode")}
