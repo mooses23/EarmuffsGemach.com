@@ -533,16 +533,28 @@ export async function registerRoutes(app: Express): Promise<Server> {
       if (!q || q.length < 2) {
         return res.json([]);
       }
-      const allLocations = await storage.getAllLocations();
+      // Only match on phone digits when the query actually contains digits —
+      // otherwise every location matches because "".includes("") is always true.
+      const qDigits = q.replace(/\D/g, "");
+      const [allLocations, cityCategories] = await Promise.all([
+        storage.getAllLocations(),
+        storage.getAllCityCategories(),
+      ]);
+      // Build a fast city-category name lookup by id.
+      const cityCatById = new Map(cityCategories.map((c) => [c.id, c]));
       const results = allLocations
         .filter((l) => l.isActive)
         .filter((l) => {
+          const cat = l.cityCategoryId ? cityCatById.get(l.cityCategoryId) : null;
           return (
             (l.name || "").toLowerCase().includes(q) ||
             (l.nameHe || "").toLowerCase().includes(q) ||
-            (l.phone || "").replace(/\D/g, "").includes(q.replace(/\D/g, "")) ||
             (l.address || "").toLowerCase().includes(q) ||
-            (l.locationCode || "").toLowerCase().includes(q)
+            (l.locationCode || "").toLowerCase().includes(q) ||
+            (cat && (cat.name || "").toLowerCase().includes(q)) ||
+            (cat && (cat.nameHe || "").toLowerCase().includes(q)) ||
+            // Phone digit matching — only when query has digits.
+            (qDigits.length > 0 && (l.phone || "").replace(/\D/g, "").includes(qDigits))
           );
         })
         .slice(0, 8)
