@@ -196,15 +196,27 @@ function OperatorLoginForm() {
                 {lookupResults.map((loc) => (
                   <div
                     key={loc.id}
-                    className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3"
+                    className="flex items-center justify-between rounded-lg border border-border bg-muted/30 px-4 py-3 gap-3"
                   >
                     <p className="text-sm font-medium">{language === "he" && loc.nameHe ? loc.nameHe : loc.name}</p>
-                    <span className="font-mono text-sm font-semibold text-primary">{loc.locationCode}</span>
+                    <div className="flex items-center gap-3 shrink-0">
+                      <span className="font-mono text-sm font-semibold text-primary">{loc.locationCode}</span>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        onClick={() => {
+                          setLocationCode(loc.locationCode);
+                          setLookupOpen(false);
+                          setLookupQuery("");
+                          setLookupResults([]);
+                        }}
+                      >
+                        Use this code
+                      </Button>
+                    </div>
                   </div>
                 ))}
-                <p className="text-xs text-muted-foreground text-center pt-1">
-                  Enter your code in the login form, then close this dialog.
-                </p>
               </div>
             )}
 
